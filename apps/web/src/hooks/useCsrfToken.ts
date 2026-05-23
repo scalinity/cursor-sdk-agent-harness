@@ -14,6 +14,14 @@ import { useUiStore } from "../state/ui-store.js";
 
 export interface UseCsrfTokenResult {
   token: string | null;
+  /**
+   * True only between the moment THIS hook instance initiated a fetch
+   * and the moment it resolved. After F-002, the cold-start fetch is
+   * shared across consumers via a module-scoped in-flight promise, so
+   * a consumer that short-circuits on the existing promise never flips
+   * its own `loading` to true. Treat `token === null && !error` as the
+   * authoritative "still bootstrapping" signal across consumers.
+   */
   loading: boolean;
   error: string | null;
   /** Refreshes the token and returns the new value (or null on failure). */
@@ -26,6 +34,14 @@ export interface UseCsrfTokenResult {
 // they all raced — each writing a different freshly-minted token to
 // ui-store, which made useWebSocket tear down + reconnect once per fetch.
 let bootstrapInFlight: Promise<string | null> | null = null;
+
+// Test-only: clear the module-scoped in-flight promise. Vitest doesn't
+// reset module state between tests (modules are cached), so without
+// this a test that hangs (e.g. unresolved fetch promise) leaves a stale
+// bootstrapInFlight that the next test would short-circuit on.
+export function __resetForTests(): void {
+  bootstrapInFlight = null;
+}
 
 export function useCsrfToken(): UseCsrfTokenResult {
   const token = useUiStore((s) => s.csrfToken);

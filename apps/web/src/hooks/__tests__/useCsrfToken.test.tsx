@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
-import { useCsrfToken } from "../useCsrfToken.js";
+import { useCsrfToken, __resetForTests } from "../useCsrfToken.js";
 import { useUiStore } from "../../state/ui-store.js";
 
 // Regression coverage for F-002. Eight independent hook consumers
@@ -13,8 +13,9 @@ import { useUiStore } from "../../state/ui-store.js";
 const FETCH_BODY = JSON.stringify({ token: "test-token-123" });
 
 beforeEach(() => {
-  // Reset module-level state by clearing the stored token.
+  // Reset both: ui-store csrfToken and the module-scoped in-flight promise.
   useUiStore.setState({ csrfToken: null });
+  __resetForTests();
   vi.restoreAllMocks();
 });
 

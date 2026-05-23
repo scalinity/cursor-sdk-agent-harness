@@ -13,9 +13,23 @@ const listenersById = new Map<string, Set<Listener>>();
 // component hasn't mounted yet — the user sees only "STREAM" instead of
 // "STREAMING WORKS" on the first paint of a freshly-replayed run.
 const latestUpdateById = new Map<string, StreamingTextUpdate>();
+// Hard cap to bound memory across long sessions with many runs. Map
+// preserves insertion order, so the oldest entry is the first key.
+// 2000 ≈ many hours of agent activity (each paragraph/list-item is one
+// entry); chosen as much-larger-than-any-realistic-active-run-set but
+// small enough to keep memory bounded.
+const LATEST_UPDATE_CAP = 2000;
 
 export function publishStreamingText(streamId: string, update: StreamingTextUpdate): void {
+  // Re-insert to refresh insertion order so frequently-published streams
+  // stay alive under the FIFO eviction below.
+  if (latestUpdateById.has(streamId)) latestUpdateById.delete(streamId);
   latestUpdateById.set(streamId, update);
+  while (latestUpdateById.size > LATEST_UPDATE_CAP) {
+    const oldest = latestUpdateById.keys().next().value;
+    if (oldest === undefined) break;
+    latestUpdateById.delete(oldest);
+  }
   const listeners = listenersById.get(streamId);
   if (!listeners) return;
   for (const listener of listeners) {
@@ -41,10 +55,16 @@ export function subscribeStreamingText(streamId: string, listener: Listener): ()
       // StrictMode runs every effect's cleanup before re-running the
       // effect in dev — if we dropped the buffer on size===0, the
       // re-subscribe would see nothing and the user gets only "STREAM"
-      // instead of "STREAMING WORKS". The buffer is overwritten on the
-      // next publish for the same streamId; in the worst case (a run is
-      // navigated away from for good) the entry holds one short string
-      // until the next publish or process restart.
+      // instead of "STREAMING WORKS". The buffer is bounded by
+      // LATEST_UPDATE_CAP above.
     }
   };
+}
+
+// Test-only: reset module-scoped state between vitest runs. Calling
+// this from production code is a no-op safety hazard — it would drop
+// active subscriber listeners. Gate by environment if you must.
+export function __resetForTests(): void {
+  listenersById.clear();
+  latestUpdateById.clear();
 }
