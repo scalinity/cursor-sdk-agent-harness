@@ -171,6 +171,16 @@ export async function registerMcpServersRoutes(
   const revealLastAt = new Map<string, number>();
   const REVEAL_MIN_INTERVAL_MS = 1000;
 
+  /**
+   * REVIEW-S11: per-server in-flight probe set. Prevents two concurrent
+   * PUT or revalidate requests against the same row from each spawning
+   * a stdio child — a runaway tab could fork-bomb the harness otherwise.
+   * Granularity is per-server-id so independent servers can probe in
+   * parallel. The POST path is exempt because the row id doesn't exist
+   * until create returns.
+   */
+  const probeInFlight = new Set<string>();
+
   app.get("/api/mcp-servers", async () => {
     const items = deps.mcpServers.list().map(toSummary);
     return listMcpServersResponseSchema.parse({ items });
@@ -244,23 +254,36 @@ export async function registerMcpServersRoutes(
         const row = deps.mcpServers.update(req.params.id, baseUpdate);
         return mcpServerSummarySchema.parse(toSummary(row));
       }
-      // Config changed → re-probe and persist the verdict atomically.
-      // Reset status to `unknown` first so a slow probe isn't masked by a
-      // stale `valid` row in the meantime.
-      deps.mcpServers.update(req.params.id, {
-        ...baseUpdate,
-        validationStatus: "unknown",
-        validationMessage: null,
-      });
-      const probe = await runProbe(validate, parsed.data.config, probeOptions);
-      const outcome = probeOutcomeFromResult(probe);
-      const row = deps.mcpServers.update(req.params.id, {
-        validationStatus: outcome.status,
-        validationMessage: outcome.message,
-        lastStatus: outcome.lastStatus,
-        lastCheckedAt: new Date().toISOString(),
-      });
-      return mcpServerSummarySchema.parse(toSummary(row));
+      // REVIEW-S11: gate on per-server in-flight set so concurrent
+      // PUTs against the same row can't each spawn a probe.
+      if (probeInFlight.has(req.params.id)) {
+        return reply.code(409).send({
+          code: "PROBE_IN_FLIGHT",
+          message: "A probe is already running for this server. Retry shortly.",
+        });
+      }
+      probeInFlight.add(req.params.id);
+      try {
+        // Config changed → re-probe and persist the verdict atomically.
+        // Reset status to `unknown` first so a slow probe isn't masked by a
+        // stale `valid` row in the meantime.
+        deps.mcpServers.update(req.params.id, {
+          ...baseUpdate,
+          validationStatus: "unknown",
+          validationMessage: null,
+        });
+        const probe = await runProbe(validate, parsed.data.config, probeOptions);
+        const outcome = probeOutcomeFromResult(probe);
+        const row = deps.mcpServers.update(req.params.id, {
+          validationStatus: outcome.status,
+          validationMessage: outcome.message,
+          lastStatus: outcome.lastStatus,
+          lastCheckedAt: new Date().toISOString(),
+        });
+        return mcpServerSummarySchema.parse(toSummary(row));
+      } finally {
+        probeInFlight.delete(req.params.id);
+      }
     },
   );
 
@@ -318,23 +341,35 @@ export async function registerMcpServersRoutes(
     async (req, reply) => {
       const existing = deps.mcpServers.getById(req.params.id);
       if (!existing) return reply.code(404).send({ code: "NOT_FOUND" });
-      // Reset to unknown while the probe runs — surfaced as "checking..." in
-      // the UI. Even though the probe completes within this request, the
-      // explicit reset matches the create/replace path and means a hung
-      // probe leaves a coherent record (rather than a stale valid/invalid).
-      deps.mcpServers.update(req.params.id, {
-        validationStatus: "unknown",
-        validationMessage: null,
-      });
-      const probe = await runProbe(validate, existing.config, probeOptions);
-      const outcome = probeOutcomeFromResult(probe);
-      const row = deps.mcpServers.update(req.params.id, {
-        validationStatus: outcome.status,
-        validationMessage: outcome.message,
-        lastStatus: outcome.lastStatus,
-        lastCheckedAt: new Date().toISOString(),
-      });
-      return mcpServerSummarySchema.parse(toSummary(row));
+      // REVIEW-S11: gate on per-server in-flight set.
+      if (probeInFlight.has(req.params.id)) {
+        return reply.code(409).send({
+          code: "PROBE_IN_FLIGHT",
+          message: "A probe is already running for this server. Retry shortly.",
+        });
+      }
+      probeInFlight.add(req.params.id);
+      try {
+        // Reset to unknown while the probe runs — surfaced as "checking..." in
+        // the UI. Even though the probe completes within this request, the
+        // explicit reset matches the create/replace path and means a hung
+        // probe leaves a coherent record (rather than a stale valid/invalid).
+        deps.mcpServers.update(req.params.id, {
+          validationStatus: "unknown",
+          validationMessage: null,
+        });
+        const probe = await runProbe(validate, existing.config, probeOptions);
+        const outcome = probeOutcomeFromResult(probe);
+        const row = deps.mcpServers.update(req.params.id, {
+          validationStatus: outcome.status,
+          validationMessage: outcome.message,
+          lastStatus: outcome.lastStatus,
+          lastCheckedAt: new Date().toISOString(),
+        });
+        return mcpServerSummarySchema.parse(toSummary(row));
+      } finally {
+        probeInFlight.delete(req.params.id);
+      }
     },
   );
 

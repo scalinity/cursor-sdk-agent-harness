@@ -5,6 +5,7 @@ import {
   updateSubagentRequestSchema,
   type SubagentDefinitionRow,
   type SubagentSummary,
+  type UpdateSubagentRequest,
 } from "@harness/shared";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { z } from "zod";
@@ -42,14 +43,38 @@ function toSummary(row: SubagentDefinitionRow): SubagentSummary {
  * persisted MCP server rows. We reject save-time references to unknown
  * IDs so the API can't be coerced into producing AgentOptions that name a
  * non-existent server (the SDK would either silently ignore or hard-fail).
+ *
+ * REVIEW-S12: uses `existsBatch` (single SELECT id ... WHERE IN) instead
+ * of `list()` + map + Set construction — avoids parsing every row's
+ * config_json just to discard it.
  */
 function findUnknownMcpIds(
   mcpServers: McpServersRepo,
   ids: ReadonlyArray<string>,
 ): string[] {
   if (ids.length === 0) return [];
-  const known = new Set(mcpServers.list().map((r) => r.id));
+  const known = mcpServers.existsBatch(ids);
   return ids.filter((id) => !known.has(id));
+}
+
+/**
+ * REVIEW-S9 + REVIEW-S13: factor the PATCH body-to-update-input mapping
+ * into one place. `model: null` is meaningful (set to inherit), so we
+ * cannot use `??` — it would fold null into the existing model. We use
+ * an explicit `!== undefined` check; the same rule lives in the repo's
+ * update method.
+ */
+function patchToUpdateInput(
+  body: UpdateSubagentRequest,
+): Parameters<SubagentDefinitionsRepo["update"]>[1] {
+  const input: Parameters<SubagentDefinitionsRepo["update"]>[1] = {};
+  if (body.name !== undefined) input.name = body.name;
+  if (body.enabled !== undefined) input.enabled = body.enabled;
+  if (body.description !== undefined) input.description = body.description;
+  if (body.prompt !== undefined) input.prompt = body.prompt;
+  if (body.model !== undefined) input.model = body.model;
+  if (body.mcpServerIds !== undefined) input.mcpServerIds = body.mcpServerIds;
+  return input;
 }
 
 export async function registerSubagentsRoutes(
@@ -130,22 +155,7 @@ export async function registerSubagentsRoutes(
           });
         }
       }
-      const updateInput: Parameters<typeof deps.subagents.update>[1] = {};
-      if (parsed.data.name !== undefined) updateInput.name = parsed.data.name;
-      if (parsed.data.enabled !== undefined) updateInput.enabled = parsed.data.enabled;
-      if (parsed.data.description !== undefined) updateInput.description = parsed.data.description;
-      if (parsed.data.prompt !== undefined) updateInput.prompt = parsed.data.prompt;
-      // `model: null` is meaningful here (set to inherit). The Zod
-      // schema may yield `undefined` when the key is absent — narrow
-      // before forwarding so the repo's `undefined` vs `null` branch
-      // works as documented.
-      if (parsed.data.model !== undefined) {
-        updateInput.model = parsed.data.model;
-      }
-      if (parsed.data.mcpServerIds !== undefined) {
-        updateInput.mcpServerIds = parsed.data.mcpServerIds;
-      }
-      const row = deps.subagents.update(req.params.id, updateInput);
+      const row = deps.subagents.update(req.params.id, patchToUpdateInput(parsed.data));
       return subagentSummarySchema.parse(toSummary(row));
     },
   );

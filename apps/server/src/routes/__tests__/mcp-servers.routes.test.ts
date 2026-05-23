@@ -317,6 +317,56 @@ describe("/api/mcp-servers", () => {
     expect(res.statusCode).toBe(422);
   });
 
+  it("REVIEW-S11: concurrent PUT against the same row returns 409 PROBE_IN_FLIGHT", async () => {
+    const { db, repos, app } = setup();
+    cleanup.push(() => app.close(), () => db.close());
+    let releaseProbe: () => void = () => {};
+    const probeBlocker = new Promise<void>((resolve) => {
+      releaseProbe = resolve;
+    });
+    await registerMcpServersRoutes(app, {
+      mcpServers: repos.mcpServers,
+      validatorOverride: async () => {
+        await probeBlocker;
+        return { status: "valid" as const, transport: "stdio" as const };
+      },
+    });
+
+    const created = repos.mcpServers.create({
+      name: "racey",
+      config: { command: "/bin/echo" },
+    });
+    repos.mcpServers.update(created.id, { validationStatus: "valid" });
+
+    // Kick off PUT #1; the validator blocks on the probeBlocker promise.
+    const first = app.inject({
+      method: "PUT",
+      url: `/api/mcp-servers/${created.id}`,
+      payload: {
+        name: "racey",
+        enabled: true,
+        config: { command: "/usr/bin/cat" },
+      },
+    });
+    // Yield once so the route handler reaches `probeInFlight.add` + the
+    // validator await before we issue the racing call.
+    await new Promise((r) => setImmediate(r));
+    const second = await app.inject({
+      method: "PUT",
+      url: `/api/mcp-servers/${created.id}`,
+      payload: {
+        name: "racey",
+        enabled: true,
+        config: { command: "/usr/bin/grep" },
+      },
+    });
+    expect(second.statusCode).toBe(409);
+    expect(second.json().code).toBe("PROBE_IN_FLIGHT");
+    releaseProbe();
+    const firstResp = await first;
+    expect(firstResp.statusCode).toBe(200);
+  });
+
   it("DELETE removes the row and is idempotent on second call", async () => {
     const { db, repos, app } = setup();
     cleanup.push(() => app.close(), () => db.close());

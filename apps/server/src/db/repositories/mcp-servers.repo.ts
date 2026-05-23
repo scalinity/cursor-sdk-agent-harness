@@ -99,6 +99,21 @@ export class McpServersRepo {
     return rows.map(rowToDomain);
   }
 
+  /**
+   * REVIEW-S12: existsBatch — return the subset of `ids` that have a
+   * persisted row. Used by the subagent referential-integrity check;
+   * previously it called `list()` and rebuilt a Set from all rows,
+   * which JSON-parses every row's config just to throw it away.
+   */
+  existsBatch(ids: ReadonlyArray<string>): Set<string> {
+    if (ids.length === 0) return new Set();
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = this.raw
+      .prepare(`SELECT id FROM mcp_servers WHERE id IN (${placeholders})`)
+      .all(...ids) as Array<{ id: string }>;
+    return new Set(rows.map((r) => r.id));
+  }
+
   update(id: string, input: UpdateMcpServerInput): McpServerRow {
     const existing = this.getById(id);
     if (!existing) {
