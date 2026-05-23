@@ -895,6 +895,22 @@ pipeline without touching the runtime.
    approval the native binding doesn't build and `import { Agent }` throws
    at module load. Root `package.json` now lists `better-sqlite3`, `keytar`,
    and `sqlite3`.
+10. **`CancelResult` is a discriminated union, not a string** (binding for
+    every WS / REST cancel surface; documented retroactively after Phase
+    07's review caught downstream code treating it as a string union):
+    ```ts
+    export type CancelResult =
+      | { outcome: "cancelled" }
+      | { outcome: "not_started" }       // start() never resolved (no Run handle yet)
+      | { outcome: "unsupported"; unsupportedReason: string | undefined }
+      | { outcome: "failed"; error: unknown };
+    ```
+    Phase 07's WS `cancel_run` handler maps each case to a distinct
+    error code (`CANCEL_UNAVAILABLE` for unsupported / not_started,
+    `SDK_ERROR` for failed, `ack` for cancelled). New callers must
+    switch on `outcome` rather than treating the return as a string —
+    a plain `result === "cancelled"` comparison is a type-narrowing
+    error and a logic bug.
 
 ### Open Questions tightened by this phase
 
@@ -1245,22 +1261,30 @@ Modified:
    tests — would require synthesising a slow socket under heavy
    ingest. Acceptable for a single-user local app; revisit if the
    harness gains multi-tab support.
-2. **`onApprovalResponse` is a no-op hook**. The WS plugin accepts
-   the frame, logs receipt (if a callback is supplied), and replies
-   with `APPROVAL_NOT_PENDING`. Wiring to a real responder is gated
-   on the SDK exposing one (OQ-10).
-3. **`recentFrameIds` dedupe is per-connection, not per-run**. The
-   spec says "10 minutes per connection"; we cap the set at 1024
-   entries with FIFO eviction. A client that issues more than 1024
-   distinct frame ids inside one socket lifetime could theoretically
-   replay an evicted id — single-user local workload makes this a
-   non-concern, but worth a note if the harness gains a more chatty
-   command surface.
-4. **Frame validation is also performed on outbound frames**. If
+2. **No SDK-side approval responder**. The WS plugin logs every
+   `approval_response` frame at info level and replies with
+   `APPROVAL_NOT_PENDING`. Wiring to a real responder is gated on
+   the SDK exposing one (OQ-10). The optional `onApprovalResponse`
+   hook that existed in the first Phase 07 draft was dropped in the
+   review pass (review fix RV-10) — Phase 13 will add it cleanly as
+   part of the responder rather than as a forward-looking half-step.
+3. **Frame validation is also performed on outbound frames**. If
    `serverFrameSchema.safeParse` ever fails for a built frame (it
    shouldn't given the builder mirrors the schema), the connection
    sees an `INTERNAL_ERROR` frame instead of a malformed payload. The
    row stays in the DB so an inspector can still diagnose.
+4. **`ws-plugin.ts` is ~750 lines covering 10 concerns** (origin/csrf
+   upgrade gate, heartbeat lifecycle, frame dedupe, frame routing,
+   replay pagination, backpressure, subscription state, approval
+   handling, RawData decoding, small helpers). It's well-organised
+   internally but Phase 08 will add a non-trivial amount of
+   client-driven surface. Either split into `ws/connection.ts`
+   (state + heartbeat + dedupe), `ws/handlers.ts` (the inbound frame
+   routing + replay), and `ws/ws-plugin.ts` (orchestrator + upgrade
+   gate + outbound helpers) before Phase 08 grows it further, OR
+   live with one large file and tighten the section comments. Deferred
+   from the Phase 07 review fix pass because the right split lines
+   are clearer once Phase 08 is in play.
 
 ### Carried into Phase 08
 
@@ -1270,6 +1294,7 @@ Modified:
   with `heartbeat_ack`.
 - **`ConnectionBanner`** — Phase 08 surface for the reconnect /
   replay / offline states the server-side contract already supports.
+- **`ws-plugin.ts` split decision** (see Known limitation #4 above).
 
 ---
 
