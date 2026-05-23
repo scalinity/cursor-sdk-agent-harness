@@ -4,6 +4,8 @@ import type {
   McpServerRow,
   SubagentDefinitionRow,
 } from "@harness/shared";
+// AgentRow used both for the public input type and the private requireCwd
+// helper. `import type { AgentRow }` keeps it tree-shaken at runtime.
 import type {
   WorkspaceDecision,
   WorkspacePolicy,
@@ -60,21 +62,14 @@ export async function buildAgentOptions(
 ): Promise<AgentOptions> {
   const { agent, apiKey, mcpServers, subagents, workspacePolicy } = input;
 
+  // Local mode: validate every cwd via WorkspacePolicy first. The narrowed
+  // `localCwd` is non-empty by construction; we capture it here so the
+  // SDK-options assembly below doesn't need a non-null assertion.
+  let localCwd: ReadonlyArray<string> | undefined;
   if (agent.mode === "local") {
-    if (!agent.cwd || agent.cwd.length === 0) {
-      throw new WorkspaceRejectedError([
-        {
-          input: "(none)",
-          decision: {
-            allowed: false,
-            normalizedPath: "",
-            reason: "not_allowlisted",
-          },
-        },
-      ]);
-    }
+    localCwd = requireCwd(agent);
     const decisions = await Promise.all(
-      agent.cwd.map(async (candidate) => ({
+      localCwd.map(async (candidate) => ({
         input: candidate,
         decision: await workspacePolicy.check(candidate),
       })),
@@ -133,10 +128,11 @@ export async function buildAgentOptions(
   };
 
   if (agent.mode === "local") {
-    // cwd existence guaranteed above
-    const cwdArray = agent.cwd!;
+    // localCwd was set + validated by the guard at the top; capture in a
+    // local so future refactors can't break the invariant.
+    const cwdArray = localCwd as ReadonlyArray<string>;
     const cwdValue: string | string[] | undefined =
-      cwdArray.length === 1 ? cwdArray[0] : cwdArray;
+      cwdArray.length === 1 ? cwdArray[0] : [...cwdArray];
     const local: NonNullable<AgentOptions["local"]> = {};
     if (cwdValue !== undefined) local.cwd = cwdValue;
     if (agent.settingSources && agent.settingSources.length > 0) {
@@ -154,4 +150,27 @@ export async function buildAgentOptions(
   }
 
   return options;
+}
+
+/**
+ * Narrowing helper: returns the agent's cwd array if non-empty, else
+ * throws `WorkspaceRejectedError` with a `(none)` placeholder. Keeps the
+ * "local agents must have at least one cwd" invariant local to the call
+ * site so future refactors of the surrounding guard can't quietly break
+ * the downstream code that previously used `agent.cwd!`.
+ */
+function requireCwd(agent: AgentRow): ReadonlyArray<string> {
+  if (!agent.cwd || agent.cwd.length === 0) {
+    throw new WorkspaceRejectedError([
+      {
+        input: "(none)",
+        decision: {
+          allowed: false,
+          normalizedPath: "",
+          reason: "not_allowlisted",
+        },
+      },
+    ]);
+  }
+  return agent.cwd;
 }

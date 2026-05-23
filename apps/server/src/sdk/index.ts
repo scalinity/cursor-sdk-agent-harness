@@ -6,7 +6,6 @@
 export {
   createAgentRuntime,
   AgentRuntimeError,
-  WorkspaceRejectedError,
   type AgentRuntime,
   type AgentRuntimeDeps,
 } from "./agent-runtime.js";
@@ -25,5 +24,6 @@ export {
 } from "./usage-extractor.js";
 export {
   buildAgentOptions,
+  WorkspaceRejectedError,
   type BuildAgentOptionsInput,
 } from "./agent-options-builder.js";

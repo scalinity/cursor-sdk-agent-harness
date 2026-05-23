@@ -376,6 +376,14 @@ export class RunsRepo {
    * one row per agent_id; agents with zero runs are NOT included — the caller
    * (AgentRuntime.list) joins this against the agents table and substitutes
    * zeros for missing keys so a freshly-created agent renders correctly.
+   *
+   * Precision note: better-sqlite3 returns `SUM(cost_usd_micros)` as a JS
+   * `number`. Cost is stored in integer micro-USD, so the safe-integer
+   * cap (2^53 ≈ 9.007e15) corresponds to roughly $9.007 billion in total
+   * cost per agent. Single-user local workloads are nowhere near this,
+   * so we treat the precision as acceptable for v1; if the harness ever
+   * grows to multi-tenant or aggregate-across-tenants reporting, swap to
+   * `better-sqlite3`'s `safeIntegers` mode and BigInt arithmetic.
    */
   aggregatesByAgent(): Map<
     string,
