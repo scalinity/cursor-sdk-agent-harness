@@ -389,6 +389,25 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
     },
 
     async shutdown(): Promise<void> {
+      // Cancel every in-flight run BEFORE clearing the registries. The
+      // consume loop keeps iterating run.stream() until either the
+      // stream ends OR the abort signal fires; if we cleared
+      // activeRuns/pipeline first, a still-running controller would
+      // re-create per-run text buffers and try to publish on an empty
+      // bus — fragile and order-dependent. Aborting first lets the
+      // loops exit cleanly via the existing
+      // `if (this.abortController.signal.aborted) break` guard in
+      // RunController.consumeAndFinalise.
+      for (const controller of activeRuns.all()) {
+        try {
+          controller.abortController.abort("server_close");
+        } catch (err) {
+          deps.logger.warn(
+            { err, runId: controller.runId },
+            "shutdown: controller abort threw",
+          );
+        }
+      }
       for (const handle of liveAgents.values()) {
         try {
           handle.close();

@@ -31,6 +31,17 @@ export class ActiveRuns {
     return out;
   }
 
+  /**
+   * Snapshot of all currently-registered controllers. Used by
+   * `AgentRuntime.shutdown` to abort every in-flight consume loop
+   * before clearing the registry. Returned as a new array so callers
+   * can iterate safely while the underlying map mutates (e.g. an
+   * abort that triggers an onTerminate callback).
+   */
+  all(): RunController[] {
+    return Array.from(this.byRunId.values());
+  }
+
   size(): number {
     return this.byRunId.size;
   }
