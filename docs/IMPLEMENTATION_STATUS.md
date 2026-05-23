@@ -1563,6 +1563,96 @@ Modified:
    run produces 200+ events) gates `@tanstack/react-virtual` on the
    real `EventTimeline`.
 
+### Review-2 follow-ups landed
+
+After the Phase 08 commit (`e6acfb1`) the `/review-2` team flagged 3
+critical, 22 warnings, and 12 suggestions across the new frontend
+surface. All 37 findings were addressed before moving on; the work
+landed as a series of focused commits (`bf59260` → `be6c927`)
+detailed below.
+
+Headline fixes:
+
+- **C1 — IME composition guard**: `Composer.onKeyDown` now bails when
+  `nativeEvent.isComposing` or legacy `keyCode === 229` so CJK Enter-to-
+  commit can't burn API budget on a half-finished prompt.
+- **C2 — Editing-aware keyboard shortcuts**: `useKeyboardShortcuts`
+  skips bindings when the keydown target is an input/textarea/
+  contentEditable unless the binding opts in via `allowInEditing`. ⌘K
+  (focus rail search) is the only opt-in binding today.
+- **C3 — CSRF lifecycle**: `http-client.mutatingRequest` retries once
+  on `CSRF_FAILED` / `CSRF_TOKEN_MISSING` after a `useCsrfToken.refresh`
+  call. The refresh hook shares an in-flight promise so concurrent
+  callers don't double-fetch. A new `BootstrapBanner` shell surfaces a
+  fatal banner when the bootstrap fetch errored and the store has no
+  token, with a manual retry button.
+
+Other structural changes:
+
+- **`run-store`** gained an incremental `events: CanonicalRunEvent[]`
+  projection (consumed by `EventTimeline`), an incremental
+  `toolCallCount` counter (consumed by `CenterPane`), and a binary-
+  insert path for the rare out-of-order seq case. `byId` is now only
+  spread on frames that affect `RunRecord` fields, so streaming text
+  deltas don't pay the cost of an unused projection rebuild.
+  `run.interrupted` now projects a terminal `status`
+  (CANCELLED/ERROR) onto the `RunRecord` so consumers don't have to
+  special-case it in status filters.
+- **`useWebSocket`** attaches every listener through a per-socket
+  `AbortController` and aborts on close + unmount, removing the
+  prior closure leak across reconnect cycles. The outbound queue is
+  capped at 64 frames with `(type, run_id)` dedupe so stale
+  subscribe/unsubscribe pairs don't replay after long outages. The
+  attempt counter increments before the cap check so the spec's
+  "20 retries" matches the schedule.
+- **`useAgentStream`** wires a reconnect-resume effect that re-
+  subscribes every `subscribedRef` entry on transition into `open`,
+  and only sends `unsubscribe_run` from the cleanup when the socket
+  is `open`. `buildSubscribeFrame` centralises the `lastSeq` lookup.
+- **`useAgents`** tracks `hasUserSelected` in `agent-store` so auto-
+  select only fires once and doesn't clobber the user's intent on
+  subsequent reloads. Sorting uses `Date.getTime()` instead of
+  `localeCompare`. A 60s stale-time and `AbortController`-plumbed
+  fetch round out the hardening.
+- **`SessionsRail`** now overlays `run-store.byId` status over the
+  REST `RunSummary` so live state flows into the rail. The new
+  `useMidnightTick` hook re-renders the rail at each local midnight
+  so the today/yesterday buckets refresh.
+- **Timeline components** (UserMessage / SystemBanner / ToolCallCard)
+  Zod-validate `event.payload` via a new
+  `apps/web/src/lib/safe-payload.ts` helper at the renderer
+  boundary; a corrupt row or future SDK shape change degrades to
+  placeholder text instead of crashing. `safeJsonString` handles
+  circular references and BigInt.
+- **`http-client`** mints an `X-Request-Id` per request and threads
+  it through `HttpError.requestId` for server-log correlation.
+  `useSettings.reload` switches to `Promise.allSettled` so a
+  failing api-key endpoint doesn't block snapshot hydration.
+  `useErrorReporter.describe()` unwraps `Error.cause` chains and
+  uses `safeJsonString` for circular non-Error inputs; `console`
+  log levels now branch on `severity`. Toasts gained per-severity
+  TTLs and a `useToastSweeper` hook that dismisses on expiry.
+- **18 new tests** in `apps/web` (`http-client.test.ts` × 8,
+  `useWebSocket.test.ts` × 2, `AppShell.bootstrap.test.tsx` × 3,
+  `run-store.test.ts` +5). Total web vitest count is now **23**
+  (was 5). Total monorepo test count is **181** (server 150 +
+  web 23 + shared 2 + eslint plugin 6).
+
+Files added during /address:
+
+- `apps/web/src/components/shell/BootstrapBanner.tsx`
+- `apps/web/src/hooks/useMidnightTick.ts`
+- `apps/web/src/hooks/useToastSweeper.ts`
+- `apps/web/src/lib/safe-payload.ts`
+- `apps/web/src/lib/__tests__/http-client.test.ts`
+- `apps/web/src/hooks/__tests__/useWebSocket.test.ts`
+- `apps/web/src/app/__tests__/AppShell.bootstrap.test.tsx`
+
+Dependencies added:
+
+- `@testing-library/react@16.1.0` (devDep) — used by the bootstrap
+  ordering test.
+
 ### Carried into Phase 09
 
 - **Replace the stub `EventTimeline`** with the streaming pipeline:
@@ -1571,6 +1661,9 @@ Modified:
   for concurrent tool calls.
 - **Composer caret animation** + structural autoscroll behavior.
 - **Tool icon set** per OQ-07 / OQ-08 mappings.
+- **Wire the wire-level `replayed` flag** server-side so the store's
+  `replayed` seam (kept as a call-site option through /address) can
+  actually suppress Phase-09 streaming animations on replay.
 
 ## Next prompt to run
 
