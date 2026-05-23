@@ -18,14 +18,15 @@ export function Titlebar() {
         <span className="block size-3 rounded-full bg-success" aria-hidden="true" />
       </div>
 
-      {/* Repo crumb */}
+      {/* Repo crumb — TODO(phase-12): wire to active agent's cwd/git remote. */}
       <div className="flex h-full items-center gap-1.5 border-r border-border-subtle px-3 font-medium text-text-secondary">
         <span>cinder</span>
         <span className="text-text-tertiary">/</span>
         <span className="text-accent-primary">api-gateway</span>
       </div>
 
-      {/* Branch / diff stats */}
+      {/* Branch / diff stats — TODO(phase-14): pull from server-side git
+          metadata (run.final_result.git_metadata) once the panel is wired. */}
       <div className="flex h-full items-center gap-1.5 border-r border-border-subtle px-3 text-md text-text-secondary">
         <span className="mono text-sm">feat/pagination-cursor-fix</span>
         <span className="mono text-xs text-text-tertiary">·</span>
@@ -53,6 +54,7 @@ export function Titlebar() {
           <span>{codeHidden ? "Show code" : "Hide code"}</span>
           <span className="mono text-2xs text-text-tertiary">⌘J</span>
         </button>
+        {/* TODO(phase-09): live run-duration timer (from activeRun.startedAt). */}
         <span className="inline-flex h-control-md items-center gap-1.5 rounded-md border border-border-subtle bg-surface-1 px-2 text-md font-medium text-text-secondary">
           12m 04s
         </span>
