@@ -9,6 +9,7 @@ import fp from "fastify-plugin";
 import type { WebSocket, RawData } from "ws";
 import {
   clientFrameSchema,
+  frameIdSchema,
   serverFrameSchema,
   type ClientFrame,
   type EventRow,
@@ -272,7 +273,7 @@ function handleClientFrame(
   }
   const parsed = clientFrameSchema.safeParse(raw);
   if (!parsed.success) {
-    const ackId = extractIdFromUnknown(raw);
+    const ackId = extractValidFrameIdFromUnknown(raw);
     sendFrame(
       state,
       errorFrame("VALIDATION_ERROR", "Frame failed schema validation", {
@@ -651,10 +652,20 @@ function pruneRecentFrameIds(state: ConnectionState): void {
   }
 }
 
-function extractIdFromUnknown(raw: unknown): string | undefined {
+/**
+ * Pull `id` off an unknown payload but ONLY return it if it would pass
+ * `frameIdSchema` (string, length 8..128). Used when building the
+ * VALIDATION_ERROR reply for a frame that already failed parsing — we
+ * want to include `ack_for` when possible so the client can correlate,
+ * but a pathological id (empty, too short, too long, non-string) would
+ * itself make our outbound errorFrame schema-invalid.
+ */
+function extractValidFrameIdFromUnknown(raw: unknown): string | undefined {
   if (raw === null || typeof raw !== "object") return undefined;
   const id = (raw as { id?: unknown }).id;
-  return typeof id === "string" ? id : undefined;
+  if (typeof id !== "string") return undefined;
+  const parsed = frameIdSchema.safeParse(id);
+  return parsed.success ? parsed.data : undefined;
 }
 
 /**
