@@ -320,6 +320,79 @@ describe("approval and cancellation integration", () => {
     ws.close();
   });
 
+  // P14-W6: regression test locking in the contract from ws-plugin.ts:764
+  // ("frame.reason is user-controlled text — treat any new consumer as
+  // untrusted input"). The persistence path must carry `reason` as plain
+  // string data, not as a pre-decoded HTML / JSX node. If a future
+  // refactor inadvertently routes payload.reason through a markdown-or-
+  // HTML inspector without escaping, this test fails because the
+  // adversarial sentinel survives untouched through to the canonical
+  // event row.
+  it("P14-W6: frame.reason is persisted as plain string data (no HTML decoding)", async () => {
+    const MALICIOUS_REASON = "<script>alert('xss')</script>";
+    const captured: { reason: unknown } = { reason: null };
+    h = await buildHarness({
+      approvalResponder: {
+        resolve: async (input) => {
+          captured.reason = input.reason;
+        },
+      },
+    });
+    const csrf = await h.csrfToken();
+    const agentId = await createAgent(h, csrf);
+    const runId = await startRun(h, csrf, agentId);
+    await new Promise((r) => setTimeout(r, 100));
+
+    const ws = await h.openSocket(csrf);
+    ws.send(
+      JSON.stringify({
+        id: "sub-w6-frame",
+        type: "subscribe_run",
+        sent_at: new Date().toISOString(),
+        run_id: runId,
+        after_seq: 0,
+        replay: { enabled: true, speed: "instant" },
+      }),
+    );
+    await waitForFrame<{ type: string; event?: { kind?: string } }>(
+      ws,
+      (frame) => frame.type === "sdk.request" && frame.event?.kind === "request.created",
+    );
+
+    ws.send(
+      JSON.stringify({
+        id: "approve-w6-frame",
+        type: "approval_response",
+        sent_at: new Date().toISOString(),
+        run_id: runId,
+        request_id: "req-1",
+        decision: "deny",
+        reason: MALICIOUS_REASON,
+      }),
+    );
+
+    const resolved = await waitForFrame<{
+      type: string;
+      event?: { payload?: { reason?: unknown } };
+    }>(ws, (frame) => frame.type === "approval.resolved");
+
+    // 1. The responder received the reason verbatim (proves the inbound
+    //    parse + frame.reason forwarding doesn't mutate the string).
+    expect(captured.reason).toBe(MALICIOUS_REASON);
+    // 2. The outbound canonical event payload carries the reason as a
+    //    plain JS string in the WS payload, NOT an object, parsed HTML
+    //    node, or anything that signals "rendered". A consumer reading
+    //    this is on the hook to escape.
+    expect(typeof resolved.event?.payload?.reason).toBe("string");
+    // 3. The byte-for-byte sentinel survives the round trip unmolested
+    //    — no encoder ate the `<script>` tag, no escape pass mutated it.
+    expect(resolved.event?.payload?.reason).toBe(MALICIOUS_REASON);
+    // 4. The frame's JSON serialization carries the sentinel as-is
+    //    (proves no nested HTML encoding has snuck in at the WS layer).
+    expect(JSON.stringify(resolved)).toContain(MALICIOUS_REASON);
+    ws.close();
+  });
+
   it("replies APPROVAL_NOT_PENDING when no matching request exists", async () => {
     h = await buildHarness();
     const csrf = await h.csrfToken();
