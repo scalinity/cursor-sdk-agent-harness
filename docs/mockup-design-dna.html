@@ -1,0 +1,1235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Harness — agent session</title>
+<meta name="viewport" content="width=1440" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;450;500;600&display=swap" rel="stylesheet">
+<template id="__bundler_thumbnail" data-bg-color="#231e1a">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+    <rect width="1200" height="800" fill="#231e1a"/>
+    <rect x="80" y="120" width="200" height="560" rx="14" fill="#2c2622"/>
+    <rect x="320" y="120" width="420" height="560" rx="14" fill="#2c2622"/>
+    <rect x="780" y="120" width="340" height="560" rx="14" fill="#2c2622"/>
+    <circle cx="600" cy="400" r="78" fill="none" stroke="#e0a06a" stroke-width="10"/>
+    <path d="M580 400 l16 16 l32 -36" fill="none" stroke="#e0a06a" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+</template>
+<style>
+  :root {
+    --bg:           oklch(0.165 0.006 70);
+    --bg-1:         oklch(0.188 0.007 70);
+    --bg-2:         oklch(0.212 0.008 70);
+    --bg-3:         oklch(0.245 0.009 70);
+    --hair:         oklch(0.282 0.008 70);
+    --hair-strong:  oklch(0.34  0.009 70);
+    --fg:           oklch(0.945 0.006 80);
+    --fg-1:         oklch(0.82  0.007 80);
+    --fg-2:         oklch(0.64  0.008 80);
+    --fg-3:         oklch(0.48  0.009 80);
+    --accent:       oklch(0.80  0.135 72);
+    --accent-soft:  oklch(0.46  0.09  72);
+    --accent-bg:    oklch(0.26  0.05  72);
+    --green:        oklch(0.78  0.13  150);
+    --green-bg:     oklch(0.30  0.06  150);
+    --red:          oklch(0.72  0.16  25);
+    --red-bg:       oklch(0.30  0.08  25);
+    --blue:         oklch(0.78  0.10  240);
+    --violet:       oklch(0.76  0.11  295);
+    --yellow:       oklch(0.85  0.13  95);
+    font-feature-settings: "ss01", "cv11", "calt";
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body { min-width: 1440px; }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-feature-settings: "calt", "liga"; }
+
+  /* ---- app shell ---- */
+  .app {
+    display: grid;
+    grid-template-columns: 224px minmax(0, 1fr) minmax(0, 1.15fr);
+    grid-template-rows: 40px minmax(0, 1fr) 26px;
+    height: 100vh;
+    min-height: 900px;
+  }
+  .titlebar {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--hair);
+    background: linear-gradient(to bottom, var(--bg-1), var(--bg));
+    padding-right: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .traffic {
+    display: flex; gap: 8px; padding: 0 14px;
+  }
+  .traffic span {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--bg-3);
+  }
+  .traffic span:nth-child(1) { background: oklch(0.65 0.16 25); }
+  .traffic span:nth-child(2) { background: oklch(0.78 0.15 95); }
+  .traffic span:nth-child(3) { background: oklch(0.72 0.14 150); }
+
+  .tb-section {
+    display: flex; align-items: center; gap: 6px;
+    padding: 0 12px;
+    height: 100%;
+    border-right: 1px solid var(--hair);
+    color: var(--fg-1);
+    font-weight: 500;
+  }
+  .tb-section.sm { font-size: 12px; }
+  .tb-section .chevron { color: var(--fg-3); }
+  .tb-section .repo { color: var(--accent); }
+  .tb-spacer { flex: 1; }
+  .tb-right { display: flex; align-items: center; gap: 6px; padding-left: 8px; }
+  .app.code-hidden { grid-template-columns: 224px minmax(0, 1fr) 0; }
+  .app.code-hidden > section.right { display: none; }
+  .tb-btn.active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent-soft); }
+  .tb-btn {
+    height: 24px;
+    padding: 0 8px;
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--hair);
+    border-radius: 5px;
+    background: var(--bg-1);
+    color: var(--fg-1);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .tb-btn .kbd { color: var(--fg-3); font-family: 'JetBrains Mono', monospace; font-size: 10.5px; }
+
+  /* ---- sessions rail ---- */
+  .rail {
+    background: var(--bg);
+    border-right: 1px solid var(--hair);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .rail-head {
+    padding: 12px 14px 8px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .rail-head h1 {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--fg-3);
+  }
+  .rail-head .add {
+    width: 18px; height: 18px;
+    border-radius: 4px;
+    background: var(--bg-2);
+    color: var(--fg-1);
+    border: 1px solid var(--hair);
+    display: grid; place-items: center;
+    font-size: 14px; line-height: 1;
+    cursor: pointer;
+  }
+  .rail-search {
+    margin: 0 10px 8px;
+    padding: 5px 8px;
+    background: var(--bg-1);
+    border: 1px solid var(--hair);
+    border-radius: 5px;
+    display: flex; align-items: center; gap: 6px;
+    color: var(--fg-3);
+    font-size: 12px;
+  }
+  .rail-search .kbd {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+  }
+  .rail-group { padding: 6px 0 4px; }
+  .rail-group h2 {
+    margin: 0; padding: 6px 14px 4px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-3);
+  }
+  .rail-item {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr);
+    column-gap: 8px;
+    align-items: center;
+    padding: 6px 14px 6px 10px;
+    margin: 0 4px;
+    border-radius: 5px;
+    cursor: pointer;
+    color: var(--fg-1);
+  }
+  .rail-item > div { min-width: 0; }
+  .rail-item:hover { background: var(--bg-1); }
+  .rail-item.active {
+    background: var(--bg-2);
+    color: var(--fg);
+  }
+  .rail-item.active::before {
+    content: "";
+    position: absolute;
+    left: 0;
+  }
+  .rail-item .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    margin-left: 4px;
+    background: var(--fg-3);
+  }
+  .rail-item .dot.run { background: var(--accent); box-shadow: 0 0 0 3px oklch(0.26 0.05 72 / 0.6); }
+  .rail-item .dot.ok  { background: var(--green); }
+  .rail-item .dot.err { background: var(--red); }
+  .rail-item .dot.idle{ background: var(--fg-3); }
+  .rail-item .title {
+    font-size: 12.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .rail-item .meta {
+    font-size: 10.5px;
+    color: var(--fg-3);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .rail-foot {
+    margin-top: auto;
+    border-top: 1px solid var(--hair);
+    padding: 8px 10px;
+  }
+  .rail-foot .row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 4px;
+  }
+  .avatar {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: linear-gradient(135deg, oklch(0.7 0.13 25), oklch(0.65 0.13 295));
+    display: grid; place-items: center;
+    font-size: 10px; font-weight: 600; color: white;
+  }
+  .rail-foot .row .name { font-size: 12px; }
+  .rail-foot .row .sub { font-size: 10.5px; color: var(--fg-3); }
+
+  /* ---- center: transcript ---- */
+  .center {
+    background: var(--bg);
+    border-right: 1px solid var(--hair);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .center-head {
+    height: 38px;
+    min-height: 38px;
+    border-bottom: 1px solid var(--hair);
+    display: flex; align-items: center;
+    padding: 0 14px;
+    gap: 10px;
+    background: var(--bg);
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .center-head .title { font-weight: 600; font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .center-head .sha { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--fg-3); }
+  .center-head .pills { display: flex; gap: 4px; margin-left: auto; flex: none; }
+  .pill {
+    height: 22px; padding: 0 8px;
+    border-radius: 4px;
+    border: 1px solid var(--hair);
+    background: var(--bg-1);
+    color: var(--fg-1);
+    font-size: 11px;
+    display: inline-flex; align-items: center; gap: 5px;
+    white-space: nowrap;
+    flex: none;
+  }
+  .pill.muted { background: transparent; color: var(--fg-2); border-color: transparent; }
+
+  .scroll {
+    flex: 1;
+    overflow: auto;
+    padding: 18px 22px 4px;
+    scrollbar-color: var(--bg-3) transparent;
+    scrollbar-width: thin;
+  }
+
+  /* ---- message blocks ---- */
+  .msg { margin-bottom: 22px; }
+  .msg-head {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 8px;
+  }
+  .msg-head .who {
+    font-weight: 600; font-size: 12.5px;
+  }
+  .msg-head .who.user   { color: var(--fg); }
+  .msg-head .who.agent  { color: var(--accent); }
+  .msg-head .when { color: var(--fg-3); font-size: 11px; font-family: 'JetBrains Mono', monospace;}
+  .msg-head .glyph {
+    width: 18px; height: 18px;
+    display: grid; place-items: center;
+    border-radius: 4px;
+    background: var(--bg-2);
+    color: var(--fg-2);
+    font-size: 11px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .msg-head .glyph.agent {
+    background: var(--accent-bg);
+    color: var(--accent);
+  }
+
+  .body { color: var(--fg-1); font-size: 13px; line-height: 1.55; }
+  .body p { margin: 0 0 8px; }
+  .body code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    background: var(--bg-2);
+    border: 1px solid var(--hair);
+    color: var(--fg);
+    padding: 0 5px;
+    border-radius: 3px;
+  }
+
+  .think {
+    border-left: 2px solid var(--hair-strong);
+    margin: 6px 0 10px;
+    padding: 2px 12px;
+    color: var(--fg-2);
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .think .label {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--fg-3);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 3px;
+  }
+
+  /* ---- tool call cards ---- */
+  .tool {
+    border: 1px solid var(--hair);
+    border-radius: 7px;
+    background: var(--bg-1);
+    margin: 8px 0 10px;
+    overflow: hidden;
+  }
+  .tool-head {
+    display: grid;
+    grid-template-columns: 18px auto 1fr auto auto;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--hair);
+    background: var(--bg-1);
+  }
+  .tool-head .name {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--fg);
+    font-weight: 500;
+  }
+  .tool-head .arg {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--fg-2);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0;
+  }
+  .tool-head .arg .key { color: var(--fg-3); }
+  .tool-head .arg .str { color: var(--green); }
+  .tool-head .ms {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--fg-3);
+    font-size: 11px;
+  }
+  .tool-head .status {
+    display: none;
+  }
+  .tool-head .status.run { background: var(--accent); }
+  .tool-head .status.err { background: var(--red); }
+
+  .icon {
+    width: 14px; height: 14px;
+    color: var(--fg-2);
+  }
+  .icon.read { color: var(--blue); }
+  .icon.write{ color: var(--accent); }
+  .icon.run  { color: var(--violet); }
+  .icon.grep { color: var(--yellow); }
+  .icon.web  { color: var(--green); }
+
+  .tool-body {
+    padding: 8px 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--fg-1);
+    background: var(--bg);
+    border-top: 1px solid transparent;
+  }
+  .tool-body .out-line { display: flex; gap: 10px; padding: 1px 0;}
+  .tool-body .ln { color: var(--fg-3); width: 28px; text-align: right; user-select: none; }
+  .tool-body .pre { color: var(--fg-1); white-space: pre; }
+
+  .diff-line { display: grid; grid-template-columns: 12px 36px 1fr; padding: 0; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; line-height: 1.55;}
+  .diff-line .sign { text-align: center; color: var(--fg-3); }
+  .diff-line .ln   { color: var(--fg-3); text-align: right; padding-right: 10px; }
+  .diff-line.add { background: oklch(0.30 0.06 150 / 0.18);}
+  .diff-line.add .sign{ color: var(--green); }
+  .diff-line.del { background: oklch(0.30 0.08 25 / 0.18); }
+  .diff-line.del .sign{ color: var(--red); }
+  .diff-line .pre { white-space: pre; color: var(--fg); }
+
+  .tool-foot {
+    padding: 6px 10px;
+    border-top: 1px solid var(--hair);
+    display: flex; align-items: center; gap: 10px;
+    font-size: 11px;
+    color: var(--fg-3);
+    font-family: 'JetBrains Mono', monospace;
+    background: var(--bg-1);
+  }
+  .tool-foot .sep { color: var(--fg-3); opacity: 0.5; }
+
+  /* ---- composer ---- */
+  .composer {
+    border-top: 1px solid var(--hair);
+    background: var(--bg);
+    padding: 10px 14px 12px;
+  }
+  .composer-box {
+    border: 1px solid var(--hair-strong);
+    border-radius: 8px;
+    background: var(--bg-1);
+    padding: 8px 10px;
+  }
+  .composer-box .row1 {
+    display: flex; gap: 8px; align-items: center;
+    color: var(--fg-3);
+    font-size: 11.5px;
+    margin-bottom: 6px;
+  }
+  .composer-box .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 20px; padding: 0 7px;
+    border: 1px solid var(--hair);
+    border-radius: 4px;
+    background: var(--bg-2);
+    color: var(--fg-1);
+    font-size: 11px;
+  }
+  .composer-box .chip.ctx { color: var(--blue); }
+  .composer-box .chip.ctx .x { color: var(--fg-3); margin-left: 4px; }
+  .composer-text {
+    color: var(--fg-2);
+    font-size: 13px;
+    min-height: 22px;
+  }
+  .composer-text .caret {
+    display: inline-block;
+    width: 1.5px;
+    height: 14px;
+    background: var(--accent);
+    vertical-align: middle;
+    animation: caret 1s steps(1) infinite;
+    margin-left: 1px;
+  }
+  @keyframes caret { 50% { opacity: 0; } }
+  .composer-bar {
+    display: flex; align-items: center; gap: 6px;
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--fg-3);
+  }
+  .composer-bar .right { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+  .composer-bar select.fake {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 22px; padding: 0 7px;
+    background: var(--bg-2);
+    border: 1px solid var(--hair);
+    border-radius: 4px;
+    color: var(--fg-1);
+    font-size: 11.5px;
+    font-family: 'Inter', sans-serif;
+  }
+  .model-picker {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 26px; padding: 0 6px 0 9px;
+    background: var(--bg-2);
+    border: 1px solid var(--hair);
+    border-radius: 6px;
+    color: var(--fg);
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .model-picker .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+  }
+  .model-picker .ver {
+    color: var(--fg-3);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 400;
+  }
+  .model-picker .chev {
+    color: var(--fg-3);
+    margin-left: 2px;
+    width: 12px; height: 12px;
+  }
+  .think-toggle {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 26px; padding: 0 9px;
+    background: var(--accent-bg);
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--accent);
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .send-btn {
+    height: 22px; padding: 0 9px;
+    background: var(--accent);
+    color: oklch(0.18 0.02 70);
+    border: 0;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 11.5px;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+
+  /* ---- right: editor ---- */
+  .right {
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .tabs {
+    height: 38px;
+    min-height: 38px;
+    border-bottom: 1px solid var(--hair);
+    display: flex; align-items: stretch;
+    background: var(--bg);
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .tab {
+    display: flex; align-items: center; gap: 7px;
+    padding: 0 12px;
+    flex: none;
+    color: var(--fg-2);
+    font-size: 12px;
+    border-right: 1px solid var(--hair);
+    cursor: pointer;
+    position: relative;
+  }
+  .tab.active {
+    background: var(--bg-1);
+    color: var(--fg);
+  }
+  .tab.active::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; top: 0;
+    height: 1.5px;
+    background: var(--accent);
+  }
+  .tab .mod { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; }
+  .tab .agent-mark { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px oklch(0.26 0.05 72 / 0.6); }
+  .tab-extra { margin-left: auto; display: flex; align-items: center; padding: 0 10px; gap: 8px; color: var(--fg-3); font-size: 11px; flex: none; white-space: nowrap; }
+
+  .breadcrumbs {
+    height: 26px;
+    border-bottom: 1px solid var(--hair);
+    display: flex; align-items: center;
+    padding: 0 14px;
+    color: var(--fg-3);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    background: var(--bg);
+    gap: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .breadcrumbs .crumb.last { color: var(--fg-1); }
+  .breadcrumbs .right { margin-left: auto; display: flex; gap: 10px; color: var(--fg-3); flex: none; white-space: nowrap; }
+  .breadcrumbs .agent-banner {
+    margin-left: 12px;
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--accent-bg);
+    color: var(--accent);
+    border-radius: 3px;
+    height: 18px; padding: 0 6px;
+    font-family: 'Inter', sans-serif;
+    font-size: 10.5px;
+    font-weight: 500;
+  }
+
+  .editor {
+    flex: 1;
+    overflow: auto;
+    background: var(--bg-1);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    line-height: 20px;
+    position: relative;
+    padding: 10px 0;
+  }
+  .erow {
+    display: grid;
+    grid-template-columns: 56px 16px 1fr;
+    height: 20px;
+    line-height: 20px;
+    font-size: 12.5px;
+  }
+  .erow.add { background: oklch(0.30 0.06 150 / 0.16); }
+  .erow.del { background: oklch(0.30 0.08 25 / 0.16); }
+  .erow.current {
+    background: linear-gradient(to right, oklch(0.26 0.05 72 / 0.28), transparent 80%);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .erow .gl {
+    color: var(--fg-3);
+    text-align: center;
+    user-select: none;
+    font-size: 11.5px;
+  }
+  .erow.add .gl { color: var(--green); }
+  .erow.del .gl { color: var(--red); }
+  .erow.current .gl { color: var(--accent); font-weight: 600; }
+  .erow .sg {
+    text-align: center;
+    color: var(--fg-3);
+    user-select: none;
+    font-size: 11.5px;
+  }
+  .erow.add .sg { color: var(--green); }
+  .erow.del .sg { color: var(--red); }
+  .erow .src {
+    padding-left: 10px;
+    color: var(--fg);
+    white-space: pre;
+    overflow: hidden;
+  }
+
+  .tk-key  { color: var(--violet); }
+  .tk-fn   { color: var(--accent); }
+  .tk-str  { color: var(--green); }
+  .tk-num  { color: var(--yellow); }
+  .tk-cmt  { color: var(--fg-3); font-style: italic; }
+  .tk-type { color: var(--blue); }
+  .tk-var  { color: var(--fg); }
+  .tk-prop { color: oklch(0.85 0.06 200); }
+  .tk-punct{ color: var(--fg-2); }
+  .tk-bool { color: var(--yellow); }
+
+  .caret-anim {
+    display: inline-block;
+    width: 2px; height: 14px;
+    background: var(--accent);
+    vertical-align: -2px;
+    animation: caret 1s steps(1) infinite;
+    margin: 0 0px;
+  }
+  .ghost {
+    color: var(--fg-3);
+    opacity: 0.55;
+  }
+
+  /* ---- statusbar ---- */
+  .status {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--hair);
+    background: var(--bg-1);
+    display: flex; align-items: center;
+    padding: 0 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--fg-2);
+    gap: 10px;
+    overflow: hidden;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .status .mid {
+    display: flex; align-items: center; gap: 10px;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .status .mid > * { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .status .live {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--accent);
+  }
+  .status .live .pulse {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 0 oklch(0.80 0.135 72 / 0.6);
+    animation: pulse 1.6s ease-out infinite;
+  }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 oklch(0.80 0.135 72 / 0.55); }
+    100% { box-shadow: 0 0 0 8px oklch(0.80 0.135 72 / 0); }
+  }
+  .status .right { margin-left: auto; display: flex; gap: 10px; flex: none; padding-left: 10px; border-left: 1px solid var(--hair); }
+  .status > .live { flex: none; }
+  .status .grp { display: inline-flex; gap: 6px; align-items: center; }
+  .status .ok { color: var(--green); }
+  .status .warn { color: var(--yellow); }
+
+  /* icons */
+  svg { display: block; }
+
+  /* scrollbars */
+  .scroll::-webkit-scrollbar, .editor::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scroll::-webkit-scrollbar-thumb, .editor::-webkit-scrollbar-thumb {
+    background: var(--bg-3); border-radius: 4px;
+  }
+  .scroll::-webkit-scrollbar-track, .editor::-webkit-scrollbar-track { background: transparent; }
+
+  /* subagent / mcp dropdown teaser */
+  .seg {
+    display: inline-flex;
+    border: 1px solid var(--hair);
+    border-radius: 5px;
+    overflow: hidden;
+    background: var(--bg-1);
+  }
+  .seg .s {
+    height: 22px;
+    padding: 0 8px;
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px;
+    color: var(--fg-2);
+    border-right: 1px solid var(--hair);
+  }
+  .seg .s:last-child { border-right: 0;}
+  .seg .s.on { background: var(--bg-2); color: var(--fg); }
+
+  /* small icon helpers */
+  .i { width: 13px; height: 13px; flex: none; display: inline-block; vertical-align: middle; }
+
+</style>
+</head>
+<body>
+<div class="app" data-screen-label="01 Harness Session">
+
+  <!-- ====================== TITLEBAR ====================== -->
+  <div class="titlebar">
+    <div class="traffic"><span></span><span></span><span></span></div>
+
+    <div class="tb-section">
+      <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 3h10v10H3z"/><path d="M3 7h10M7 3v10"/></svg>
+      <span>cinder</span>
+      <span class="chevron">/</span>
+      <span class="repo">api-gateway</span>
+    </div>
+
+    <div class="tb-section sm">
+      <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="5" cy="5" r="2"/><circle cx="11" cy="11" r="2"/><path d="M5 7v2a2 2 0 0 0 2 2h2"/></svg>
+      <span class="mono" style="font-size:11.5px">feat/pagination-cursor-fix</span>
+      <span style="color:var(--fg-3); font-family:'JetBrains Mono', monospace; font-size:11px">·</span>
+      <span style="color:var(--green); font-family:'JetBrains Mono', monospace; font-size:11px">+184</span>
+      <span style="color:var(--red); font-family:'JetBrains Mono', monospace; font-size:11px">−72</span>
+    </div>
+
+    <div class="tb-spacer"></div>
+
+    <div class="tb-right">
+      <div class="seg">
+        <div class="s on">
+          <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 1l5 3v8l-5 3-5-3V4z"/></svg>
+          Build
+        </div>
+        <div class="s">Plan</div>
+        <div class="s">Review</div>
+      </div>
+      <button class="tb-btn">
+        <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M2.5 6h11"/></svg>
+        Worktree
+        <span class="kbd">⌘W</span>
+      </button>
+      <button class="tb-btn" id="toggle-code" type="button" title="Hide code (⌘ J)">
+        <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M10 3v10"/><path d="M11.5 6.5 13 8l-1.5 1.5"/></svg>
+        <span id="toggle-code-label">Hide code</span>
+      </button>
+      <button class="tb-btn">
+        <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 1"/></svg>
+        12m 04s
+      </button>
+    </div>
+  </div>
+
+  <!-- ====================== RAIL ====================== -->
+  <aside class="rail">
+    <div class="rail-head">
+      <h1>Sessions</h1>
+      <button class="add" title="New session">+</button>
+    </div>
+    <div class="rail-search">
+      <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="4.5"/><path d="m11 11 3 3"/></svg>
+      <span>Search runs…</span>
+      <span class="kbd">⌘K</span>
+    </div>
+
+    <div class="rail-group">
+      <h2>Live</h2>
+      <div class="rail-item active">
+        <span class="dot run"></span>
+        <div>
+          <div class="title">Fix off-by-one in cursor pagination</div>
+          <div class="meta" style="color:var(--accent)">running · 12m</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="rail-group">
+      <h2>Today</h2>
+      <div class="rail-item">
+        <span class="dot ok"></span>
+        <div>
+          <div class="title">Add OTEL spans to /v2/search</div>
+          <div class="meta">3 commits · 41m ago</div>
+        </div>
+      </div>
+      <div class="rail-item">
+        <span class="dot ok"></span>
+        <div>
+          <div class="title">Refactor RateLimiter→TokenBucket</div>
+          <div class="meta">1 commit · 1h ago</div>
+        </div>
+      </div>
+      <div class="rail-item">
+        <span class="dot err"></span>
+        <div>
+          <div class="title">Migrate auth.ts to passkeys</div>
+          <div class="meta" style="color:var(--red)">2 failed · 2h ago</div>
+        </div>
+      </div>
+      <div class="rail-item">
+        <span class="dot idle"></span>
+        <div>
+          <div class="title">Investigate flaky webhook_test</div>
+          <div class="meta">paused · 3h ago</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="rail-group">
+      <h2>Yesterday</h2>
+      <div class="rail-item">
+        <span class="dot ok"></span>
+        <div>
+          <div class="title">Bump fastify, patch CVE-2026-…</div>
+          <div class="meta">merged · Wed 17:22</div>
+        </div>
+      </div>
+      <div class="rail-item">
+        <span class="dot ok"></span>
+        <div>
+          <div class="title">Sketch billing reconciliation job</div>
+          <div class="meta">draft · Wed 14:08</div>
+        </div>
+      </div>
+      <div class="rail-item">
+        <span class="dot ok"></span>
+        <div>
+          <div class="title">Port snapshot tests to Vitest 3</div>
+          <div class="meta">merged · Wed 11:43</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="rail-foot">
+      <div class="row">
+        <div class="avatar">RM</div>
+        <div>
+          <div class="name">Rohan Mehta</div>
+          <div class="sub">cinder · Sonnet 4.5</div>
+        </div>
+        <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" style="margin-left:auto; color:var(--fg-3)"><path d="M4 6l4 4 4-4"/></svg>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ====================== CENTER: TRANSCRIPT ====================== -->
+  <main class="center">
+    <div class="center-head">
+      <div class="title">Fix off-by-one in cursor pagination</div>
+      <div class="sha mono">· @ 7f3c1a2</div>
+      <div class="pills">
+        <div class="pill">
+          <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" style="color:var(--accent)"><path d="M3 3h10v10H3z"/><path d="M6 8h4"/></svg>
+          22 tool calls
+        </div>
+        <div class="pill">
+          <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="6"/><path d="M5 8h6M8 5v6"/></svg>
+          2 subagents
+        </div>
+        <div class="pill muted mono" style="font-size:11px">112k / 200k ctx</div>
+      </div>
+    </div>
+
+    <div class="scroll">
+
+      <!-- ---- USER MSG ---- -->
+      <div class="msg">
+        <div class="msg-head">
+          <div class="who user">Rohan</div>
+          <div class="when">12:04:11</div>
+        </div>
+        <div class="body">
+          <p>We're losing the last item on every other page when paginating <code>/v2/search</code>. I think the cursor encoder is treating <code>after</code> as exclusive but the SQL is using <code>&gt;=</code>. Confirm in <code>src/cursor.ts</code> and the search route, then patch + add a regression test that paginates across a hard boundary (page size 50, 101 results).</p>
+        </div>
+      </div>
+
+      <!-- ---- AGENT MSG ---- -->
+      <div class="msg">
+        <div class="msg-head">
+          <div class="glyph agent mono">A</div>
+          <div class="who agent">Harness</div>
+          <div class="when">12:04:13</div>
+          <div style="margin-left:auto; display:flex; gap:4px;">
+            <div class="pill mono" style="font-size:10.5px">sonnet 4.5</div>
+            <div class="pill mono" style="font-size:10.5px; color:var(--fg-3)">2,418 tok</div>
+          </div>
+        </div>
+
+        <div class="think">
+          <div class="label">
+            <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2v3M8 11v3M2 8h3M11 8h3M4 4l2 2M10 10l2 2M4 12l2-2M10 6l2-2"/></svg>
+            reasoning · 4.2s
+          </div>
+          Two paths to verify: (1) read the cursor codec to see whether the decoded position is meant to be inclusive or exclusive, (2) read the query in the search route. The naming convention in this repo is usually <em>after</em>=exclusive, so the SQL comparator is the likely culprit. I'll start by listing the relevant files, then read both before changing anything.
+        </div>
+
+        <div class="body">
+          <p>I'll confirm the contract first, then narrow the fix to the SQL side so the cursor format on the wire stays stable. Reading both files now.</p>
+        </div>
+
+        <!-- TOOL: glob -->
+        <div class="tool">
+          <div class="tool-head">
+            <svg class="i icon grep" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="4.5"/><path d="m11 11 3 3"/></svg>
+            <span class="name">grep</span>
+            <span class="arg">
+              <span class="key">pattern:</span> <span class="str">"decodeCursor\\("</span><span class="key"> · path:</span> src/
+            </span>
+            <span class="ms">142ms</span>
+            <span class="status"></span>
+          </div>
+          <div class="tool-body">
+            <div class="out-line"><span class="ln">3</span><span class="pre"><span style="color:var(--accent)">src/cursor.ts</span>:<span style="color:var(--yellow)">87</span>  export function <span style="color:var(--blue)">decodeCursor</span>(token: string): Cursor {</span></div>
+            <div class="out-line"><span class="ln"></span><span class="pre"><span style="color:var(--accent)">src/routes/search.ts</span>:<span style="color:var(--yellow)">42</span>  const cursor = decodeCursor(req.query.after)</span></div>
+            <div class="out-line"><span class="ln"></span><span class="pre"><span style="color:var(--accent)">test/cursor.test.ts</span>:<span style="color:var(--yellow)">14</span>  expect(decodeCursor(t)).toEqual({...})</span></div>
+          </div>
+        </div>
+
+        <!-- TOOL: read cursor.ts -->
+        <div class="tool">
+          <div class="tool-head">
+            <svg class="i icon read" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 2.5h7l3 3V13a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13z"/><path d="M10 2.5V6h3"/><path d="M5.5 8.5h5M5.5 10.5h5"/></svg>
+            <span class="name">read_file</span>
+            <span class="arg">
+              <span class="key">path:</span> <span class="str">"src/cursor.ts"</span><span class="key"> · range:</span> 70:110
+            </span>
+            <span class="ms">38ms</span>
+            <span class="status"></span>
+          </div>
+          <div class="tool-body" style="max-height:140px; overflow:hidden; position:relative;">
+            <div class="out-line"><span class="ln">82</span><span class="pre"><span class="tk-cmt">// Cursor: opaque, base64url-encoded { lastId, ts }. Treated as EXCLUSIVE</span></span></div>
+            <div class="out-line"><span class="ln">83</span><span class="pre"><span class="tk-cmt">// by callers — i.e. results returned must satisfy id &gt; cursor.lastId</span></span></div>
+            <div class="out-line"><span class="ln">84</span><span class="pre"><span class="tk-key">export</span> <span class="tk-key">type</span> <span class="tk-type">Cursor</span> = { <span class="tk-prop">lastId</span>: <span class="tk-type">string</span>; <span class="tk-prop">ts</span>: <span class="tk-type">number</span> }</span></div>
+            <div class="out-line"><span class="ln">85</span><span class="pre"></span></div>
+            <div class="out-line"><span class="ln">86</span><span class="pre"><span class="tk-key">export</span> <span class="tk-key">function</span> <span class="tk-fn">decodeCursor</span>(token: <span class="tk-type">string</span>): <span class="tk-type">Cursor</span> {</span></div>
+            <div class="out-line"><span class="ln">87</span><span class="pre">  <span class="tk-key">const</span> raw = Buffer.<span class="tk-fn">from</span>(token, <span class="tk-str">'base64url'</span>).<span class="tk-fn">toString</span>(<span class="tk-str">'utf8'</span>)</span></div>
+            <div class="out-line"><span class="ln">88</span><span class="pre">  <span class="tk-key">return</span> <span class="tk-fn">JSON</span>.<span class="tk-fn">parse</span>(raw) <span class="tk-key">as</span> <span class="tk-type">Cursor</span></span></div>
+            <div style="position:absolute; left:0; right:0; bottom:0; height:30px; background: linear-gradient(to bottom, transparent, var(--bg));"></div>
+          </div>
+          <div class="tool-foot">
+            <span>read 41 lines</span><span class="sep">·</span><span>1.4 KB</span><span class="sep">·</span><span style="color:var(--fg-2)">contract confirmed: cursor is exclusive</span>
+          </div>
+        </div>
+
+        <!-- TOOL: read search.ts -->
+        <div class="tool">
+          <div class="tool-head">
+            <svg class="i icon read" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 2.5h7l3 3V13a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13z"/><path d="M10 2.5V6h3"/><path d="M5.5 8.5h5M5.5 10.5h5"/></svg>
+            <span class="name">read_file</span>
+            <span class="arg">
+              <span class="key">path:</span> <span class="str">"src/routes/search.ts"</span><span class="key"> · range:</span> 38:74
+            </span>
+            <span class="ms">29ms</span>
+            <span class="status"></span>
+          </div>
+          <div class="tool-body" style="max-height:120px; overflow:hidden; position:relative;">
+            <div class="out-line"><span class="ln">52</span><span class="pre">  <span class="tk-key">const</span> rows = <span class="tk-key">await</span> db.<span class="tk-fn">query</span>(<span class="tk-fn">sql</span>`</span></div>
+            <div class="out-line"><span class="ln">53</span><span class="pre">    <span class="tk-str">select</span> id, score, snippet, ts</span></div>
+            <div class="out-line"><span class="ln">54</span><span class="pre">    <span class="tk-str">from</span> documents</span></div>
+            <div class="out-line"><span class="ln">55</span><span class="pre">    <span class="tk-str">where</span> tenant_id = ${tenant}</span></div>
+            <div class="out-line"><span class="ln">56</span><span class="pre">      <span class="tk-str">and</span> id <span style="color:var(--red); background:var(--red-bg); padding:0 3px; border-radius:2px;">&gt;=</span> ${cursor.lastId}</span></div>
+            <div class="out-line"><span class="ln">57</span><span class="pre">    <span class="tk-str">order by</span> id <span class="tk-str">asc</span></span></div>
+            <div class="out-line"><span class="ln">58</span><span class="pre">    <span class="tk-str">limit</span> ${pageSize + <span class="tk-num">1</span>}</span></div>
+            <div style="position:absolute; left:0; right:0; bottom:0; height:30px; background: linear-gradient(to bottom, transparent, var(--bg));"></div>
+          </div>
+          <div class="tool-foot">
+            <span style="color:var(--red)">⨯ mismatch</span><span class="sep">·</span><span>SQL uses <span class="mono">&gt;=</span> against an exclusive cursor</span>
+          </div>
+        </div>
+
+        <div class="body">
+          <p>Confirmed. The codec is exclusive but the SQL uses <code>id &gt;= cursor.lastId</code>, so the boundary row gets returned on the next page — and because we trim to <code>pageSize</code> after fetching <code>pageSize+1</code>, the genuinely-new last row falls off the end. Patching the comparator and adding a regression test that paginates 101 rows at <code>pageSize=50</code>.</p>
+        </div>
+
+        <!-- TOOL: edit_file -->
+        <div class="tool">
+          <div class="tool-head">
+            <svg class="i icon write" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2.5 11.5 11 3l2 2-8.5 8.5L2 14z"/><path d="m10 4 2 2"/></svg>
+            <span class="name">edit_file</span>
+            <span class="arg">
+              <span class="key">path:</span> <span class="str">"src/routes/search.ts"</span>
+            </span>
+            <span class="ms">writing…</span>
+            <span class="status run"></span>
+          </div>
+          <div>
+            <div class="diff-line del"><span class="sign">−</span><span class="ln">56</span><span class="pre">      and id &gt;= ${cursor.lastId}</span></div>
+            <div class="diff-line add"><span class="sign">+</span><span class="ln">56</span><span class="pre">      and id &gt;  ${cursor.lastId}</span></div>
+            <div class="diff-line"><span class="sign"></span><span class="ln">57</span><span class="pre">    order by id asc</span></div>
+            <div class="diff-line"><span class="sign"></span><span class="ln">58</span><span class="pre">    limit ${pageSize + 1}</span></div>
+          </div>
+          <div class="tool-foot">
+            <span style="color:var(--green)">+1</span><span style="color:var(--red)">−1</span><span class="sep">·</span><span>1 file changed</span><span class="sep">·</span><span style="color:var(--fg-2)">tsc clean</span>
+          </div>
+        </div>
+
+        <!-- TOOL: shell -->
+        <div class="tool">
+          <div class="tool-head">
+            <svg class="i icon run" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 4l4 4-4 4"/><path d="M8 13h5"/></svg>
+            <span class="name">shell</span>
+            <span class="arg">
+              <span class="str">pnpm test cursor.test.ts --reporter=compact</span>
+            </span>
+            <span class="ms">2.1s</span>
+            <span class="status"></span>
+          </div>
+          <div class="tool-body">
+            <div class="out-line"><span class="ln">$</span><span class="pre"><span style="color:var(--fg-2)">pnpm test cursor.test.ts --reporter=compact</span></span></div>
+            <div class="out-line"><span class="ln"></span><span class="pre"><span style="color:var(--green)">✓</span> cursor › encodes &amp; decodes round-trip          <span style="color:var(--fg-3)">2ms</span></span></div>
+            <div class="out-line"><span class="ln"></span><span class="pre"><span style="color:var(--green)">✓</span> cursor › treats `after` as exclusive             <span style="color:var(--fg-3)">3ms</span></span></div>
+            <div class="out-line"><span class="ln"></span><span class="pre"><span style="color:var(--red)">✗</span> cursor › paginates 101 results at size 50        <span style="color:var(--fg-3)">11ms</span></span></div>
+            <div class="out-line"><span class="ln"></span><span class="pre">    <span style="color:var(--red)">expected length 101, received 100 (missing id=doc_050)</span></span></div>
+            <div class="out-line"><span class="ln"></span><span class="pre"><span style="color:var(--fg-3)">Tests:  2 passed, 1 failed (3)</span></span></div>
+          </div>
+          <div class="tool-foot">
+            <span style="color:var(--yellow)">expected failure</span><span class="sep">·</span><span>regression covered before patch</span>
+          </div>
+        </div>
+
+        <div class="body">
+          <p>Adding the boundary-spanning test now — writing in <code>test/search.pagination.test.ts</code>. Once it passes against the patched route I'll run the full suite.</p>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- ---- COMPOSER ---- -->
+    <div class="composer">
+      <div class="composer-box">
+        <div class="row1">
+          <div class="chip ctx"><svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 2.5h7l3 3V13a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13z"/></svg> src/routes/search.ts <span class="x">×</span></div>
+          <div class="chip ctx"><svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 2.5h7l3 3V13a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13z"/></svg> src/cursor.ts <span class="x">×</span></div>
+          <div class="chip"><svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" style="color:var(--violet)"><circle cx="8" cy="8" r="5"/><path d="M8 5v3l2 1"/></svg> @reviewer subagent</div>
+        </div>
+        <div class="composer-text">
+          <span style="color:var(--fg-1)">After the regression passes, run the e2e harness against staging and<span class="caret"></span></span>
+        </div>
+        <div class="composer-bar">
+          <button class="model-picker" type="button">
+            <span class="dot"></span>
+            <span>Sonnet</span>
+            <span class="ver">4.5</span>
+            <svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6.5l4 4 4-4"/></svg>
+          </button>
+          <button class="think-toggle" type="button">
+            <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2v3M8 11v3M2 8h3M11 8h3M4 4l2 2M10 10l2 2M4 12l2-2M10 6l2-2"/></svg>
+            <span>Extended thinking</span>
+          </button>
+          <div class="right">
+            <button class="send-btn">
+              Send
+              <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ====================== RIGHT: EDITOR ====================== -->
+  <section class="right">
+    <div class="tabs">
+      <div class="tab">
+        <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" style="color:var(--blue)"><path d="M3 2.5h7l3 3V13a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13z"/></svg>
+        cursor.ts
+      </div>
+      <div class="tab">
+        <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" style="color:var(--blue)"><path d="M3 2.5h7l3 3V13a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13z"/></svg>
+        search.ts
+        <span class="mod" title="unsaved"></span>
+      </div>
+      <div class="tab active">
+        <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" style="color:var(--green)"><path d="M3 2.5h7l3 3V13a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13z"/></svg>
+        search.pagination.test.ts
+        <span class="agent-mark" title="agent editing"></span>
+      </div>
+      <div class="tab">
+        <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 4l4 4-4 4"/><path d="M8 13h5"/></svg>
+        terminal
+      </div>
+      <div class="tab-extra">
+        <span class="mono">TypeScript</span>
+      </div>
+    </div>
+
+    <div class="breadcrumbs">
+      <span class="crumb">api-gateway</span><span>/</span>
+      <span class="crumb">test</span><span>/</span>
+      <span class="crumb last">search.pagination.test.ts</span>
+      <span class="agent-banner">
+        <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="3"/><circle cx="8" cy="8" r="6"/></svg>
+        Harness editing · line 42
+      </span>
+      <span class="right">
+      </span>
+    </div>
+
+    <div class="editor">
+      <div class="erow"><span class="gl">1</span><span class="sg">&nbsp;</span><span class="src"><span class="tk-key">import</span> { describe, it, expect, beforeAll, afterAll } <span class="tk-key">from</span> <span class="tk-str">'vitest'</span></span></div>
+      <div class="erow"><span class="gl">2</span><span class="sg">&nbsp;</span><span class="src"><span class="tk-key">import</span> { build } <span class="tk-key">from</span> <span class="tk-str">'../src/server'</span></span></div>
+      <div class="erow"><span class="gl">3</span><span class="sg">&nbsp;</span><span class="src"><span class="tk-key">import</span> { seedDocuments, truncate } <span class="tk-key">from</span> <span class="tk-str">'./helpers/fixtures'</span></span></div>
+      <div class="erow"><span class="gl">4</span><span class="sg">&nbsp;</span><span class="src">&nbsp;</span></div>
+      <div class="erow"><span class="gl">5</span><span class="sg">&nbsp;</span><span class="src"><span class="tk-key">const</span> <span class="tk-var">TENANT</span> = <span class="tk-str">'acme'</span></span></div>
+      <div class="erow"><span class="gl">6</span><span class="sg">&nbsp;</span><span class="src"><span class="tk-key">const</span> <span class="tk-var">PAGE_SIZE</span> = <span class="tk-num">50</span></span></div>
+      <div class="erow"><span class="gl">7</span><span class="sg">&nbsp;</span><span class="src">&nbsp;</span></div>
+      <div class="erow"><span class="gl">8</span><span class="sg">&nbsp;</span><span class="src"><span class="tk-fn">describe</span>(<span class="tk-str">'GET /v2/search · cursor pagination'</span>, () =&gt; {</span></div>
+      <div class="erow"><span class="gl">9</span><span class="sg">&nbsp;</span><span class="src">  <span class="tk-key">let</span> app: <span class="tk-key">Awaited</span>&lt;<span class="tk-type">ReturnType</span>&lt;<span class="tk-key">typeof</span> build&gt;&gt;</span></div>
+      <div class="erow"><span class="gl">10</span><span class="sg">&nbsp;</span><span class="src">&nbsp;</span></div>
+      <div class="erow"><span class="gl">11</span><span class="sg">&nbsp;</span><span class="src">  <span class="tk-fn">beforeAll</span>(<span class="tk-key">async</span> () =&gt; {</span></div>
+      <div class="erow"><span class="gl">12</span><span class="sg">&nbsp;</span><span class="src">    app = <span class="tk-key">await</span> <span class="tk-fn">build</span>({ logger: <span class="tk-bool">false</span> })</span></div>
+      <div class="erow"><span class="gl">13</span><span class="sg">&nbsp;</span><span class="src">    <span class="tk-key">await</span> <span class="tk-fn">truncate</span>(<span class="tk-var">TENANT</span>)</span></div>
+      <div class="erow"><span class="gl">14</span><span class="sg">&nbsp;</span><span class="src">    <span class="tk-key">await</span> <span class="tk-fn">seedDocuments</span>(<span class="tk-var">TENANT</span>, <span class="tk-num">101</span>) <span class="tk-cmt">// 101 ids so we cross a 50-page boundary</span></span></div>
+      <div class="erow"><span class="gl">15</span><span class="sg">&nbsp;</span><span class="src">  })</span></div>
+      <div class="erow"><span class="gl">16</span><span class="sg">&nbsp;</span><span class="src">&nbsp;</span></div>
+      <div class="erow"><span class="gl">17</span><span class="sg">&nbsp;</span><span class="src">  <span class="tk-fn">afterAll</span>(<span class="tk-key">async</span> () =&gt; app?.<span class="tk-fn">close</span>())</span></div>
+      <div class="erow"><span class="gl">18</span><span class="sg">&nbsp;</span><span class="src">&nbsp;</span></div>
+      <div class="erow"><span class="gl">19</span><span class="sg">&nbsp;</span><span class="src">  <span class="tk-fn">it</span>(<span class="tk-str">'returns every row exactly once across the boundary'</span>, <span class="tk-key">async</span> () =&gt; {</span></div>
+      <div class="erow"><span class="gl">20</span><span class="sg">&nbsp;</span><span class="src">    <span class="tk-key">const</span> seen = <span class="tk-key">new</span> <span class="tk-type">Set</span>&lt;<span class="tk-type">string</span>&gt;()</span></div>
+      <div class="erow"><span class="gl">21</span><span class="sg">&nbsp;</span><span class="src">    <span class="tk-key">let</span> cursor: <span class="tk-type">string</span> | <span class="tk-key">undefined</span></span></div>
+      <div class="erow"><span class="gl">22</span><span class="sg">&nbsp;</span><span class="src">&nbsp;</span></div>
+      <div class="erow"><span class="gl">23</span><span class="sg">&nbsp;</span><span class="src">    <span class="tk-key">for</span> (<span class="tk-key">let</span> page = <span class="tk-num">0</span>; page &lt; <span class="tk-num">3</span>; page++) {</span></div>
+      <div class="erow"><span class="gl">24</span><span class="sg">&nbsp;</span><span class="src">      <span class="tk-key">const</span> res = <span class="tk-key">await</span> app.<span class="tk-fn">inject</span>({</span></div>
+      <div class="erow"><span class="gl">25</span><span class="sg">&nbsp;</span><span class="src">        method: <span class="tk-str">'GET'</span>,</span></div>
+      <div class="erow"><span class="gl">26</span><span class="sg">&nbsp;</span><span class="src">        url: <span class="tk-str">'/v2/search'</span>,</span></div>
+      <div class="erow"><span class="gl">27</span><span class="sg">&nbsp;</span><span class="src">        query: { q: <span class="tk-str">'*'</span>, tenant: <span class="tk-var">TENANT</span>, limit: <span class="tk-fn">String</span>(<span class="tk-var">PAGE_SIZE</span>), after: cursor ?? <span class="tk-str">''</span> },</span></div>
+      <div class="erow"><span class="gl">28</span><span class="sg">&nbsp;</span><span class="src">      })</span></div>
+      <div class="erow"><span class="gl">29</span><span class="sg">&nbsp;</span><span class="src">&nbsp;</span></div>
+      <div class="erow"><span class="gl">30</span><span class="sg">&nbsp;</span><span class="src">      <span class="tk-fn">expect</span>(res.statusCode).<span class="tk-fn">toBe</span>(<span class="tk-num">200</span>)</span></div>
+      <div class="erow"><span class="gl">31</span><span class="sg">&nbsp;</span><span class="src">      <span class="tk-key">const</span> body = res.<span class="tk-fn">json</span>() <span class="tk-key">as</span> { hits: { id: <span class="tk-type">string</span> }[]; next?: <span class="tk-type">string</span> }</span></div>
+      <div class="erow"><span class="gl">32</span><span class="sg">&nbsp;</span><span class="src">&nbsp;</span></div>
+      <div class="erow add"><span class="gl">33</span><span class="sg">+</span><span class="src">      <span class="tk-key">for</span> (<span class="tk-key">const</span> hit <span class="tk-key">of</span> body.hits) {</span></div>
+      <div class="erow add"><span class="gl">34</span><span class="sg">+</span><span class="src">        <span class="tk-fn">expect</span>(seen.<span class="tk-fn">has</span>(hit.id), <span class="tk-str">`duplicate ${hit.id}`</span>).<span class="tk-fn">toBe</span>(<span class="tk-bool">false</span>)</span></div>
+      <div class="erow add"><span class="gl">35</span><span class="sg">+</span><span class="src">        seen.<span class="tk-fn">add</span>(hit.id)</span></div>
+      <div class="erow add"><span class="gl">36</span><span class="sg">+</span><span class="src">      }</span></div>
+      <div class="erow add"><span class="gl">37</span><span class="sg">+</span><span class="src">      cursor = body.next</span></div>
+      <div class="erow add"><span class="gl">38</span><span class="sg">+</span><span class="src">      <span class="tk-key">if</span> (!cursor) <span class="tk-key">break</span></span></div>
+      <div class="erow add"><span class="gl">39</span><span class="sg">+</span><span class="src">    }</span></div>
+      <div class="erow add"><span class="gl">40</span><span class="sg">+</span><span class="src">&nbsp;</span></div>
+      <div class="erow add"><span class="gl">41</span><span class="sg">+</span><span class="src">    <span class="tk-fn">expect</span>(seen.size).<span class="tk-fn">toBe</span>(<span class="tk-num">101</span>)</span></div>
+      <div class="erow add current"><span class="gl">42</span><span class="sg">+</span><span class="src">    <span class="tk-fn">expect</span>(seen.<span class="tk-fn">has</span>(<span class="tk-str">'doc_050'</span>), <span class="tk-str">'boundary row preserved'</span>).<span class="tk-fn">toBe</span>(<span class="tk-bool">true</span><span class="caret-anim"></span></span></div>
+      <div class="erow"><span class="gl">43</span><span class="sg">&nbsp;</span><span class="src">  })</span></div>
+      <div class="erow"><span class="gl">44</span><span class="sg">&nbsp;</span><span class="src">&nbsp;</span></div>
+      <div class="erow"><span class="gl">45</span><span class="sg">&nbsp;</span><span class="src">  <span class="tk-fn">it</span>.<span class="tk-fn">todo</span>(<span class="tk-str">'rejects malformed cursors with 400'</span>)</span></div>
+      <div class="erow"><span class="gl">46</span><span class="sg">&nbsp;</span><span class="src">  <span class="tk-fn">it</span>.<span class="tk-fn">todo</span>(<span class="tk-str">'is stable when documents are inserted mid-pagination'</span>)</span></div>
+      <div class="erow"><span class="gl">47</span><span class="sg">&nbsp;</span><span class="src">})</span></div>
+    </div>
+
+  </section>
+
+  <!-- ====================== STATUSBAR ====================== -->
+  <div class="status">
+    <span class="live"><span class="pulse"></span> writing · search.pagination.test.ts</span>
+    <span class="mid">
+      <span class="grp"><svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" style="color:var(--accent)"><circle cx="8" cy="8" r="6"/><path d="M5 8h6"/></svg> sonnet 4.5</span>
+      <span style="color:var(--fg-3)">·</span>
+      <span class="grp">subagents <span style="color:var(--violet)">@reviewer</span> <span style="color:var(--blue)">@db-expert</span></span>
+      <span style="color:var(--fg-3)">·</span>
+      <span class="grp">mcp <span class="ok">github</span> <span class="ok">postgres</span> <span class="ok">linear</span> <span class="warn">sentry⚠</span></span>
+    </span>
+    <span class="right">
+      <span class="grp ok">p50 412ms</span>
+      <span class="grp">14,288 tok</span>
+      <span class="grp">$0.18</span>
+      <span class="grp">⌘. cancel</span>
+    </span>
+  </div>
+
+</div>
+<script>
+(function() {
+  const app = document.querySelector('.app');
+  const btn = document.getElementById('toggle-code');
+  const label = document.getElementById('toggle-code-label');
+  const KEY = 'harness:codeHidden';
+
+  function apply(hidden) {
+    app.classList.toggle('code-hidden', hidden);
+    btn.classList.toggle('active', hidden);
+    label.textContent = hidden ? 'Show code' : 'Hide code';
+    btn.title = hidden ? 'Show code (⌘ J)' : 'Hide code (⌘ J)';
+    document.body.style.minWidth = hidden ? '900px' : '1440px';
+  }
+
+  apply(localStorage.getItem(KEY) === '1');
+
+  btn.addEventListener('click', () => {
+    const next = !app.classList.contains('code-hidden');
+    localStorage.setItem(KEY, next ? '1' : '0');
+    apply(next);
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
+      e.preventDefault();
+      btn.click();
+    }
+  });
+})();
+</script>
+</body>
+</html>

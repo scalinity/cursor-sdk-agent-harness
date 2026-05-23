@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+
+# Secrets and environment
+.env
+.env.*
+!.env.example
+*.local
+
+# Local databases and runtime state
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor / AI tooling
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.claude/
+.cursor/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Test artifacts
+.playwright-mcp/
+screenshots/
+playwright-report/
+test-results/
+
+# Temporary
+.tmp/
+*.tmp

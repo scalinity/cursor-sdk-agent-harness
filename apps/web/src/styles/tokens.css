@@ -1,0 +1,8 @@
+/*
+ * Design tokens are materialized in Phase 03 (Design Token Extraction).
+ * Phase 02 ships a minimal :root rule so the Tailwind v4 @import chain
+ * compiles cleanly without a fully-populated @theme block.
+ */
+:root {
+  --harness-bootstrap-phase: "02";
+}
