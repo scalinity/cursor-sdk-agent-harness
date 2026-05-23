@@ -49,7 +49,17 @@ export interface RunControllerInit {
   logger: FastifyBaseLogger;
 }
 
-export type CancelResult = "cancelled" | "unavailable";
+/**
+ * Discriminated outcome of a cancel attempt. The four cases mean very
+ * different things for the caller (UI vs internal terminate cascade vs
+ * Phase 13 cancel route), so the controller surfaces them separately
+ * instead of collapsing into a string "unavailable" that hides intent.
+ */
+export type CancelResult =
+  | { outcome: "cancelled" }
+  | { outcome: "not_started" } // start() never resolved (no Run handle yet)
+  | { outcome: "unsupported"; unsupportedReason: string | undefined } // SDK reports cancel not supported
+  | { outcome: "failed"; error: unknown }; // SDK cancel() threw
 
 export class RunController {
   readonly runId: string;
@@ -114,18 +124,29 @@ export class RunController {
 
   async cancel(reason: RunInterruptedReason = "user_cancelled"): Promise<CancelResult> {
     if (!this.runHandle) {
-      return "unavailable";
+      // start() has not resolved yet — there's no Run to cancel. Caller
+      // (terminate cascade, Phase 13 cancel route) decides whether to
+      // mark the row as interrupted; we don't write anything because
+      // we can't tell whether the SDK already started a run.
+      return { outcome: "not_started" };
     }
     if (this.runHandle.supports("cancel") === false) {
+      const unsupportedReason = this.runHandle.unsupportedReason("cancel");
       this.init.logger.warn(
-        {
-          runId: this.runId,
-          reason,
-          unsupportedReason: this.runHandle.unsupportedReason("cancel"),
-        },
-        "run.cancel: SDK reports unsupported, returning CANCEL_UNAVAILABLE",
+        { runId: this.runId, reason, unsupportedReason },
+        "run.cancel: SDK reports unsupported — persisting cancel_unavailable so the run doesn't linger",
       );
-      return "unavailable";
+      // Per spec §11 cancellation contract step 9: when no cancellation
+      // primitive is available the harness must NOT fake CANCELLED.
+      // Write setInterrupted(stream_error, cancel_unavailable) so the
+      // run terminates as ERROR rather than lingering in RUNNING forever.
+      this.init.runsRepo.setInterrupted(
+        this.runId,
+        "stream_error",
+        "cancel_unavailable",
+      );
+      const result: CancelResult = { outcome: "unsupported", unsupportedReason };
+      return result;
     }
     try {
       await this.runHandle.cancel();
@@ -134,9 +155,10 @@ export class RunController {
         { err, runId: this.runId },
         "run.cancel: SDK cancel() threw",
       );
-      // Treat a thrown cancel as "available but failed" — caller decides
-      // whether to mark the run ERROR. We do NOT promote to CANCELLED here.
-      return "unavailable";
+      // Cancel was attempted but failed — we don't know whether the SDK
+      // managed to abort. Don't promote to CANCELLED; leave it to the
+      // consume loop and caller decide.
+      return { outcome: "failed", error: err };
     }
     // The SDK should emit a CANCELLED status event next; the consume loop
     // picks it up. Belt-and-braces: stamp CANCELLED here too via the
@@ -150,7 +172,7 @@ export class RunController {
     // row. The consume loop is bounded by `run.wait()`'s timeout (see
     // RUN_WAIT_TIMEOUT_MS below) so this can't hang forever.
     await this.awaitSettled();
-    return "cancelled";
+    return { outcome: "cancelled" };
   }
 
   private async consumeAndFinalise(): Promise<void> {
