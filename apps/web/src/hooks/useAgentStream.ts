@@ -5,7 +5,12 @@
  *   - Opens the WS connection (via `useWebSocket`).
  *   - On open AND when `activeRunId` changes, sends `subscribe_run` with
  *     `after_seq = run-store.eventsByRunId[runId].lastSeq`.
- *   - On unmount / runId change, sends `unsubscribe_run`.
+ *   - On unmount / runId change, sends `unsubscribe_run` — but only if
+ *     the socket is currently open (RV2-W7).
+ *   - On reconnect (`connectionState` flips back to "open"), every
+ *     previously-subscribed run is re-subscribed with its current
+ *     `lastSeq` so callers that used the exposed `subscribeRun` API
+ *     don't need to re-fire after reconnect (RV2-W8).
  *   - Forwards every frame to `run-store.ingestServerFrame`.
  *   - Exposes `submitUserInput` (REST POST /api/runs) and `cancelRun`.
  *
@@ -45,6 +50,18 @@ function makeFrameId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function buildSubscribeFrame(runId: string): ClientFrame {
+  const lastSeq = useRunStore.getState().eventsByRunId[runId]?.lastSeq ?? 0;
+  return {
+    id: makeFrameId("sub"),
+    type: "subscribe_run",
+    sent_at: new Date().toISOString(),
+    run_id: runId,
+    after_seq: lastSeq,
+    replay: { enabled: true, speed: "instant" },
+  };
+}
+
 export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult {
   const { refresh: refreshCsrfToken } = useCsrfToken();
   const csrfToken = useUiStore((s) => s.csrfToken);
@@ -53,18 +70,16 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
   const setActiveRunId = useRunStore((s) => s.setActiveRunId);
   const activeRunId = useRunStore((s) => s.activeRunId);
 
-  // Track subscribed runIds so we can resume after reconnect.
+  // Track subscribed runIds so the reconnect-resume effect can replay
+  // every prior subscription. The set survives socket churn within this
+  // hook lifetime; cleared on unmount.
   const subscribedRef = useRef<Set<string>>(new Set());
 
   const onFrame = useCallback(
     (frame: ServerFrame) => {
-      // Mark replayed events so the renderer can suppress live-only animations.
-      const replayed = frame.type !== "ack" && frame.type !== "heartbeat" && frame.type !== "error";
-      if (replayed) {
-        // `replayed: true` lives on the frame implicitly via the server (the
-        // bus tags via the frame's event metadata in Phase 09). For now we
-        // always treat ingest as live; the store still dedupes by seq.
-      }
+      // The wire-level frame doesn't carry a `replayed` flag yet (Phase 09
+      // adds it server-side). For Phase 08 every ingest is treated as
+      // live; the run-store dedupes by seq so replay-overlap is harmless.
       ingestServerFrame(frame);
     },
     [ingestServerFrame],
@@ -77,37 +92,57 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
     onStateChange: setConnectionState,
   });
 
-  // Subscribe to the current runId whenever it changes AND we're connected.
-  // The seq cursor is read at send time so we don't subscribe with a stale 0.
+  // Subscribe to the target runId whenever it changes AND we're connected.
+  // The seq cursor is read at send time so we never subscribe with a stale 0.
   const targetRunId = input.runId ?? activeRunId ?? null;
   useEffect(() => {
     if (connectionState !== "open") return;
     if (!targetRunId) return;
 
-    const lastSeq = useRunStore.getState().eventsByRunId[targetRunId]?.lastSeq ?? 0;
-    const frame: ClientFrame = {
-      id: makeFrameId("sub"),
-      type: "subscribe_run",
-      sent_at: new Date().toISOString(),
-      run_id: targetRunId,
-      after_seq: lastSeq,
-      replay: { enabled: true, speed: "instant" },
-    };
     const subscribed = subscribedRef.current;
+    send(buildSubscribeFrame(targetRunId));
     subscribed.add(targetRunId);
-    send(frame);
 
     return () => {
-      // Best-effort unsubscribe; the server tolerates unsubscribe-of-not-subscribed.
-      send({
-        id: makeFrameId("unsub"),
-        type: "unsubscribe_run",
-        sent_at: new Date().toISOString(),
-        run_id: targetRunId,
-      });
+      // Only send unsubscribe when the socket is OPEN — otherwise the
+      // frame would land in the outbound queue and replay on reconnect
+      // against a run the user has since moved away from. The server
+      // tolerates unsubscribe-of-not-subscribed, so dropping on closed
+      // sockets is safe.
+      if (useUiStore.getState().connectionState === "open") {
+        send({
+          id: makeFrameId("unsub"),
+          type: "unsubscribe_run",
+          sent_at: new Date().toISOString(),
+          run_id: targetRunId,
+        });
+      }
       subscribed.delete(targetRunId);
     };
   }, [connectionState, targetRunId, send]);
+
+  // Reconnect-resume: when connectionState flips back to "open", any
+  // run that was subscribed via the exposed `subscribeRun(runId)` API
+  // (i.e. NOT the single targetRunId driven by the effect above) gets
+  // a fresh subscribe with the current lastSeq. Without this, callers
+  // that subscribed independently would be silently dropped after
+  // reconnect.
+  useEffect(() => {
+    if (connectionState !== "open") return;
+    const subscribed = subscribedRef.current;
+    for (const runId of subscribed) {
+      if (runId === targetRunId) continue; // already handled by the effect above.
+      send(buildSubscribeFrame(runId));
+    }
+  }, [connectionState, targetRunId, send]);
+
+  // Clear the subscribed set on unmount so a future remount starts fresh.
+  useEffect(() => {
+    const subscribed = subscribedRef.current;
+    return () => {
+      subscribed.clear();
+    };
+  }, []);
 
   const submitUserInput = useCallback(
     async ({ prompt, agentId }: { prompt: string; agentId: string }): Promise<string> => {
@@ -138,15 +173,7 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
 
   const subscribeRun = useCallback(
     (runId: string) => {
-      const lastSeq = useRunStore.getState().eventsByRunId[runId]?.lastSeq ?? 0;
-      send({
-        id: makeFrameId("sub"),
-        type: "subscribe_run",
-        sent_at: new Date().toISOString(),
-        run_id: runId,
-        after_seq: lastSeq,
-        replay: { enabled: true, speed: "instant" },
-      });
+      send(buildSubscribeFrame(runId));
       subscribedRef.current.add(runId);
     },
     [send],
