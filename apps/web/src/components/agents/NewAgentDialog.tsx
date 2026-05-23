@@ -121,6 +121,11 @@ export function NewAgentDialog({ open, onClose, onCreated }: NewAgentDialogProps
     async (rowId: string) => {
       const target = state.cwdRows.find((r) => r.id === rowId);
       if (!target || !target.value.trim()) return;
+      // REVIEW-W5: snapshot the value being validated so a concurrent
+      // user edit during the in-flight request doesn't get a decision
+      // written under the new value. On resolution, we only write the
+      // decision if the row's current value still matches.
+      const validatedValue = target.value.trim();
       setState((prev) => ({
         ...prev,
         cwdRows: prev.cwdRows.map((r) =>
@@ -128,13 +133,21 @@ export function NewAgentDialog({ open, onClose, onCreated }: NewAgentDialogProps
         ),
       }));
       try {
-        const map = await allowlist.validateMany([target.value.trim()]);
-        const decision = map.get(target.value.trim()) ?? null;
+        const map = await allowlist.validateMany([validatedValue]);
+        const decision = map.get(validatedValue) ?? null;
         setState((prev) => ({
           ...prev,
-          cwdRows: prev.cwdRows.map((r) =>
-            r.id === rowId ? { ...r, decision, validating: false } : r,
-          ),
+          cwdRows: prev.cwdRows.map((r) => {
+            if (r.id !== rowId) return r;
+            // The user typed something new since we kicked off the
+            // probe — drop the stale decision so the renderer shows
+            // "not yet validated" against the new value rather than a
+            // misleading green-check from the old value.
+            if (r.value.trim() !== validatedValue) {
+              return { ...r, validating: false };
+            }
+            return { ...r, decision, validating: false };
+          }),
         }));
       } catch (e) {
         setState((prev) => ({
