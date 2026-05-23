@@ -12,19 +12,23 @@ export interface RightTabsProps {
 }
 
 export function RightTabs({ tabs }: RightTabsProps) {
+  const hasTabs = tabs.length > 0;
   return (
     <div className="tabs">
-      {tabs.map((t) => (
-        <div key={t.id} className={cn("tab", t.active && "tab--active")}>
-          <span>{t.label}</span>
-          {t.agentEditing ? (
-            <span className="tab__agent-mark" title="Agent editing" aria-hidden="true" />
-          ) : null}
+      {hasTabs ? (
+        tabs.map((t) => (
+          <div key={t.id} className={cn("tab", t.active && "tab--active")}>
+            <span>{t.label}</span>
+            {t.agentEditing ? (
+              <span className="tab__agent-mark" title="Agent editing" aria-hidden="true" />
+            ) : null}
+          </div>
+        ))
+      ) : (
+        <div className="flex items-center px-2.5 text-xs text-text-tertiary">
+          <span className="mono">No open files</span>
         </div>
-      ))}
-      <div className="ml-auto flex items-center px-2.5 text-xs text-text-tertiary">
-        <span className="mono">Placeholder</span>
-      </div>
+      )}
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { useRunStore } from "../../state/run-store.js";
 import type { CanonicalRunEvent } from "../../state/run-store.js";
 import { useUiStore } from "../../state/ui-store.js";
 import { CodeEditPreviewPanel } from "../streaming/CodeEditPreviewPanel.js";
-import { RightTabs } from "./RightTabs.js";
+import { RightTabs, type RightTab } from "./RightTabs.js";
 import { Breadcrumbs } from "./Breadcrumbs.js";
 
 export interface RightPaneProps {
@@ -21,22 +21,30 @@ export function RightPane({ activeRunId }: RightPaneProps) {
   const editEvents = codeEditEventsForRun(events);
   const activeEvent = selectedCodeEditEvent(events, selectedEventId);
   const payload = activeEvent ? parseCodeEditPayload(activeEvent.payload) : null;
-  const activePath = payload?.edits[0]?.path ?? "no-file-open";
-  const segments = activePath === "no-file-open" ? ["harness", "preview", activePath] : activePath.split("/");
+  const activePath = payload?.edits[0]?.path ?? null;
+
+  const tabs: RightTab[] = activeEvent && activePath
+    ? [
+        {
+          id: activeEvent.event_id,
+          label: activePath,
+          active: true,
+          agentEditing: editEvents.length > 0,
+        },
+      ]
+    : [];
+
+  const segments = activePath ? activePath.split("/") : [];
 
   return (
     <section className="right-pane">
-      <RightTabs
-        tabs={[
-          {
-            id: activeEvent?.event_id ?? "placeholder",
-            label: activePath,
-            active: true,
-            agentEditing: editEvents.length > 0,
-          },
-        ]}
-      />
-      <Breadcrumbs segments={segments} banner={editEvents.length > 0 ? "agent edit preview" : null} />
+      <RightTabs tabs={tabs} />
+      {segments.length > 0 ? (
+        <Breadcrumbs
+          segments={segments}
+          banner={editEvents.length > 0 ? "agent edit preview" : null}
+        />
+      ) : null}
       <div className="editor-area editor-area--preview">
         <CodeEditPreviewPanel runId={activeRunId} />
       </div>
