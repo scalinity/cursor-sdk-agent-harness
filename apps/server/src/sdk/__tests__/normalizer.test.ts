@@ -11,6 +11,7 @@ function ctx(overrides: Partial<RunContext> = {}): RunContext {
   return {
     runId: RUN_ID,
     agentId: AGENT_ID,
+    agentMode: "local",
     receivedAt: RECEIVED_AT,
     occurredAt: OCCURRED_AT,
     previousAssistantText: "",

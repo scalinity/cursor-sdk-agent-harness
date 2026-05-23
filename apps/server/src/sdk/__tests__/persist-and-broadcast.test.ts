@@ -60,7 +60,7 @@ describe("persist-and-broadcast pipeline", () => {
       run_id: runId,
       message: { role: "assistant", content: [{ type: "text", text: "hi" }] },
     };
-    pipeline.ingestSDKMessage({ raw: raw1, runId, agentId });
+    pipeline.ingestSDKMessage({ raw: raw1, runId, agentId, agentMode: "local" });
 
     const dbRows = events.getByRunIdAfterSeq(runId, 0);
     expect(dbRows).toHaveLength(1);
@@ -85,6 +85,7 @@ describe("persist-and-broadcast pipeline", () => {
         },
         runId,
         agentId,
+        agentMode: "local",
       });
     }
 
@@ -103,6 +104,7 @@ describe("persist-and-broadcast pipeline", () => {
       },
       runId,
       agentId,
+      agentMode: "local",
     });
     pipeline.ingestSDKMessage({
       raw: {
@@ -113,6 +115,7 @@ describe("persist-and-broadcast pipeline", () => {
       },
       runId,
       agentId,
+      agentMode: "local",
     });
     const rows = events.getByRunIdAfterSeq(runId, 0, 100);
     // The second event's payload should carry only the suffix delta.
@@ -136,6 +139,7 @@ describe("persist-and-broadcast pipeline", () => {
         },
         runId: "bogus-run",
         agentId,
+        agentMode: "local",
       });
     }).not.toThrow();
 
@@ -161,6 +165,7 @@ describe("persist-and-broadcast pipeline", () => {
       },
       runId,
       agentId,
+      agentMode: "local",
     });
     await new Promise((r) => setImmediate(r));
     const kinds = seen.map((e) => e.kind);
@@ -182,6 +187,7 @@ describe("persist-and-broadcast pipeline", () => {
       },
       runId,
       agentId,
+      agentMode: "local",
     });
     pipeline.dropRun(runId);
     pipeline.ingestSDKMessage({
@@ -193,6 +199,7 @@ describe("persist-and-broadcast pipeline", () => {
       },
       runId,
       agentId,
+      agentMode: "local",
     });
     // Without the drop, the second event would have been a "def" delta. With
     // the drop, it's a fresh delta of the entire string.

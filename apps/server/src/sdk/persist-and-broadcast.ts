@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
-import type { EventRow, SDKMessage } from "@harness/shared";
+import type { AgentMode, EventRow, SDKMessage } from "@harness/shared";
 import type { EventsRepo } from "../db/repositories/events.repo.js";
 import type { RunBus } from "../ws/run-bus.js";
 import { normalize, type RunContext } from "./normalizer.js";
@@ -26,6 +26,12 @@ export interface IngestArgs {
   raw: SDKMessage;
   runId: string;
   agentId: string;
+  /**
+   * Execution mode of the agent that produced the event. Forwarded into
+   * RunContext so the normalizer can stamp the correct mode on
+   * `system.init` (the SDK doesn't expose it on the wire).
+   */
+  agentMode: AgentMode;
   receivedAt?: string;
   /** Override the occurred_at timestamp; defaults to `receivedAt`. */
   occurredAt?: string;
@@ -67,6 +73,7 @@ export function createPersistAndBroadcast(
       const runContext: RunContext = {
         runId: args.runId,
         agentId: args.agentId,
+        agentMode: args.agentMode,
         receivedAt,
         occurredAt,
         previousAssistantText: buffer.assistantText,

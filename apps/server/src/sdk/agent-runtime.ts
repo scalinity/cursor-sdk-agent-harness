@@ -343,6 +343,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
           sink: createPipelineSink({
             runId: runRow.id,
             agentId: row.id,
+            agentMode: row.mode,
             pipeline: deps.pipeline,
             logger: deps.logger,
           }),
@@ -405,6 +406,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
 function createPipelineSink(args: {
   runId: string;
   agentId: string;
+  agentMode: "local" | "cloud";
   pipeline: PersistAndBroadcastPipeline;
   logger: FastifyBaseLogger;
 }): StreamSink {
@@ -427,6 +429,7 @@ function createPipelineSink(args: {
       raw,
       runId: args.runId,
       agentId: args.agentId,
+      agentMode: args.agentMode,
     });
   };
 }

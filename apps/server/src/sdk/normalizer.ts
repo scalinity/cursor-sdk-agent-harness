@@ -1,4 +1,5 @@
 import type {
+  AgentMode,
   EventSdkType,
   SDKMessage,
   ToolUseBlock,
@@ -24,6 +25,13 @@ import type {
 export interface RunContext {
   runId: string;
   agentId: string;
+  /**
+   * Execution mode of the owning agent. Threaded through from the
+   * agents row so `system.init` payloads carry the actual mode rather
+   * than a hardcoded literal — cloud-mode agents flow through the same
+   * sink and would otherwise be misclassified at persistence + replay.
+   */
+  agentMode: AgentMode;
   /** ISO timestamp the harness assigned when it received the SDK message. */
   receivedAt: string;
   /**
@@ -92,9 +100,10 @@ export function normalize(input: NormalizeInput): NormalizeOutput {
           ...(raw.model !== undefined ? { model: raw.model } : {}),
           ...(raw.tools !== undefined ? { tools: raw.tools } : {}),
           // `mode` is non-optional on the wire schema but the SDK doesn't
-          // expose it on the system message — default to "local" since cloud
-          // execution would have flowed through a different code path.
-          mode: "local",
+          // expose it on the system message — use the agent's persisted mode.
+          // Both local and cloud agents flow through this sink; hardcoding
+          // would mis-tag cloud runs in replay.
+          mode: runContext.agentMode,
         },
         raw,
         occurredAt: runContext.occurredAt,
