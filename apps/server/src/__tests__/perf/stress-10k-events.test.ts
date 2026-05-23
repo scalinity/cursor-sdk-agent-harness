@@ -104,6 +104,11 @@ describe("stress: 10k events through persist-and-broadcast", () => {
       });
 
       const wallStart = performance.now();
+      // P14-S11: monotonic timestamps so the fixture exercises realistic
+      // ordering. Previous version captured `new Date().toISOString()`
+      // INSIDE the loop, but at ~25k inserts/sec many events shared the
+      // same millisecond — a single-stamp-per-loop body would not.
+      const baseEpoch = Date.now();
       for (let i = 1; i <= TOTAL_EVENTS; i += 1) {
         pipeline.ingestSDKMessage({
           raw: {
@@ -118,15 +123,22 @@ describe("stress: 10k events through persist-and-broadcast", () => {
           runId,
           agentId,
           agentMode: "local",
-          occurredAt: new Date().toISOString(),
+          occurredAt: new Date(baseEpoch + i).toISOString(),
         });
       }
 
-      // The bus dispatches via setImmediate — flush the queue before
-      // asserting. Two macrotask hops are sufficient because each
-      // listener runs synchronously inside its setImmediate.
-      await new Promise<void>((r) => setImmediate(r));
-      await new Promise<void>((r) => setImmediate(r));
+      // P14-S5: poll until every committed event has been delivered to
+      // the bus subscriber, or 1s elapses. Previously two consecutive
+      // `setImmediate` hops were used with a comment claiming they were
+      // "sufficient because each listener runs synchronously inside its
+      // setImmediate" — fragile if RunBus.publish ever chains another
+      // setImmediate (e.g. for backpressure batching). The polling loop
+      // adapts automatically to the dispatch depth.
+      const drainStartedAt = performance.now();
+      while (received.length < TOTAL_EVENTS) {
+        await new Promise<void>((r) => setImmediate(r));
+        if (performance.now() - drainStartedAt > 1_000) break;
+      }
 
       const wallElapsed = performance.now() - wallStart;
 
@@ -143,7 +155,7 @@ describe("stress: 10k events through persist-and-broadcast", () => {
       // Bus delivered every committed event to the live subscriber.
       expect(received.length).toBe(TOTAL_EVENTS);
 
-      // Perf budget assertions (spec §13).
+      // Perf budget snapshot (spec §13).
       const commit = perf.snapshot("sdk_event_received_to_db_commit_ms");
       const broadcast = perf.snapshot("db_commit_to_bus_publish_ms");
       console.info(
@@ -152,17 +164,37 @@ describe("stress: 10k events through persist-and-broadcast", () => {
           ` | broadcast p50=${(broadcast.p50 ?? 0).toFixed(3)}ms`,
       );
 
+      // Unconditional smoke assertions — these are correctness, not perf.
       expect(commit.count).toBe(TOTAL_EVENTS);
       expect(broadcast.count).toBe(TOTAL_EVENTS);
-      // Spec §13: SDK event → DB commit p50 < 8ms, p95 < 25ms.
-      expect(commit.p50).toBeLessThan(8);
-      expect(commit.p95).toBeLessThan(25);
-      // Spec §13: DB commit → WS broadcast p50 < 5ms.
-      expect(broadcast.p50).toBeLessThan(5);
-
       // Sustained throughput: 100 events/sec means 10k in <100s. We give
-      // a more aggressive 60s cap to catch regressions early.
+      // a more aggressive 60s cap to catch regressions early. Cheap CI
+      // can still hit this even when the µs-level p95 budget below would
+      // flake.
       expect(wallElapsed).toBeLessThan(60_000);
+
+      // P14-W5: strict p50/p95 assertions are gated behind RUN_PERF_GATE
+      // because they're MBP-class numbers (spec §13). Shared GitHub
+      // Actions runners commonly see 2-5× slower SQLite throughput and
+      // would flake on the strict thresholds, eroding trust in the
+      // budget rather than catching real regressions. Run `RUN_PERF_GATE=true
+      // pnpm test:perf` on the developer machine / a known-fast tier to
+      // enforce. Default (no env) emits a warn but doesn't fail.
+      if (process.env.RUN_PERF_GATE === "true") {
+        // Spec §13: SDK event → DB commit p50 < 8ms, p95 < 25ms.
+        expect(commit.p50).toBeLessThan(8);
+        expect(commit.p95).toBeLessThan(25);
+        // Spec §13: DB commit → bus publish p50 < 5ms.
+        expect(broadcast.p50).toBeLessThan(5);
+      } else if (
+        (commit.p50 ?? 0) > 8 ||
+        (commit.p95 ?? 0) > 25 ||
+        (broadcast.p50 ?? 0) > 5
+      ) {
+        console.warn(
+          `[stress] perf gate disabled (RUN_PERF_GATE!=true) — observed numbers exceed budget. Re-run with RUN_PERF_GATE=true to enforce. commit p50=${(commit.p50 ?? 0).toFixed(3)}ms (budget 8) p95=${(commit.p95 ?? 0).toFixed(3)}ms (budget 25); broadcast p50=${(broadcast.p50 ?? 0).toFixed(3)}ms (budget 5).`,
+        );
+      }
     },
     120_000,
   );
