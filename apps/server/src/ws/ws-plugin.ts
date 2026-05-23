@@ -100,6 +100,17 @@ interface ConnectionState {
 interface RunSubscription {
   /** Returns true while replay is still flushing; false once live. */
   replaying: boolean;
+  /**
+   * Set to true by any code path that decides the subscription is
+   * over (backlog overflow, explicit unsubscribe arriving mid-replay,
+   * etc.). The listener checks at entry, runReplay checks after each
+   * page, and the post-replay drain+ack checks before sending the
+   * ack. This prevents (a) sending both an error AND a
+   * replay_complete ack for the same subscribe frame and (b) the
+   * already-snapshot bus listener delivering more queued events after
+   * unsubscribe.
+   */
+  aborted: boolean;
   /** Live events queued during replay; flushed when replay completes. */
   liveQueue: EventRow[];
   unsubscribe: () => void;
@@ -352,17 +363,23 @@ async function handleSubscribeRun(
   // and won't be lost in the gap between snapshot read and live attach.
   const subscription: RunSubscription = {
     replaying: true,
+    aborted: false,
     liveQueue: [],
     unsubscribe: () => {
       // populated below
     },
   };
   const unsubscribe = opts.bus.subscribe(frame.run_id, (event) => {
-    if (state.closed) return;
+    if (state.closed || subscription.aborted) return;
     if (subscription.replaying) {
       subscription.liveQueue.push(event);
       if (subscription.liveQueue.length > MAX_LIVE_BACKLOG) {
-        // Backpressure trigger — see MAX_LIVE_BACKLOG comment.
+        // Backpressure trigger — close THIS subscription only with
+        // `retryable: true` so the client resyncs from SQLite. Mark
+        // aborted so the post-replay drain + replay_complete ack at
+        // the bottom of this function bail out (otherwise we'd send
+        // contradictory error + ack frames for the same subscribe).
+        subscription.aborted = true;
         sendFrame(
           state,
           errorFrame(
@@ -386,6 +403,11 @@ async function handleSubscribeRun(
   state.subscriptions.set(frame.run_id, subscription);
 
   await runReplay(state, frame.run_id, frame.after_seq, opts);
+
+  // If the listener tripped the backlog guard mid-replay, the error
+  // frame has already gone out — don't follow it with a contradictory
+  // replay_complete ack and don't drain the abandoned queue.
+  if (subscription.aborted) return;
 
   // Drain any live events that arrived during replay BEFORE flipping the
   // subscription to live mode. Otherwise a race could deliver a live event
