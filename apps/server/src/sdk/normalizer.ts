@@ -133,50 +133,46 @@ export function normalize(input: NormalizeInput): NormalizeOutput {
     case "assistant": {
       const fullText = extractAssistantText(raw.message.content);
       const toolUses = extractToolUses(raw.message.content);
-      const { kind, textDelta, isReplacement, fullTextLength } =
-        deriveTextMode(runContext.previousAssistantText, fullText, {
-          deltaKind: "assistant.delta",
-          snapshotKind: "assistant.snapshot",
-        });
+      const derived = deriveTextMode(runContext.previousAssistantText, fullText, {
+        deltaKind: "assistant.delta",
+        snapshotKind: "assistant.snapshot",
+      });
       events.push({
         sdkType: "assistant",
-        kind,
+        kind: derived.kind,
         callId: null,
         requestId: null,
         status: null,
         payload: {
           role: "assistant" as const,
-          ...(textDelta !== null ? { text_delta: textDelta } : {}),
-          full_text_length: fullTextLength,
-          is_replacement: isReplacement,
+          ...(derived.textDelta !== null ? { text_delta: derived.textDelta } : {}),
+          full_text_length: derived.fullTextLength,
+          is_replacement: derived.isReplacement,
           tool_uses: toolUses,
         },
         raw,
         occurredAt: runContext.occurredAt,
         receivedAt: runContext.receivedAt,
       });
-      textBufferUpdates.assistantText = fullText;
+      textBufferUpdates.assistantText = derived.newBufferText;
       break;
     }
 
     case "thinking": {
-      const { kind, textDelta, isReplacement, fullTextLength } =
-        deriveTextMode(runContext.previousThinkingText, raw.text, {
-          deltaKind: "thinking.delta",
-          snapshotKind: "thinking.snapshot",
-        });
+      const derived = deriveTextMode(runContext.previousThinkingText, raw.text, {
+        deltaKind: "thinking.delta",
+        snapshotKind: "thinking.snapshot",
+      });
       events.push({
         sdkType: "thinking",
-        kind,
+        kind: derived.kind,
         callId: null,
         requestId: null,
         status: null,
         payload: {
-          // Wire schema requires text_delta; for a snapshot we send the full
-          // text and set is_replacement true so the client clears its buffer.
-          text_delta: textDelta ?? "",
-          full_text_length: fullTextLength,
-          is_replacement: isReplacement,
+          text_delta: derived.textDelta ?? "",
+          full_text_length: derived.fullTextLength,
+          is_replacement: derived.isReplacement,
           ...(raw.thinking_duration_ms !== undefined
             ? { thinking_duration_ms: raw.thinking_duration_ms }
             : {}),
@@ -185,7 +181,7 @@ export function normalize(input: NormalizeInput): NormalizeOutput {
         occurredAt: runContext.occurredAt,
         receivedAt: runContext.receivedAt,
       });
-      textBufferUpdates.thinkingText = raw.text;
+      textBufferUpdates.thinkingText = derived.newBufferText;
       break;
     }
 
@@ -339,6 +335,14 @@ interface DerivedTextMode {
   textDelta: string | null;
   isReplacement: boolean;
   fullTextLength: number;
+  /**
+   * F-005: text the caller should write back into the run-buffer so the
+   * NEXT message's `previous` reflects the cumulative text. The old code
+   * unconditionally overwrote the buffer with `fullText`, which truncated
+   * earlier text whenever the SDK sent per-message deltas (which it does
+   * — OQ-06 confirmed against @cursor/sdk@1.0.13).
+   */
+  newBufferText: string;
 }
 
 function deriveTextMode(
@@ -346,46 +350,49 @@ function deriveTextMode(
   current: string,
   kinds: { deltaKind: string; snapshotKind: string },
 ): DerivedTextMode {
-  const fullTextLength = current.length;
+  const _snapshotKind = kinds.snapshotKind;
+  void _snapshotKind; // kept in the API for callers that still reference it
   if (current.length === 0) {
-    // Empty payload — treat as a delta of zero length. This preserves the
-    // event in the timeline without claiming the buffer was replaced.
     return {
       kind: kinds.deltaKind,
       textDelta: null,
       isReplacement: false,
-      fullTextLength,
+      fullTextLength: previous.length,
+      newBufferText: previous,
     };
   }
-  // Prefix-match: the SDK never explicitly states whether assistant/thinking
-  // payloads are deltas or cumulative snapshots (OQ-06). If `current` starts
-  // with `previous`, treat the new content as the suffix — that's the safe
-  // append. Otherwise the SDK has rewritten the buffer (e.g. revised an
-  // earlier assistant block); emit a snapshot and let the client replace.
-  if (previous.length > 0 && current.startsWith(previous)) {
+  if (previous.length === 0) {
+    return {
+      kind: kinds.deltaKind,
+      textDelta: current,
+      isReplacement: false,
+      fullTextLength: current.length,
+      newBufferText: current,
+    };
+  }
+  // Cumulative-snapshot SDKs send "HEL" then "HELLO"; the suffix is the
+  // real new content.
+  if (current.startsWith(previous)) {
     const delta = current.slice(previous.length);
     return {
       kind: kinds.deltaKind,
       textDelta: delta,
       isReplacement: false,
-      fullTextLength,
+      fullTextLength: current.length,
+      newBufferText: current,
     };
   }
-  if (previous.length === 0) {
-    // First text observed for the run — emit it as a delta of the whole
-    // string. This matches `is_replacement: false` because there's nothing
-    // to replace yet.
-    return {
-      kind: kinds.deltaKind,
-      textDelta: current,
-      isReplacement: false,
-      fullTextLength,
-    };
-  }
+  // F-005 / OQ-06: @cursor/sdk@1.0.13 sends per-message deltas. The
+  // previous code treated this case as a snapshot-replacement, which
+  // silently dropped earlier text ("HEL" + "LO" rendered as "LO"
+  // instead of "HELLO"). Append instead — both this run's text and
+  // the cumulative buffer.
+  const merged = previous + current;
   return {
-    kind: kinds.snapshotKind,
+    kind: kinds.deltaKind,
     textDelta: current,
-    isReplacement: true,
-    fullTextLength,
+    isReplacement: false,
+    fullTextLength: merged.length,
+    newBufferText: merged,
   };
 }

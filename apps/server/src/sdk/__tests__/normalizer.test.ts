@@ -107,7 +107,7 @@ describe("normalize — discriminant coverage", () => {
     expect(out.textBufferUpdates.assistantText).toBe("Hello, world");
   });
 
-  it("emits an assistant.snapshot when the new text doesn't extend the previous one", () => {
+  it("treats a non-prefix assistant message as an append-delta (per-message SDK semantics, OQ-06)", () => {
     const raw: SDKMessage = {
       type: "assistant",
       agent_id: AGENT_ID,
@@ -121,11 +121,12 @@ describe("normalize — discriminant coverage", () => {
       raw,
       runContext: ctx({ previousAssistantText: "Hello" }),
     });
-    expect(out.events[0]?.kind).toBe("assistant.snapshot");
+    expect(out.events[0]?.kind).toBe("assistant.delta");
     expect(out.events[0]?.payload).toMatchObject({
       text_delta: "totally different content",
-      is_replacement: true,
+      is_replacement: false,
     });
+    expect(out.textBufferUpdates.assistantText).toBe("Hellototally different content");
   });
 
   it("extracts tool_uses from assistant content into the payload", () => {
@@ -188,10 +189,14 @@ describe("normalize — discriminant coverage", () => {
       } as SDKMessage,
       runContext: ctx({ previousThinkingText: "thought 1" }),
     });
-    expect(replacement.events[0]?.kind).toBe("thinking.snapshot");
+    expect(replacement.events[0]?.kind).toBe("thinking.delta");
     expect((replacement.events[0]?.payload as { is_replacement: boolean }).is_replacement).toBe(
-      true,
+      false,
     );
+    expect((replacement.events[0]?.payload as { text_delta: string }).text_delta).toBe(
+      "fresh thought",
+    );
+    expect(replacement.textBufferUpdates.thinkingText).toBe("thought 1fresh thought");
   });
 
   it("maps tool_call running/completed/error onto the right kinds", () => {
