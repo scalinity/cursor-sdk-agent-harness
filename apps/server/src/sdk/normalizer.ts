@@ -135,7 +135,6 @@ export function normalize(input: NormalizeInput): NormalizeOutput {
       const toolUses = extractToolUses(raw.message.content);
       const derived = deriveTextMode(runContext.previousAssistantText, fullText, {
         deltaKind: "assistant.delta",
-        snapshotKind: "assistant.snapshot",
       });
       events.push({
         sdkType: "assistant",
@@ -161,7 +160,6 @@ export function normalize(input: NormalizeInput): NormalizeOutput {
     case "thinking": {
       const derived = deriveTextMode(runContext.previousThinkingText, raw.text, {
         deltaKind: "thinking.delta",
-        snapshotKind: "thinking.snapshot",
       });
       events.push({
         sdkType: "thinking",
@@ -329,7 +327,7 @@ function extractToolUses(
   return out;
 }
 
-interface DerivedTextMode {
+export interface DerivedTextMode {
   kind: string;
   /** Suffix when delta, full text when snapshot, null when text is empty. */
   textDelta: string | null;
@@ -345,13 +343,11 @@ interface DerivedTextMode {
   newBufferText: string;
 }
 
-function deriveTextMode(
+export function deriveTextMode(
   previous: string,
   current: string,
-  kinds: { deltaKind: string; snapshotKind: string },
+  kinds: { deltaKind: string },
 ): DerivedTextMode {
-  const _snapshotKind = kinds.snapshotKind;
-  void _snapshotKind; // kept in the API for callers that still reference it
   if (current.length === 0) {
     return {
       kind: kinds.deltaKind,

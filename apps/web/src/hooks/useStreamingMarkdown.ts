@@ -72,14 +72,11 @@ export function useStreamingMarkdown(input: UseStreamingMarkdownInput): UseStrea
   );
   const lastTextRef = useRef("");
   const fallbackModeRef = useRef(false);
-  const generationRef = useRef(0);
   const [blocks, setBlocks] = useState<MarkdownBlock[]>([]);
   const [fallbackText, setFallbackText] = useState<string | null>(null);
   const { report } = useErrorReporter(`streaming-markdown-${scope.source}`);
 
   useEffect(() => {
-    generationRef.current += 1;
-    const generation = generationRef.current;
     fallbackModeRef.current = false;
     lastTextRef.current = "";
     projector.reset();
@@ -95,7 +92,6 @@ export function useStreamingMarkdown(input: UseStreamingMarkdownInput): UseStrea
       // Publishing synchronously preserves write order without breaking
       // the React commit (publishStreamingText is cheap — sets a Map
       // entry and notifies any current listeners).
-      if (generationRef.current !== generation) return;
       for (const block of nextBlocks) publishBlockText(scope, block);
     };
 
@@ -158,7 +154,6 @@ export function useStreamingMarkdown(input: UseStreamingMarkdownInput): UseStrea
     });
     return () => {
       unsubscribe();
-      generationRef.current += 1;
     };
   }, [projector, report, scope]);
 

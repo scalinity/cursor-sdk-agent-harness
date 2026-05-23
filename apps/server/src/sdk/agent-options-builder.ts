@@ -39,9 +39,21 @@ export class WorkspaceRejectedError extends Error {
  * dots and have no "fast" tier. Translate here at the boundary so the
  * harness schema, pricing keys, and settings rows can keep their
  * existing shapes (which carry the fast-vs-standard pricing distinction
- * for cost accounting). When the SDK schema stabilises, the harness
- * model IDs should be aligned to the SDK's literals and this map can
- * collapse.
+ * for cost accounting).
+ *
+ * Verified against: `@cursor/sdk@1.0.13` (May 2026).
+ *
+ * Upgrade triggers — revisit this map when ANY of the following change:
+ *   - `@cursor/sdk` ships a new model literal that the harness wants to
+ *     expose (add a new harness ID to `packages/shared/src/models.ts`
+ *     AND a translation here).
+ *   - `@cursor/sdk` renames an existing model literal (translation key
+ *     stays in the harness ID, value flips to the new SDK literal).
+ *   - The harness collapses its fast/standard pricing distinction —
+ *     drop the corresponding harness IDs and this map can shrink.
+ *
+ * See `docs/POST_BUILD_REVIEW.md` F-004 and the "Out of scope" follow-up
+ * about collapsing the harness schema.
  */
 const HARNESS_TO_SDK_MODEL_ID: Record<string, string> = {
   "composer-2-5-fast": "composer-2.5",
