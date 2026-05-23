@@ -19,6 +19,7 @@ import {
   WorkspaceRejectedError,
 } from "./agent-options-builder.js";
 import { ActiveRuns } from "./active-runs.js";
+import { LiveAgents } from "./live-agents.js";
 import { RunController, newRunId } from "./run-controller.js";
 import { createStubSink } from "./stream-stub.js";
 import type { SDKAgent, SdkAdapter } from "./sdk-adapter.js";
@@ -75,11 +76,12 @@ export interface AgentRuntime {
 
 export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
   const activeRuns = new ActiveRuns();
-  // Map of agentId → live SDK handle. We hold these for the lifetime of
-  // the process so `startRun` doesn't re-resume on every prompt. The Run
-  // Lifecycle spec (§4) is explicit: subsequent prompts to the same agent
-  // reuse the same durable agent handle.
-  const liveAgents = new Map<string, SDKAgent>();
+  // Bounded LRU cache of live SDK handles. We reuse a single SDKAgent
+  // across `startRun` calls (spec §4: "Subsequent prompts to the same
+  // agent reuse the same durable agent handle"). Bound prevents a
+  // long-running process that resumes many agents from leaking handles.
+  // See ./live-agents.ts for eviction policy.
+  const liveAgents = new LiveAgents({ logger: deps.logger });
 
   async function loadActiveAgent(row: AgentRow): Promise<SDKAgent> {
     const cached = liveAgents.get(row.id);
