@@ -23,6 +23,7 @@ import {
   cloudAgentOptionsSchema,
   MODEL_LABELS,
   modelIdSchema,
+  parseJsonWithSchema,
   type AgentMode,
   type CloudAgentOptions,
   type CreateAgentRequest,
@@ -185,22 +186,24 @@ export function NewAgentDialog({ open, onClose, onCreated }: NewAgentDialogProps
 
   const onCloudJsonBlur = useCallback(() => {
     setState((prev) => {
-      try {
-        const parsed = cloudAgentOptionsSchema.safeParse(JSON.parse(prev.cloudJsonText));
-        return {
-          ...prev,
-          cloudJsonError: parsed.success ? null : parsed.error.issues[0]?.message ?? "invalid",
-        };
-      } catch (e) {
-        return {
-          ...prev,
-          cloudJsonError: e instanceof Error ? e.message : "invalid JSON",
-        };
-      }
+      const { error } = parseJsonWithSchema(prev.cloudJsonText, cloudAgentOptionsSchema);
+      return { ...prev, cloudJsonError: error };
     });
   }, []);
 
-  const blockers = useMemo(() => collectBlockers(state), [state]);
+  // REVIEW-S3: derive the cloud parse outcome from the text once per
+  // render. `collectBlockers` reads this rather than re-parsing inline,
+  // so the parse runs once per state change instead of twice (blur +
+  // blockers memo).
+  const cloudParse = useMemo(
+    () =>
+      state.mode === "cloud"
+        ? parseJsonWithSchema(state.cloudJsonText, cloudAgentOptionsSchema)
+        : { value: null, error: null },
+    [state.mode, state.cloudJsonText],
+  );
+
+  const blockers = useMemo(() => collectBlockers(state, cloudParse), [state, cloudParse]);
 
   const submit = useCallback(async () => {
     if (blockers.length > 0) {
@@ -211,7 +214,7 @@ export function NewAgentDialog({ open, onClose, onCreated }: NewAgentDialogProps
       return;
     }
     setState((prev) => ({ ...prev, saving: true, formError: null }));
-    const payload = assemblePayload(state);
+    const payload = assemblePayload(state, cloudParse.value);
     if (!payload) {
       setState((prev) => ({
         ...prev,
@@ -232,7 +235,7 @@ export function NewAgentDialog({ open, onClose, onCreated }: NewAgentDialogProps
         formError: e instanceof Error ? e.message : "create failed",
       }));
     }
-  }, [blockers, state, createAgent, onCreated, onClose]);
+  }, [blockers, state, cloudParse.value, createAgent, onCreated, onClose]);
 
   if (!open) return null;
 
@@ -655,7 +658,10 @@ function SubagentsTab({
  * Aggregate every save-time problem so the dialog can show a single
  * banner. Empty array means "free to submit".
  */
-function collectBlockers(state: DialogState): string[] {
+function collectBlockers(
+  state: DialogState,
+  cloudParse: { value: CloudAgentOptions | null; error: string | null },
+): string[] {
   const issues: string[] = [];
   if (!state.name.trim()) issues.push("name");
   if (state.mode === "local") {
@@ -680,20 +686,17 @@ function collectBlockers(state: DialogState): string[] {
       issues.push("settingSources 'all' is mutually exclusive");
     }
   } else {
-    if (state.cloudJsonError) issues.push(`cloud options invalid: ${state.cloudJsonError}`);
-    try {
-      const parsed = cloudAgentOptionsSchema.safeParse(JSON.parse(state.cloudJsonText));
-      if (!parsed.success) {
-        issues.push(`cloud options invalid: ${parsed.error.issues[0]?.message ?? "shape mismatch"}`);
-      }
-    } catch (e) {
-      issues.push(`cloud options JSON parse error: ${e instanceof Error ? e.message : "?"}`);
-    }
+    // REVIEW-S3: read the pre-computed parse outcome instead of parsing
+    // again inline. Single source of truth for the cloud-options error.
+    if (cloudParse.error) issues.push(`cloud options invalid: ${cloudParse.error}`);
   }
   return issues;
 }
 
-function assemblePayload(state: DialogState): CreateAgentRequest | null {
+function assemblePayload(
+  state: DialogState,
+  cloudOptions: CloudAgentOptions | null,
+): CreateAgentRequest | null {
   if (state.mode === "local") {
     const cwd = state.cwdRows
       .map((r) => r.value.trim())
@@ -709,13 +712,12 @@ function assemblePayload(state: DialogState): CreateAgentRequest | null {
       subagentDefinitionIds: Array.from(state.selectedSubagentIds),
     };
   }
-  // Cloud
-  let cloudOptions: CloudAgentOptions;
-  try {
-    cloudOptions = cloudAgentOptionsSchema.parse(JSON.parse(state.cloudJsonText));
-  } catch {
-    return null;
-  }
+  // REVIEW-S3: cloud-options were parsed once at the call site (the
+  // `cloudParse` useMemo above). Callers must pass the parsed value;
+  // a null here means the parse failed and submit should have been
+  // blocked by `collectBlockers` — return null to surface the bug
+  // rather than re-parsing.
+  if (!cloudOptions) return null;
   return {
     name: state.name.trim(),
     mode: "cloud",

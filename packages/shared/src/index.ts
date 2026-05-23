@@ -2,6 +2,10 @@
 export { jsonValueSchema, safeParse, safeStringify } from "./json.js";
 export type { JsonValue } from "./json.js";
 
+// Shared JSON-text → schema parse helper (REVIEW-S4).
+export { parseJsonWithSchema } from "./parse-json-schema.js";
+export type { ParseJsonOutcome } from "./parse-json-schema.js";
+
 // Constants & primitives
 export {
   LARGE_PAYLOAD_THRESHOLD_BYTES,

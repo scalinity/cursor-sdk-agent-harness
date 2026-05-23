@@ -10,6 +10,7 @@
 import { useCallback, useMemo, useState } from "react";
 import {
   mcpServerConfigSchema,
+  parseJsonWithSchema,
   type CreateMcpServerRequest,
   type McpServerConfig,
   type McpServerSummary,
@@ -63,20 +64,9 @@ function containsRedactedSentinel(value: unknown): boolean {
   return false;
 }
 
+// REVIEW-S4: delegate to the shared parseJsonWithSchema helper.
 function tryParse(text: string): { value: McpServerConfig | null; error: string | null } {
-  try {
-    const json = JSON.parse(text) as unknown;
-    const parsed = mcpServerConfigSchema.safeParse(json);
-    if (!parsed.success) {
-      const issue = parsed.error.issues[0];
-      const where = issue ? issue.path.join(".") || "(root)" : "(root)";
-      const why = issue ? issue.message : "shape mismatch";
-      return { value: null, error: `${where}: ${why}` };
-    }
-    return { value: parsed.data, error: null };
-  } catch (e) {
-    return { value: null, error: e instanceof Error ? e.message : "invalid JSON" };
-  }
+  return parseJsonWithSchema(text, mcpServerConfigSchema);
 }
 
 /**
