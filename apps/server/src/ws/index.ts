@@ -6,4 +6,4 @@
 
 export { createRunBus, type RunBus, type RunBusListener } from "./run-bus.js";
 export { wsPlugin, type WsPluginOptions } from "./ws-plugin.js";
-export { buildServerFrame } from "./frame-builder.js";
+export { buildServerFrame, buildLargePayloadUrl } from "./frame-builder.js";

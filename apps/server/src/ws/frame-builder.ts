@@ -6,6 +6,20 @@ import {
 } from "@harness/shared";
 
 /**
+ * REST endpoint template for lazy large-payload fetch. Phase 10
+ * implements the route; we keep the template here next to its only
+ * current emitter so the contract stays in one place. When Phase 10
+ * adds the route, move this helper into a shared location (e.g.
+ * apps/server/src/routes/events.routes.ts) and import it back.
+ */
+export function buildLargePayloadUrl(
+  eventId: string,
+  field: "args" | "result" | "raw",
+): string {
+  return `/api/events/${eventId}/large-payload/${field}`;
+}
+
+/**
  * Convert a persisted canonical event row into a server-side WS frame. The
  * resulting frame is Zod-checked at the boundary in the WS plugin; the
  * shapes below are written defensively so the validator passes for every
@@ -248,8 +262,10 @@ function buildLargePayloadRefs(row: EventRow): {
   raw_event_url?: string;
 } {
   // Spec §4 "REST Endpoints → Events" exposes
-  // `/api/events/:eventId/large-payload/:field`. The field discriminator
-  // tells the route which JSON sub-tree to slice out.
+  // `/api/events/:eventId/large-payload/:field`. The field
+  // discriminator tells the route which JSON sub-tree to slice out.
+  // URL template lives in buildLargePayloadUrl above so Phase 10's
+  // route definition can share the exact format.
   const refs: {
     args_event_url?: string;
     result_event_url?: string;
@@ -257,13 +273,13 @@ function buildLargePayloadRefs(row: EventRow): {
   } = {};
   const payload = row.payload as { args?: unknown; result?: unknown };
   if (payload.args !== undefined) {
-    refs.args_event_url = `/api/events/${row.id}/large-payload/args`;
+    refs.args_event_url = buildLargePayloadUrl(row.id, "args");
   }
   if (payload.result !== undefined) {
-    refs.result_event_url = `/api/events/${row.id}/large-payload/result`;
+    refs.result_event_url = buildLargePayloadUrl(row.id, "result");
   }
   if (row.raw !== null) {
-    refs.raw_event_url = `/api/events/${row.id}/large-payload/raw`;
+    refs.raw_event_url = buildLargePayloadUrl(row.id, "raw");
   }
   return refs;
 }
