@@ -108,16 +108,36 @@ export function useRunHealth(runId: string | null): UseRunHealthResult {
     runId ? (s.byId[runId] ?? null) : null,
   );
 
+  // RV2-W7: collect the running-tool timing snapshot keyed ONLY on
+  // events. Re-running on every 2s tick was O(events.length) per
+  // tick per caller; long runs paid for it twice per second. Now the
+  // O(N) walk only re-runs when `events` itself changes. The tick-
+  // bound memo below derives elapsed-ms from this snapshot in
+  // O(running calls).
+  const runningTiming = useMemo(() => {
+    if (!events || events.length === 0) return {};
+    const all = collectToolCallTiming(events);
+    const running: Record<string, { startedAt: string }> = {};
+    for (const [callId, t] of Object.entries(all)) {
+      if (!t.completed) running[callId] = { startedAt: t.startedAt };
+    }
+    return running;
+  }, [events]);
+
+  const lastReceivedAt = useMemo(() => {
+    if (!events || events.length === 0) return null;
+    const last = events[events.length - 1];
+    return last ? last.received_at : null;
+  }, [events]);
+
   return useMemo(() => {
     void tick; // recompute on every tick
     const now = externalNowMs();
-    if (!runId || !events || events.length === 0) {
+    if (!runId) {
       return { toolCallHealth: {}, runStalled: false, msSinceLastEvent: null };
     }
-    const timing = collectToolCallTiming(events);
     const toolCallHealth: Record<string, ToolCallHealth> = {};
-    for (const [callId, t] of Object.entries(timing)) {
-      if (t.completed) continue;
+    for (const [callId, t] of Object.entries(runningTiming)) {
       const startMs = Date.parse(t.startedAt);
       if (Number.isNaN(startMs)) continue;
       const elapsed = Math.max(0, now - startMs);
@@ -130,19 +150,22 @@ export function useRunHealth(runId: string | null): UseRunHealthResult {
       };
     }
 
-    const last = events[events.length - 1];
-    const lastEventMs = last ? Date.parse(last.received_at) : NaN;
+    const lastEventMs = lastReceivedAt ? Date.parse(lastReceivedAt) : NaN;
     const msSinceLastEvent = Number.isNaN(lastEventMs)
       ? null
       : Math.max(0, now - lastEventMs);
 
+    // RV2-S3: only CREATING/RUNNING runs can be "stalled". A null
+    // status means we have no info yet (e.g. summary not loaded) —
+    // treat that as not stalled rather than potentially showing a
+    // banner for a run we've never seen status for.
     const status = runRecord?.status ?? null;
-    const isActive = status === "CREATING" || status === "RUNNING" || status === null;
+    const isActive = status === "CREATING" || status === "RUNNING";
     const runStalled =
       isActive && msSinceLastEvent !== null && msSinceLastEvent > RUN_STALLED_MS;
 
     return { toolCallHealth, runStalled, msSinceLastEvent };
-  }, [tick, runId, events, runRecord]);
+  }, [tick, runId, runningTiming, lastReceivedAt, runRecord]);
 }
 
 export const RUN_HEALTH_THRESHOLDS = {
