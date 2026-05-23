@@ -67,7 +67,13 @@ export interface McpValidatorOptions {
   spawnImpl?: typeof spawn;
 }
 
-const DEFAULT_TIMEOUT_MS = 3000;
+/**
+ * REVIEW-S2: exported so the route layer resolves `MCP_PROBE_TIMEOUT_MS`
+ * against the same default the validator itself uses, instead of
+ * duplicating the literal.
+ */
+export const DEFAULT_PROBE_TIMEOUT_MS = 3000;
+const DEFAULT_TIMEOUT_MS = DEFAULT_PROBE_TIMEOUT_MS;
 
 /**
  * Probe an MCP server configuration once.
@@ -223,10 +229,17 @@ async function probeStdio(
     });
 
     child.on("exit", (code, signal) => {
+      // REVIEW-S1: persist only the first line of stderr, bounded length.
+      // Custom MCP binaries may write paths or credentials to stderr; a
+      // multi-line dump in last_status / validation_message is a surface
+      // we don't need. Full stderr is still observable via process logs
+      // at debug verbosity.
+      const firstStderrLine = stderr.split(/\r?\n/, 1)[0] ?? "";
+      const truncated = firstStderrLine.slice(0, 200);
       const detail =
         signal !== null
           ? `terminated by ${signal}`
-          : `exit ${code ?? "unknown"}${stderr ? `; stderr: ${stderr.slice(0, 200)}` : ""}`;
+          : `exit ${code ?? "unknown"}${truncated ? `; stderr: ${truncated}` : ""}`;
       resolveOnce({
         status: "valid",
         transport,

@@ -11,6 +11,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import type { z } from "zod";
 import type { McpServersRepo } from "../db/repositories/mcp-servers.repo.js";
 import {
+  DEFAULT_PROBE_TIMEOUT_MS,
   redactMcpConfig,
   validateMcpServerConfig,
   type McpValidationResult,
@@ -139,16 +140,20 @@ export async function registerMcpServersRoutes(
   app: FastifyInstance,
   deps: McpServersRoutesDeps,
 ): Promise<void> {
+  // REVIEW-S2: prefer the env override, otherwise pin to the validator's
+  // exported default so changing one place can't silently diverge from
+  // the other.
+  const envTimeout = process.env.MCP_PROBE_TIMEOUT_MS
+    ? Number.parseInt(process.env.MCP_PROBE_TIMEOUT_MS, 10)
+    : undefined;
   const probeTimeoutMs =
     deps.probeTimeoutMs ??
-    (process.env.MCP_PROBE_TIMEOUT_MS
-      ? Number.parseInt(process.env.MCP_PROBE_TIMEOUT_MS, 10)
-      : undefined);
+    (envTimeout !== undefined && Number.isFinite(envTimeout)
+      ? envTimeout
+      : DEFAULT_PROBE_TIMEOUT_MS);
   const validate = deps.validatorOverride ?? validateMcpServerConfig;
   const probeOptions: McpValidatorOptions = {
-    ...(probeTimeoutMs !== undefined && Number.isFinite(probeTimeoutMs)
-      ? { timeoutMs: probeTimeoutMs }
-      : {}),
+    timeoutMs: probeTimeoutMs,
   };
 
   /**
