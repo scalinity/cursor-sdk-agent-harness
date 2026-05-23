@@ -139,13 +139,10 @@ export class RunController {
       return "unavailable";
     }
     // The SDK should emit a CANCELLED status event next; the consume loop
-    // picks it up and persists the row. Belt-and-braces: also stamp it
-    // here in case the SDK swallows the status frame.
-    this.init.runsRepo.setInterrupted(
-      this.runId,
-      reason,
-      reason === "user_cancelled" ? null : reason,
-    );
+    // picks it up. Belt-and-braces: stamp CANCELLED here too via the
+    // dedicated setter — `setInterrupted` would write status='ERROR',
+    // which is the wrong terminal state for a successful user cancel.
+    this.init.runsRepo.setCancelled(this.runId, reason);
     return "cancelled";
   }
 

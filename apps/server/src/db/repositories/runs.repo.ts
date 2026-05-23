@@ -199,6 +199,32 @@ export class RunsRepo {
   }
 
   /**
+   * Mark a non-terminal run as CANCELLED in response to a verified SDK
+   * cancellation (e.g. `Run.cancel()` resolved). Distinct from
+   * `setInterrupted` because the latter writes `status='ERROR'` and is
+   * reserved for error-y interruption (stream errors, server crash
+   * recovery). No-op when the run is already in a terminal status.
+   *
+   * Spec §11 cancellation contract step 5–6: the harness sets CANCELLED
+   * only when the SDK confirms it — this method is the write path for that
+   * confirmation.
+   */
+  setCancelled(id: string, reason: string): void {
+    const now = isoNow();
+    this.raw
+      .prepare(
+        `UPDATE runs
+            SET status = 'CANCELLED',
+                interrupted_reason = ?,
+                updated_at = ?,
+                finished_at = COALESCE(finished_at, ?)
+          WHERE id = ?
+            AND status IN ('CREATING', 'RUNNING')`,
+      )
+      .run(reason, now, now, id);
+  }
+
+  /**
    * Mark a non-terminal run as ERROR with the supplied interruption reason.
    * No-op when the run is already in a terminal status (FINISHED/ERROR/
    * CANCELLED/EXPIRED) — see spec §11 Mid-run Server Crash Recovery: the
