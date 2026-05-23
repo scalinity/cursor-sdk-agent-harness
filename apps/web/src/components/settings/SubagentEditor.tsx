@@ -27,9 +27,21 @@ interface EditorState {
   selectedMcpIds: Set<string>;
   saving: boolean;
   error: string | null;
+  /**
+   * REVIEW-W6: when the existing model id is NOT in this build's
+   * `modelIdSchema` (e.g. persisted by a future SDK or another tool),
+   * we preserve it here so the user can keep using it instead of being
+   * silently downgraded to the harness default. The override picker is
+   * locked in this case to avoid an accidental overwrite.
+   */
+  unknownModelId: string | null;
 }
 
 function initialState(existing: SubagentSummary | null): EditorState {
+  const hasOverride = existing?.model !== null && existing?.model !== undefined;
+  const overrideId = hasOverride && existing?.model ? existing.model.id : null;
+  const overrideIsKnown =
+    overrideId !== null && modelIdSchema.safeParse(overrideId).success;
   return {
     name: existing?.name ?? "",
     description: existing?.description ?? "",
@@ -37,9 +49,10 @@ function initialState(existing: SubagentSummary | null): EditorState {
     enabled: existing?.enabled ?? true,
     modelInherit: existing ? existing.model === null : true,
     modelId:
-      existing?.model && modelIdSchema.safeParse(existing.model.id).success
-        ? (existing.model.id as ModelId)
+      overrideIsKnown && overrideId !== null
+        ? (overrideId as ModelId)
         : "composer-2-5-fast",
+    unknownModelId: hasOverride && !overrideIsKnown ? overrideId : null,
     selectedMcpIds: new Set(existing?.mcpServerIds ?? []),
     saving: false,
     error: null,
@@ -88,12 +101,19 @@ export function SubagentEditor({ existing, open, mcpServers, onClose, onSaved }:
       return;
     }
     setState((prev) => ({ ...prev, saving: true, error: null }));
+    // REVIEW-W6: preserve the unknown model id if the user kept "Override"
+    // selected without picking a known id from the dropdown. The dropdown
+    // is locked in that case so any explicit selection (which clears
+    // `unknownModelId`) wins; otherwise we round-trip the original value
+    // instead of silently downgrading to the harness default.
+    const overrideId =
+      state.unknownModelId !== null ? state.unknownModelId : state.modelId;
     const payload: CreateSubagentRequest = {
       name: state.name.trim(),
       description: state.description.trim(),
       prompt: state.prompt,
       enabled: state.enabled,
-      model: state.modelInherit ? null : { id: state.modelId },
+      model: state.modelInherit ? null : { id: overrideId },
       mcpServerIds: Array.from(state.selectedMcpIds),
     };
     try {
@@ -180,13 +200,14 @@ export function SubagentEditor({ existing, open, mcpServers, onClose, onSaved }:
             />
             <span>Override:</span>
             <select
-              disabled={state.modelInherit}
+              disabled={state.modelInherit || state.unknownModelId !== null}
               className="h-control-md rounded-sm border border-border-subtle bg-surface-2 px-2 text-sm"
               value={state.modelId}
               onChange={(e) =>
                 setState((prev) => ({
                   ...prev,
                   modelId: e.currentTarget.value as ModelId,
+                  unknownModelId: null,
                 }))
               }
             >
@@ -197,6 +218,13 @@ export function SubagentEditor({ existing, open, mcpServers, onClose, onSaved }:
               ))}
             </select>
           </label>
+          {state.unknownModelId !== null ? (
+            <p className="mt-1 text-xs text-warning">
+              Existing model id <code className="font-mono">{state.unknownModelId}</code>{" "}
+              is not in this build&apos;s known list. Saving keeps it as-is. Pick a known
+              id from the dropdown above to replace it.
+            </p>
+          ) : null}
         </fieldset>
 
         <label className="flex flex-col gap-1">
