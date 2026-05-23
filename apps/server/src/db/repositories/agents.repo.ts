@@ -174,4 +174,32 @@ export class AgentsRepo {
   delete(id: string): void {
     this.raw.prepare("DELETE FROM agents WHERE id = ?").run(id);
   }
+
+  /**
+   * Atomically swap an agent's durable id. Used by AgentRuntime.create when
+   * the SDK rotates the agentId after `Agent.create(...)` resolves. The
+   * delete+insert pair runs inside a single `db.transaction(...)` so a
+   * failed re-insert leaves the original row intact rather than losing the
+   * record entirely.
+   *
+   * The new row preserves every field from `input` so the caller (which
+   * has the SDK-confirmed shape) is the single source of truth.
+   *
+   * Throws if the new id already exists (UNIQUE collision) — the
+   * transaction rolls back automatically.
+   */
+  swapId(oldId: string, input: CreateAgentInput & { id: string }): AgentRow {
+    const swap = this.raw.transaction((next: CreateAgentInput & { id: string }) => {
+      this.raw.prepare("DELETE FROM agents WHERE id = ?").run(oldId);
+      this.create(next);
+    });
+    swap(input);
+    const row = this.getById(input.id);
+    if (!row) {
+      throw new Error(
+        `AgentsRepo.swapId: replacement row not found after swap id=${input.id}`,
+      );
+    }
+    return row;
+  }
 }

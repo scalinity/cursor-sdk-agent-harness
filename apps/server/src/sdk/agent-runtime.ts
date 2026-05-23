@@ -6,7 +6,7 @@ import type {
   CreateAgentRequest,
   CreateRunResponse,
 } from "@harness/shared";
-import type { AgentsRepo } from "../db/repositories/agents.repo.js";
+import type { AgentsRepo, CreateAgentInput } from "../db/repositories/agents.repo.js";
 import type { McpServersRepo } from "../db/repositories/mcp-servers.repo.js";
 import type { RunsRepo } from "../db/repositories/runs.repo.js";
 import type { SubagentDefinitionsRepo } from "../db/repositories/subagents.repo.js";
@@ -119,13 +119,15 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
   return {
     async create(input: CreateAgentRequest): Promise<AgentRow> {
       const apiKey = await mustApiKey();
-      // Phase 5 wrote the workspace policy; we re-use it via the options
-      // builder. Persist the row in `creating` first, then call the SDK,
-      // then flip to `active`. On failure we mark it `error` so the picker
-      // can surface the problem rather than dropping the record.
-      const initialRow = deps.agentsRepo.create({
+      // Persist-before-SDK pattern: insert the row as `creating` first, then
+      // call the SDK, then flip to `active`. On failure we mark `error` so
+      // the picker can surface the problem rather than dropping the record.
+      const createArgs = (
+        overrides: { id?: string; status: "creating" | "active" },
+      ): CreateAgentInput => ({
+        ...(overrides.id !== undefined ? { id: overrides.id } : {}),
         name: input.name,
-        status: "creating",
+        status: overrides.status,
         mode: input.mode,
         modelId: input.modelId,
         cwd: input.cwd ?? null,
@@ -135,6 +137,8 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
         mcpServerIds: input.mcpServerIds,
         subagentDefinitionIds: input.subagentDefinitionIds,
       });
+
+      const initialRow = deps.agentsRepo.create(createArgs({ status: "creating" }));
       let options: Awaited<ReturnType<typeof buildAgentOptions>>;
       try {
         options = await buildAgentOptions({
@@ -151,35 +155,18 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
 
       try {
         const handle = await deps.sdk.createAgent(options);
-        // The SDK is authoritative about its agentId. If it returned a
-        // different one (e.g. SDK overrode our `agentId` field), keep the
-        // SDK's value as the durable ID by deleting the temp row and
-        // re-inserting under the correct id.
         if (handle.agentId !== initialRow.id) {
-          deps.agentsRepo.delete(initialRow.id);
-          const replaced = deps.agentsRepo.create({
+          // The SDK rotated our durable id. Swap atomically — `swapId`
+          // wraps delete+insert in db.transaction so a failed re-insert
+          // leaves the original row intact for inspection rather than
+          // losing the record entirely.
+          const replaced = deps.agentsRepo.swapId(initialRow.id, {
+            ...createArgs({ id: handle.agentId, status: "active" }),
             id: handle.agentId,
-            name: input.name,
-            status: "active",
-            mode: input.mode,
-            modelId: input.modelId,
-            cwd: input.cwd ?? null,
-            settingSources: input.settingSources ?? null,
-            sandboxEnabled: input.sandboxEnabled ?? null,
-            cloudOptions: input.cloudOptions ?? null,
-            mcpServerIds: input.mcpServerIds,
-            subagentDefinitionIds: input.subagentDefinitionIds,
           });
           deps.agentsRepo.updateLastActiveAt(replaced.id);
           liveAgents.set(replaced.id, handle);
-          const final = deps.agentsRepo.getById(replaced.id);
-          if (!final) {
-            throw new AgentRuntimeError(
-              "AGENT_NOT_FOUND",
-              `Inserted agent vanished id=${replaced.id}`,
-            );
-          }
-          return final;
+          return replaced;
         }
         deps.agentsRepo.updateStatus(initialRow.id, "active");
         deps.agentsRepo.updateLastActiveAt(initialRow.id);
@@ -193,6 +180,9 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
         }
         return final;
       } catch (err) {
+        // The swap above is transactional, so on swap failure the original
+        // row is still present and this updateStatus succeeds. On any
+        // other SDK failure, the initial row is also present.
         deps.agentsRepo.updateStatus(initialRow.id, "error", err);
         if (err instanceof AgentRuntimeError) throw err;
         throw new AgentRuntimeError(
