@@ -29,7 +29,6 @@ interface EditorState {
   name: string;
   enabled: boolean;
   configText: string;
-  parsedConfig: McpServerConfig | null;
   configError: string | null;
   formError: string | null;
   saving: boolean;
@@ -42,7 +41,6 @@ function blankState(): EditorState {
     name: "",
     enabled: true,
     configText: JSON.stringify(initial, null, 2),
-    parsedConfig: null,
     configError: null,
     formError: null,
     saving: false,
@@ -111,10 +109,9 @@ export function McpServerEditor({ existing, open, onClose, onSaved }: McpServerE
 
   const onConfigBlur = useCallback(() => {
     setState((prev) => {
-      const { value, error } = tryParse(prev.configText);
+      const { error } = tryParse(prev.configText);
       return {
         ...prev,
-        parsedConfig: value,
         configError: error,
       };
     });
@@ -128,7 +125,6 @@ export function McpServerEditor({ existing, open, onClose, onSaved }: McpServerE
         ...prev,
         revealedRaw: true,
         configText: JSON.stringify(revealed.config, null, 2),
-        parsedConfig: revealed.config,
         configError: null,
       }));
     } catch (e) {
@@ -286,12 +282,11 @@ export function McpServerEditor({ existing, open, onClose, onSaved }: McpServerE
 function initialEditorState(existing: McpServerSummary | null): EditorState {
   if (!existing) return blankState();
   const text = JSON.stringify(existing.configRedacted, null, 2);
-  const { value, error } = tryParse(text);
+  const { error } = tryParse(text);
   return {
     name: existing.name,
     enabled: existing.enabled,
     configText: text,
-    parsedConfig: value,
     configError: error,
     formError: null,
     saving: false,
