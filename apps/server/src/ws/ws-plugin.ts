@@ -837,7 +837,14 @@ async function handleApprovalResponse(
  * Find the pending `request.created` event for a (runId, requestId).
  * Returns the agentId so the synthetic outcome event can be appended
  * with the correct foreign key. A `null` result means no matching
- * request exists, which the WS plugin maps to `APPROVAL_NOT_PENDING`.
+ * request exists OR an outcome already landed; both surface to the
+ * WS client as `APPROVAL_NOT_PENDING`.
+ *
+ * RV2-W3: switched from `events.getAllByRunId(runId)` + JS .some() to
+ * an indexed `getRequestState(runId, requestId)` query keyed on the
+ * existing partial index `idx_events_request_id`. Cost per approval
+ * is now O(1) under a hostile workload (or any long run) instead of
+ * O(events.length) plus per-row JSON.parse in `rowToDomain`.
  */
 function findPendingRequest(
   opts: WsPluginOptions,
@@ -846,24 +853,10 @@ function findPendingRequest(
 ): { agentId: string } | null {
   const run = opts.runs.getById(runId);
   if (!run) return null;
-  // Walk the run's events for a matching `request.created`. This is a
-  // small scan in practice — runs have at most a handful of pending
-  // requests at once — and avoids adding a dedicated query path. If a
-  // later phase grows pending requests, switch to an indexed lookup.
-  const rows = opts.events.getAllByRunId(runId);
-  for (const row of rows) {
-    if (row.kind === "request.created" && row.requestId === requestId) {
-      // Confirm this request hasn't already been resolved / failed.
-      const alreadyDone = rows.some(
-        (r) =>
-          r.requestId === requestId &&
-          (r.kind === "approval.resolved" || r.kind === "approval.failed"),
-      );
-      if (alreadyDone) return null;
-      return { agentId: row.agentId };
-    }
-  }
-  return null;
+  const state = opts.events.getRequestState(runId, requestId);
+  if (!state) return null;
+  if (state.hasOutcome) return null;
+  return { agentId: state.agentId };
 }
 
 function ackFrame(

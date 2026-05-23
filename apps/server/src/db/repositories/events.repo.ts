@@ -223,6 +223,53 @@ export class EventsRepo {
     return rows.map(rowToDomain);
   }
 
+  /**
+   * RV2-W3: focused lookup for the WS approval handler. Replaces a
+   * full `getAllByRunId(runId)` + JS scan with a bounded indexed
+   * query against `idx_events_request_id` (partial index on
+   * `request_id IS NOT NULL`).
+   *
+   * Returns the originating `request.created` event's `agent_id` and
+   * whether an outcome (`approval.resolved` / `approval.failed`)
+   * already landed. The caller (`findPendingRequest`) routes:
+   *   - `null` → no matching `request.created` row → APPROVAL_NOT_PENDING.
+   *   - `{ hasOutcome: true }` → already resolved → APPROVAL_NOT_PENDING.
+   *   - `{ hasOutcome: false }` → admit the approval.
+   *
+   * Only `(kind, agent_id)` is selected — payloads stay in the
+   * database. Typical row count is 1–3 (request + at most one
+   * outcome), so the in-JS pass over the result is O(1) for the
+   * usable case.
+   */
+  getRequestState(
+    runId: string,
+    requestId: string,
+  ): { agentId: string; hasOutcome: boolean } | null {
+    const rows = this.raw
+      .prepare(
+        `SELECT kind, agent_id
+           FROM events
+          WHERE run_id = ?
+            AND request_id = ?
+            AND kind IN ('request.created', 'approval.resolved', 'approval.failed')`,
+      )
+      .all(runId, requestId) as Array<{ kind: string; agent_id: string }>;
+    let requestRow: { agent_id: string } | null = null;
+    let hasOutcome = false;
+    for (const row of rows) {
+      if (row.kind === "request.created") {
+        requestRow = row;
+      } else if (
+        row.kind === "approval.resolved" ||
+        row.kind === "approval.failed"
+      ) {
+        hasOutcome = true;
+      }
+    }
+    if (!requestRow) return null;
+    return { agentId: requestRow.agent_id, hasOutcome };
+  }
+
   getByRunIdRange(
     runId: string,
     options: { fromSeq?: number; toSeq?: number; limit?: number; direction?: "asc" | "desc" } = {},
