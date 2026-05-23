@@ -98,9 +98,11 @@ export type {
 export {
   agentRowSchema,
   canonicalEventBaseSchema,
+  canonicalEventKindSchema,
   eventRowSchema,
   eventSdkTypeSchema,
   mcpServerRowSchema,
+  NON_BROADCAST_EVENT_KINDS,
   runInterruptedReasonSchema,
   runRowSchema,
   settingRowSchema,
@@ -110,6 +112,7 @@ export {
 export type {
   AgentRow,
   CanonicalEventBase,
+  CanonicalEventKind,
   EventRow,
   EventSdkType,
   McpServerRow,

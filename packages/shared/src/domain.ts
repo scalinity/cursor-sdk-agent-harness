@@ -89,6 +89,51 @@ export const eventSdkTypeSchema = z.enum([
 ]);
 export type EventSdkType = z.infer<typeof eventSdkTypeSchema>;
 
+/**
+ * Closed enum of every canonical event `kind` the harness emits. Used
+ * by the WS frame builder for an exhaustiveness check — switching on
+ * this union forces the TypeScript compiler to flag any added kind
+ * that doesn't have a frame-builder branch (otherwise a new event
+ * would silently fall through to `return null` and never broadcast).
+ *
+ * `system.unknown_sdk_message` is a forensic-only kind: rows persist
+ * for inspectors but the frame-builder intentionally returns null for
+ * it so live UIs aren't exposed to unknown shapes (see RV-5).
+ *
+ * The DB `events.kind` column has NO CHECK constraint — anything can
+ * land in a row. The literal list here is the harness-side contract;
+ * a future Phase 10/12/13 that adds a new kind MUST update this list
+ * so the frame-builder's exhaustiveness check picks it up.
+ */
+export const canonicalEventKindSchema = z.enum([
+  "system.init",
+  "system.unknown_sdk_message",
+  "user.message",
+  "assistant.delta",
+  "assistant.snapshot",
+  "thinking.delta",
+  "thinking.snapshot",
+  "tool_call.running",
+  "tool_call.completed",
+  "tool_call.error",
+  "status.changed",
+  "task.updated",
+  "request.created",
+  "code_edit.detected",
+  "run.final_result",
+  "run.interrupted",
+]);
+export type CanonicalEventKind = z.infer<typeof canonicalEventKindSchema>;
+
+/**
+ * Subset of canonical kinds that are NOT broadcast over WS. The
+ * frame-builder uses this to return null without logging — silent
+ * non-broadcast is the intended behaviour for these kinds.
+ */
+export const NON_BROADCAST_EVENT_KINDS: ReadonlySet<CanonicalEventKind> = new Set([
+  "system.unknown_sdk_message",
+]);
+
 export const canonicalEventBaseSchema = z.object({
   event_id: eventIdSchema,
   schema_version: z.literal(SCHEMA_VERSION),

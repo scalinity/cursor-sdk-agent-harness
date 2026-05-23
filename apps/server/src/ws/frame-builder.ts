@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
+  type CanonicalEventKind,
   type EventRow,
   LARGE_PAYLOAD_THRESHOLD_BYTES,
+  NON_BROADCAST_EVENT_KINDS,
   type ServerFrame,
 } from "@harness/shared";
 
@@ -62,6 +64,19 @@ export function buildServerFrame(
   // on the wire.
   const replayedFlag = opts.replayed === true ? { replayed: true } : {};
 
+  // Forensic-only kinds (e.g. system.unknown_sdk_message): row
+  // persists but does not broadcast. Returning null is intentional;
+  // the caller's frame validator does NOT log this branch.
+  if (NON_BROADCAST_EVENT_KINDS.has(row.kind as CanonicalEventKind)) {
+    return null;
+  }
+
+  // The switch below uses string-based discrimination for per-frame
+  // type narrowing. The `default` branch contains an exhaustiveness
+  // assertion against CanonicalEventKind: adding a new kind to the
+  // shared schema without a `case` here will fail the typecheck on
+  // the `_exhaustive: never` assignment rather than silently dropping
+  // every event of the new kind via `return null`.
   switch (row.kind) {
     case "system.init":
       return {
@@ -213,10 +228,60 @@ export function buildServerFrame(
         },
       };
     default:
-      // Unknown kind — drop on the floor. The DB still has the row so an
-      // inspector can fetch the raw shape; we don't risk an invalid frame
-      // crashing the live socket.
+      // Unknown kind — drop on the floor (the DB still has the row
+      // for inspection) but call out the drift. If you see this log
+      // and `row.kind` is a known CanonicalEventKind, the switch
+      // above is missing a case. If it's truly unknown, the
+      // normalizer wrote a kind that isn't in the shared schema.
+      assertKindIsKnown(row.kind);
       return null;
+  }
+}
+
+/**
+ * Compile-time + runtime check that every `kind` we ever emit has a
+ * corresponding frame-builder case. The KNOWN_KINDS const is typed
+ * as `Record<CanonicalEventKind, true>` so TypeScript fails the
+ * typecheck if a new CanonicalEventKind is added without an entry
+ * here — which is the prompt to add a `case` to the switch above.
+ *
+ * The runtime branch logs a warning when an unexpected `kind` (e.g.
+ * from a corrupted DB row or a forgotten normalizer addition) reaches
+ * the frame-builder, so the drift surfaces operationally instead of
+ * silently returning null.
+ */
+const KNOWN_KINDS: Record<CanonicalEventKind, true> = {
+  "system.init": true,
+  "system.unknown_sdk_message": true, // intentionally non-broadcast
+  "user.message": true,
+  "assistant.delta": true,
+  "assistant.snapshot": true,
+  "thinking.delta": true,
+  "thinking.snapshot": true,
+  "tool_call.running": true,
+  "tool_call.completed": true,
+  "tool_call.error": true,
+  "status.changed": true,
+  "task.updated": true,
+  "request.created": true,
+  "code_edit.detected": true,
+  "run.final_result": true,
+  "run.interrupted": true,
+};
+
+function assertKindIsKnown(kind: string): void {
+  if (!(kind in KNOWN_KINDS)) {
+    console.warn(
+      `[frame-builder] unknown canonical event kind "${kind}" — frame dropped. ` +
+        `If this is a new kind, add it to the switch in buildServerFrame.`,
+    );
+  } else if (!NON_BROADCAST_EVENT_KINDS.has(kind as CanonicalEventKind)) {
+    // The kind is registered as broadcastable but the switch above
+    // didn't match it — caller forgot to add a case.
+    console.warn(
+      `[frame-builder] broadcastable kind "${kind}" reached the default branch — ` +
+        `missing case in buildServerFrame switch?`,
+    );
   }
 }
 
