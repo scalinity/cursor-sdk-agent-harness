@@ -591,30 +591,39 @@ function deliverEvent(
 ): void {
   const flushStart = performance.now();
   const frame = buildServerFrame(row, { replayed });
-  if (frame === null) return;
-  // Validate every outbound event frame against the shared schema before
-  // sending. A bad shape gets surfaced as an error frame instead of being
-  // shipped and quietly breaking the client.
-  const result = serverFrameSchema.safeParse(frame);
-  if (!result.success) {
-    state.log.error(
-      { kind: row.kind, eventId: row.id, errors: result.error.flatten() },
-      "ws: outbound event frame failed schema validation",
-    );
-    sendFrame(
-      state,
-      errorFrame("INTERNAL_ERROR", "Server produced an invalid frame", {
-        details: { kind: row.kind, eventId: row.id },
-      }),
-    );
+  if (frame === null) {
+    // Suppressed kind (e.g. system.unknown_sdk_message) — nothing
+    // flushed, so no flush delay to record. Leave the counter alone.
     return;
   }
-  sendFrame(state, frame);
-  // ws_flush_delay_ms — wall clock from listener entry to the
-  // socket.send() return. Captures schema validation + JSON.stringify +
-  // native send-buffer write; spec §13 budget treats this as the
-  // "server WS flush delay" target.
-  perf.observe("ws_flush_delay_ms", performance.now() - flushStart);
+  // P14-W2: try/finally guarantees ws_flush_delay_ms is observed for
+  // EVERY non-suppressed delivery — happy path AND validation-failure
+  // INTERNAL_ERROR path. Without this, a kind-mismatch storm would
+  // silently underreport p95 and triage would be blind exactly when it
+  // matters most.
+  try {
+    const result = serverFrameSchema.safeParse(frame);
+    if (!result.success) {
+      state.log.error(
+        { kind: row.kind, eventId: row.id, errors: result.error.flatten() },
+        "ws: outbound event frame failed schema validation",
+      );
+      sendFrame(
+        state,
+        errorFrame("INTERNAL_ERROR", "Server produced an invalid frame", {
+          details: { kind: row.kind, eventId: row.id },
+        }),
+      );
+      return;
+    }
+    sendFrame(state, frame);
+  } finally {
+    // ws_flush_delay_ms — wall clock from listener entry to the
+    // socket.send() return. Captures schema validation + JSON.stringify +
+    // native send-buffer write; spec §13 budget treats this as the
+    // "server WS flush delay" target.
+    perf.observe("ws_flush_delay_ms", performance.now() - flushStart);
+  }
 }
 
 function handleUnsubscribeRun(

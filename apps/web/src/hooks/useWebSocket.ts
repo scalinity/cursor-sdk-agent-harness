@@ -219,13 +219,23 @@ export function useWebSocket(config: UseWebSocketConfig): UseWebSocketResult {
         resetStaleTimer();
         const raw = typeof event.data === "string" ? event.data : null;
         if (!raw) return;
+        // P14-W2: time JSON.parse + serverFrameSchema.safeParse together.
+        // The previous wiring started the timer AFTER the try/catch, so
+        // parse-failure frames silently bypassed the histogram — a
+        // malformed-JSON storm wouldn't show up in p99. The validation-
+        // failure branch also observes before returning, so the counter
+        // covers all four exit paths uniformly.
+        const validateStart = performance.now();
         let parsed: unknown;
         try {
           parsed = JSON.parse(raw);
         } catch {
+          clientPerf.observe(
+            "client_frame_validation_ms",
+            performance.now() - validateStart,
+          );
           return;
         }
-        const validateStart = performance.now();
         const result = serverFrameSchema.safeParse(parsed);
         clientPerf.observe(
           "client_frame_validation_ms",
