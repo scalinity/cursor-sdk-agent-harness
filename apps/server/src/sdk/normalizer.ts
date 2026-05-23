@@ -4,6 +4,7 @@ import type {
   SDKMessage,
   ToolUseBlock,
 } from "@harness/shared";
+import { extractCodeEdit } from "./code-edit-extractors/index.js";
 
 /**
  * Phase 07 — pure normalization from raw SDK message to one or more canonical
@@ -73,14 +74,10 @@ export interface NormalizeOutput {
 }
 
 /**
- * Tool names whose `tool_call.completed` event should produce a placeholder
- * `code_edit.detected` derived event. Phase 10 implements the actual extractor
- * that fills in `edits`; Phase 07 only emits the seam so replay can hide
- * tool-call cards behind the preview UI consistently.
- *
- * Verified literals from OQ-08 in the ledger.
+ * Phase 10 — completed edit-like tool calls are inspected by server-side
+ * extractors. A successful parse emits a derived `code_edit.detected` event;
+ * non-matching shapes simply leave the raw tool call visible.
  */
-const CODE_EDIT_TOOL_NAMES = new Set(["edit", "write", "delete"]);
 
 export function normalize(input: NormalizeInput): NormalizeOutput {
   const { raw, runContext } = input;
@@ -219,27 +216,24 @@ export function normalize(input: NormalizeInput): NormalizeOutput {
         receivedAt: runContext.receivedAt,
       });
 
-      // Derived `code_edit.detected` placeholder. Phase 10 will populate
-      // `edits` from `result.value.diffString` (edit), `args.fileText`
-      // (write), or `args.path` (delete). For now the placeholder is enough
-      // to wire the UI seam without committing to extraction shape.
-      if (
-        raw.status === "completed" &&
-        CODE_EDIT_TOOL_NAMES.has(raw.name)
-      ) {
+      const derivedCodeEdit =
+        raw.status === "completed"
+          ? extractCodeEdit({
+              callId: raw.call_id,
+              name: raw.name,
+              args: raw.args,
+              result: raw.result,
+              ...(raw.truncated !== undefined ? { truncated: raw.truncated } : {}),
+            })
+          : null;
+      if (derivedCodeEdit !== null) {
         events.push({
           sdkType: "tool_call",
           kind: "code_edit.detected",
           callId: raw.call_id,
           requestId: null,
           status: null,
-          payload: {
-            source_call_id: raw.call_id,
-            confidence: "low" as const,
-            edits: [],
-          },
-          // Derived events carry no raw payload of their own — they reference
-          // the source call via `source_call_id`.
+          payload: derivedCodeEdit,
           raw: null,
           occurredAt: runContext.occurredAt,
           receivedAt: runContext.receivedAt,

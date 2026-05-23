@@ -4,9 +4,11 @@
  *   - Code-pane visibility (⌘J toggles)
  *   - WebSocket connection state (for the connection banner)
  *   - Composer draft (so the textarea is controlled but state stays out of components)
+ *   - Code preview replay speed / pause / selected edit controls
  *   - A simple toast queue (used by `useErrorReporter`) with per-toast TTL
  */
 import { create } from "zustand";
+import type { ReplaySpeed } from "@harness/shared";
 
 export type ConnectionState =
   | "idle"
@@ -37,6 +39,9 @@ export interface UiState {
   csrfToken: string | null;
   connectionState: ConnectionState;
   composerDraft: string;
+  replaySpeedByRunId: Record<string, ReplaySpeed>;
+  replayPausedByRunId: Record<string, boolean>;
+  selectedCodeEditEventByRunId: Record<string, string>;
   toasts: Toast[];
   /**
    * Monotonic counter for toast IDs. Lives on the store rather than at
@@ -50,6 +55,9 @@ export interface UiState {
   setCsrfToken: (token: string | null) => void;
   setConnectionState: (state: ConnectionState) => void;
   setComposerDraft: (draft: string) => void;
+  setReplaySpeed: (runId: string, speed: ReplaySpeed) => void;
+  setReplayPaused: (runId: string, paused: boolean) => void;
+  selectCodeEditEvent: (runId: string, eventId: string | null) => void;
   pushToast: (toast: Omit<Toast, "id" | "createdAt" | "expiresAt"> & { ttlMs?: number | null }) => void;
   dismissToast: (id: string) => void;
   sweepExpiredToasts: (now?: number) => void;
@@ -80,6 +88,9 @@ export const useUiStore = create<UiState>((set) => ({
   csrfToken: null,
   connectionState: "idle",
   composerDraft: "",
+  replaySpeedByRunId: {},
+  replayPausedByRunId: {},
+  selectedCodeEditEventByRunId: {},
   toasts: [],
   toastCounter: 0,
 
@@ -97,6 +108,18 @@ export const useUiStore = create<UiState>((set) => ({
   setCsrfToken: (token) => set({ csrfToken: token }),
   setConnectionState: (state) => set({ connectionState: state }),
   setComposerDraft: (draft) => set({ composerDraft: draft }),
+  setReplaySpeed: (runId, speed) =>
+    set((s) => ({ replaySpeedByRunId: { ...s.replaySpeedByRunId, [runId]: speed } })),
+  setReplayPaused: (runId, paused) =>
+    set((s) => ({ replayPausedByRunId: { ...s.replayPausedByRunId, [runId]: paused } })),
+  selectCodeEditEvent: (runId, eventId) =>
+    set((s) => {
+      const next = { ...s.selectedCodeEditEventByRunId };
+      if (eventId === null) delete next[runId];
+      else next[runId] = eventId;
+      persistCodeHidden(false);
+      return { selectedCodeEditEventByRunId: next, codeHidden: false };
+    }),
   pushToast: ({ scope, message, severity, ttlMs }) =>
     set((s) => {
       const nextId = s.toastCounter + 1;

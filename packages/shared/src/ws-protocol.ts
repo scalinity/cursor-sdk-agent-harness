@@ -8,7 +8,7 @@ import {
   requestIdSchema,
   runIdSchema,
 } from "./constants.js";
-import { modelIdSchema, replaySpeedSchema, sdkRunStatusSchema, settingSourceSchema } from "./models.js";
+import { modelIdSchema, replaySpeedSchema, sdkRunStatusSchema, settingSourceSchema, knownLanguageSchema } from "./models.js";
 import { canonicalEventBaseSchema, runInterruptedReasonSchema } from "./domain.js";
 import { tokenUsageSchema } from "./sdk-surface.js";
 
@@ -278,34 +278,34 @@ export const requestEventFrameSchema = frameBaseSchema.extend({
   }),
 });
 
+export const codeEditOperationSchema = z.object({
+  type: z.enum(["insert", "delete", "replace"]),
+  startOffset: z.number().int().nonnegative(),
+  endOffset: z.number().int().nonnegative(),
+  text: z.string(),
+});
+
+export const codeEditDetectedPayloadSchema = z.object({
+  source_call_id: callIdSchema,
+  confidence: z.enum(["high", "medium", "low"]),
+  edits: z.array(
+    z.object({
+      path: z.string(),
+      language: knownLanguageSchema.nullable(),
+      before: z.string().optional(),
+      after: z.string().optional(),
+      unifiedDiff: z.string().optional(),
+      operations: z.array(codeEditOperationSchema),
+    }),
+  ),
+});
+
 export const codeEditDetectedFrameSchema = frameBaseSchema.extend({
   type: z.literal("derived.code_edit"),
   event: canonicalEventBaseSchema.extend({
     sdk_type: z.literal("tool_call"),
     kind: z.literal("code_edit.detected"),
-    payload: z.object({
-      source_call_id: callIdSchema,
-      confidence: z.enum(["high", "medium", "low"]),
-      edits: z.array(
-        z.object({
-          path: z.string(),
-          language: z
-            .enum(["typescript", "javascript", "python", "json", "markdown", "shell", "plain-text"])
-            .nullable(),
-          before: z.string().optional(),
-          after: z.string().optional(),
-          unifiedDiff: z.string().optional(),
-          operations: z.array(
-            z.object({
-              type: z.enum(["insert", "delete", "replace"]),
-              startOffset: z.number().int().nonnegative(),
-              endOffset: z.number().int().nonnegative(),
-              text: z.string(),
-            }),
-          ),
-        }),
-      ),
-    }),
+    payload: codeEditDetectedPayloadSchema,
   }),
 });
 

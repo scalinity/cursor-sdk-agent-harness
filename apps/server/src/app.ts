@@ -185,7 +185,14 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       policy: workspacePolicy,
     },
     agents: { runtime: agentRuntime },
-    runs: { runtime: agentRuntime, runsRepo: repos.runs },
+    runs: {
+      runtime: agentRuntime,
+      runsRepo: repos.runs,
+      eventsRepo: repos.events,
+      agentsRepo: repos.agents,
+    },
+    events: { events: repos.events },
+    usage: { runsRepo: repos.runs, settingsRepo: repos.settings },
   });
 
   return {

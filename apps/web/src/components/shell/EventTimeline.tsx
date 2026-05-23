@@ -1,34 +1,28 @@
 import { useRunStore } from "../../state/run-store.js";
 import { UserMessage } from "../timeline/UserMessage.js";
-import { AgentMessage } from "../timeline/AgentMessage.js";
-import { ThinkingTrace } from "../timeline/ThinkingTrace.js";
-import { ToolCallCard } from "../timeline/ToolCallCard.js";
-import { SystemBanner } from "../timeline/SystemBanner.js";
+import { StreamingMarkdown } from "../streaming/StreamingMarkdown.js";
+import { ThinkingTrace } from "../streaming/ThinkingTrace.js";
+import { ToolCallLane } from "../streaming/ToolCallLane.js";
+import { SystemBanner } from "../streaming/SystemBanner.js";
+import { RunStatusPill } from "../streaming/RunStatusPill.js";
+import { StreamingSurfaceBoundary } from "../streaming/StreamingSurfaceBoundary.js";
+import { CodeEditPreviewPanel } from "../streaming/CodeEditPreviewPanel.js";
 
 export interface EventTimelineProps {
   runId: string | null;
 }
 
 /**
- * Phase 08 timeline. Iterates events in seq order and renders a stub
- * component per kind. Assistant/thinking show the accumulator (not the
- * delta-by-delta event), but we still render an event marker so the
- * scroll position keeps pace with the stream. Phase 09 replaces this
- * with StreamingMarkdown and grouped tool-call lanes.
- *
- * The events array is read directly from the run-store's parallel
- * projection (RV2-S5) so we don't rebuild `seqList.map(seq => bySeq.get(seq))`
- * on every render.
+ * Phase 09 timeline. Events remain the canonical ordering source, but related
+ * deltas are rendered through aggregate streaming surfaces: one assistant
+ * markdown stream, one thinking trace, grouped tool-call lanes, code-edit
+ * preview placeholders, and status/usage badges. Live and replay both feed the
+ * same run-store projections, so surfaces avoid per-token React commits while
+ * preserving event order for surrounding markers.
  */
 export function EventTimeline({ runId }: EventTimelineProps) {
   const events = useRunStore((s) =>
     runId ? (s.eventsByRunId[runId]?.events ?? null) : null,
-  );
-  const assistantText = useRunStore((s) =>
-    runId ? (s.eventsByRunId[runId]?.assistantText ?? "") : "",
-  );
-  const thinkingText = useRunStore((s) =>
-    runId ? (s.eventsByRunId[runId]?.thinkingText ?? "") : "",
   );
 
   if (!runId) {
@@ -44,40 +38,77 @@ export function EventTimeline({ runId }: EventTimelineProps) {
     );
   }
 
-  // Phase 08 trick: emit at most ONE AgentMessage block (using the
-  // accumulator) and ONE ThinkingTrace block at the latest point in the
-  // stream where either appeared. Other events render in order. The
-  // streaming surfaces phase will replace this with proper iteration
-  // boundaries and StreamingMarkdown.
   let assistantRendered = false;
   let thinkingRendered = false;
+  let toolLaneRendered = false;
+  let codeEditRendered = false;
 
   return (
     <>
       {events.map((evt) => {
         if (evt.sdk_type === "system") {
-          return <SystemBanner key={evt.event_id} event={evt} />;
+          return (
+            <StreamingSurfaceBoundary key={evt.event_id} surface="system-banner">
+              <SystemBanner event={evt} />
+            </StreamingSurfaceBoundary>
+          );
         }
         if (evt.sdk_type === "user") {
           return <UserMessage key={evt.event_id} event={evt} />;
         }
-        if (evt.sdk_type === "assistant") {
-          if (assistantRendered) return null;
-          assistantRendered = true;
-          // Key includes runId so switching runs creates a fresh DOM node
-          // — protects against any Phase-09 local state in AgentMessage
-          // bleeding across runs.
-          return <AgentMessage key={`assistant-accumulator-${runId}`} text={assistantText} />;
-        }
         if (evt.sdk_type === "thinking") {
           if (thinkingRendered) return null;
           thinkingRendered = true;
-          return <ThinkingTrace key={`thinking-accumulator-${runId}`} text={thinkingText} />;
+          return (
+            <StreamingSurfaceBoundary key={`thinking-${runId}`} surface="thinking-trace">
+              <ThinkingTrace runId={runId} />
+            </StreamingSurfaceBoundary>
+          );
+        }
+        if (evt.sdk_type === "assistant") {
+          if (assistantRendered) return null;
+          assistantRendered = true;
+          return (
+            <div key={`assistant-${runId}`} className="agent-message">
+              <div className="agent-message__head">
+                <span className="agent-message__glyph mono">A</span>
+                <span className="font-semibold text-accent-primary">Harness</span>
+                <span className="mono text-xs text-text-tertiary">
+                  {new Date(evt.occurred_at).toLocaleTimeString()}
+                </span>
+              </div>
+              <StreamingSurfaceBoundary surface="assistant-markdown">
+                <StreamingMarkdown runId={runId} source="assistant" />
+              </StreamingSurfaceBoundary>
+            </div>
+          );
         }
         if (evt.sdk_type === "tool_call") {
-          return <ToolCallCard key={evt.event_id} event={evt} />;
+          if (evt.kind === "code_edit.detected") {
+            if (codeEditRendered) return null;
+            codeEditRendered = true;
+            return (
+              <StreamingSurfaceBoundary key={`code-edits-${runId}`} surface="code-edits">
+                <CodeEditPreviewPanel runId={runId} />
+              </StreamingSurfaceBoundary>
+            );
+          }
+          if (toolLaneRendered) return null;
+          toolLaneRendered = true;
+          return (
+            <StreamingSurfaceBoundary key={`tool-calls-${runId}`} surface="tool-calls">
+              <ToolCallLane runId={runId} />
+            </StreamingSurfaceBoundary>
+          );
         }
-        // status / task / request — minimal generic line.
+        if (evt.sdk_type === "status") {
+          return (
+            <div key={evt.event_id} className="my-2 flex items-center gap-2 text-xs text-text-tertiary">
+              <span className="mono">[{evt.kind}]</span>
+              <RunStatusPill runId={runId} />
+            </div>
+          );
+        }
         return (
           <div key={evt.event_id} className="my-1 text-xs text-text-tertiary">
             <span className="mono">[{evt.kind}]</span>

@@ -248,7 +248,7 @@ describe("normalize — discriminant coverage", () => {
         name: "edit",
         status: "completed",
         args: { path: "src/foo.ts" },
-        result: { value: { diffString: "--- a\n+++ b\n" } },
+        result: { value: { diffString: "--- a/src/foo.ts\n+++ b/src/foo.ts\n@@ -1 +1,2 @@\n const a = 1;\n+const b = 2;\n" } },
       },
       runContext: ctx(),
     });
@@ -258,8 +258,15 @@ describe("normalize — discriminant coverage", () => {
     ]);
     expect(out.events[1]?.payload).toMatchObject({
       source_call_id: "c-2",
-      confidence: "low",
-      edits: [],
+      confidence: "high",
+      edits: [
+        {
+          path: "src/foo.ts",
+          language: "typescript",
+          unifiedDiff: expect.stringContaining("const b = 2;"),
+          operations: [expect.objectContaining({ type: "replace" })],
+        },
+      ],
     });
     expect(out.events[1]?.raw).toBeNull();
   });

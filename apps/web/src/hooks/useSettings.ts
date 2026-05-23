@@ -8,6 +8,7 @@ import {
   settingsSnapshotSchema,
   type SettingsSnapshot,
   type UpdateSettingsRequest,
+  type UpdatePricingRequest,
 } from "@harness/shared";
 import { httpRequest, mutatingRequest } from "../lib/http-client.js";
 import { useSettingsStore } from "../state/settings-store.js";
@@ -21,6 +22,7 @@ export interface UseSettingsResult {
   error: string | null;
   reload: () => Promise<void>;
   updateSettings: (patch: UpdateSettingsRequest) => Promise<void>;
+  updatePricing: (patch: UpdatePricingRequest) => Promise<void>;
   setApiKey: (value: string) => Promise<void>;
   deleteApiKey: () => Promise<void>;
 }
@@ -84,6 +86,20 @@ export function useSettings(): UseSettingsResult {
     [refreshCsrfToken, setSnapshot],
   );
 
+  const updatePricing = useCallback(
+    async (patch: UpdatePricingRequest) => {
+      const next = await mutatingRequest("/api/settings/pricing", {
+        method: "PATCH",
+        body: patch,
+        getCsrfToken: () => useUiStore.getState().csrfToken,
+        refreshCsrfToken,
+        responseSchema: settingsSnapshotSchema,
+      });
+      setSnapshot(next);
+    },
+    [refreshCsrfToken, setSnapshot],
+  );
+
   const setApiKey = useCallback(
     async (value: string) => {
       const next = await mutatingRequest("/api/settings/api-key", {
@@ -120,6 +136,7 @@ export function useSettings(): UseSettingsResult {
     error: lastError,
     reload,
     updateSettings,
+    updatePricing,
     setApiKey,
     deleteApiKey,
   };

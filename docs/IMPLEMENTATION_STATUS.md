@@ -16,7 +16,10 @@ each phase. Use it as the single source of truth for "what is decided" vs
 | 06 | Cursor SDK Runtime Manager | ✅ complete | `@cursor/sdk@1.0.13` installed, `AgentRuntime` + `RunController` + `ActiveRuns` registry, agents/runs REST routes, stub stream sink, stubbed-SDK integration tests (no live SDK call). |
 | 07 | Event Normalization & WebSocket Streaming | ✅ complete | `normalize` + `persist-and-broadcast` pipeline replaces the Phase 06 stub sink; `run-bus` + `wsPlugin` with heartbeat + `after_seq` replay + large-payload refs; 8 WS integration tests + normalizer/bus/pipeline unit tests. |
 | 08 | Frontend State, Hooks, and Chat Shell | ✅ complete | 5 Zustand stores, 8 custom hooks (incl. reconnecting `useWebSocket`), 3-pane `AppShell` matching the mockup, basic event timeline, composer wired to `POST /api/runs`, ⌘J / ⌘K / ⌘. shortcuts, web vitest harness now has 5 tests for `run-store` ingestion. |
-| ≥9 | (per spec §16) | ⏳ pending | |
+| 09 | Streaming Surfaces | ✅ complete | Hybrid `StreamingMarkdown` + RAF-batched `StreamingText`, thinking trace, concurrent `ToolCallLane`, tool cards, JSON inspector with lazy payload fetch, status/cost/system banners, dev QA fixture, perf benchmarks. |
+| 10 | Code Edit Preview and Syntax Highlighting | ✅ complete | Server-side code-edit extractors, derived `code_edit.detected` events, RAF edit animation, Lezer syntax highlighting, right-pane + inline previews, replay-speed controls, large-edit bounded preview, review-2 fixes. |
+| 11 | History, Replay, and Usage | ✅ complete | Run history with cost/tokens, replay from `events` via `run-store.ingestServerFrame`, transcript export, usage aggregates, pricing freshness banner/dialog, focused route tests. |
+| ≥12 | (per spec §16) | ⏳ pending | |
 
 ---
 
@@ -1665,6 +1668,255 @@ Dependencies added:
   `replayed` seam (kept as a call-site option through /address) can
   actually suppress Phase-09 streaming animations on replay.
 
+---
+
+## Phase 09 Outcomes
+
+### Summary
+
+Replaced the Phase 08 plain-text assistant/timeline stubs with the Phase 09 streaming surface stack. `StreamingMarkdown` now projects block structure from `streaming-markdown@0.2.15`, while `StreamingText` owns RAF-batched text-node mutation for prose leaves and code-fence text. Tool calls are coalesced by `call_id`, currently overlapping running windows render side-by-side, and each streaming surface is wrapped in `StreamingSurfaceBoundary` so a bad card/inspector does not collapse the chat.
+
+Review follow-up on 2026-05-23 addressed the review-5 critical/warning/suggestion set: the dev fixture is lazily imported and seeds/restores store state only while mounted, large payloads use the actual `large_payload_refs` URL contract, lazy fetches are abortable and same-origin validated, completed historical tool-call overlap collapses back to stacked cards, parser fallback keeps streaming, terminal unclosed code fences show `unterminated`, JSON trees render lazily with entry caps, and route tests cover the app-level security stack.
+
+### Files changed
+
+Web streaming primitives and surfaces:
+- `apps/web/src/hooks/useStreamingTextNode.ts`
+- `apps/web/src/hooks/useStreamingMarkdown.ts`
+- `apps/web/src/hooks/useToolCallProjection.ts`
+- `apps/web/src/hooks/useAutoCollapse.ts`
+- `apps/web/src/hooks/useLazyPayload.ts`
+- `apps/web/src/lib/streaming-markdown-projector.ts`
+- `apps/web/src/lib/streaming-text-channel.ts`
+- `apps/web/src/lib/tool-call-projection.ts`
+- `apps/web/src/components/streaming/StreamingText.tsx`
+- `apps/web/src/components/streaming/StreamingMarkdown.tsx`
+- `apps/web/src/components/streaming/MarkdownBlockView.tsx`
+- `apps/web/src/components/streaming/ThinkingTrace.tsx`
+- `apps/web/src/components/streaming/ToolCallCard.tsx`
+- `apps/web/src/components/streaming/ToolCallLane.tsx`
+- `apps/web/src/components/streaming/SystemBanner.tsx`
+- `apps/web/src/components/streaming/RunStatusPill.tsx`
+- `apps/web/src/components/streaming/CostBadge.tsx`
+- `apps/web/src/components/streaming/JsonInspector.tsx`
+- `apps/web/src/components/streaming/StreamingSurfaceBoundary.tsx`
+- `apps/web/src/components/streaming/CodeEditPreviewPanel.tsx`
+
+Integration, fixture, and style updates:
+- `apps/web/src/components/shell/EventTimeline.tsx`
+- `apps/web/src/components/shell/CenterPane.tsx`
+- `apps/web/src/components/shell/Composer.tsx`
+- `apps/web/src/app/App.tsx`
+- `apps/web/src/pages/StreamingQA.tsx` — dev-only `/__streaming` visual fixture, now mounted behind a lazy route and fixture hook.
+- `apps/web/src/styles/app-shell.css`
+- `apps/web/package.json`, `pnpm-lock.yaml` — added exact `streaming-markdown@0.2.15`.
+
+Server lazy payload route:
+- `apps/server/src/routes/events.routes.ts`
+- `apps/server/src/routes/index.ts`
+- `apps/server/src/app.ts`
+- `apps/server/src/db/repositories/events.repo.ts`
+- `packages/shared/src/rest-contracts.ts`
+- `packages/shared/src/index.ts`
+
+Tests and benchmarks:
+- `apps/web/src/hooks/__tests__/useStreamingTextNode.test.tsx`
+- `apps/web/src/lib/__tests__/streaming-markdown-projector.test.ts`
+- `apps/web/src/lib/__tests__/tool-call-projection.test.ts`
+- `apps/web/src/components/streaming/streaming-surfaces.test.tsx`
+- `apps/server/src/routes/__tests__/events.routes.test.ts`
+- `apps/web/tests/perf/streaming-markdown.bench.ts`
+- `apps/web/tests/perf/event-ingest.bench.ts`
+- `apps/web/vitest.perf.config.ts`
+
+### Verification run
+
+All acceptance commands passed on 2026-05-23 after review fixes:
+- `pnpm typecheck` — passed.
+- `pnpm lint` — passed; zero direct `useEffect` calls in components/pages.
+- `pnpm test` — passed; monorepo total is 209 tests (server 160 + web 41 + shared 2 + eslint plugin 6).
+- `pnpm --filter @harness/web exec vitest run --config vitest.perf.config.ts` — passed.
+- `pnpm build` — passed.
+
+Benchmark results from the final run:
+- Mounted streaming markdown block-boundary p50: `0.017ms` (budget `<12ms`).
+- Mounted streaming prose update p50: `0.016ms` (budget `<4ms`).
+- Mounted event ingest p50: `0.281ms`; p95: `0.513ms` (client budget `<2ms` p50, `<8ms` p95).
+
+Visual smoke:
+- Existing Vite route responded at `http://127.0.0.1:5173/__streaming`.
+- Screenshot capture was not available in this run: `pnpm dev` could not start a second web server because port 5173 was already in use, and the in-app browser connector was locked by another session. The route HTML was fetched successfully with `curl`.
+
+### Acceptance notes
+
+Satisfied:
+- `StreamingText` mutates one text node and batches updates via RAF.
+- `StreamingMarkdown` uses `streaming-markdown` and the projector only updates React state on structural changes; prose/code leaf text goes through the text channel.
+- Paragraphs, headings, lists, blockquotes, code fences, tables, and thematic breaks render through `MarkdownBlockView`.
+- `ThinkingTrace` collapses by default for completed runs and displays latest `thinking_duration_ms`.
+- `ToolCallCard` renders running/completed/error states, timing, args/result inspectors, truncation labels, and footer summaries.
+- `ToolCallLane` groups currently overlapping running calls side-by-side and collapses completed historical overlap back to stacked cards.
+- `SystemBanner`, `RunStatusPill`, and `CostBadge` cover the required states.
+- `JsonInspector` renders recursive JSON and lazy-loads `large_payload_refs` URL fields via `GET /api/events/:eventId/large-payload/:field`; the legacy `/api/events/:eventId/payload` fallback remains for older fixture shapes.
+- `StreamingSurfaceBoundary` catches a forced render failure without unmounting siblings.
+- Composer caret animation is wired for focused-empty textarea state.
+
+Deviations / limitations:
+- Phase 09 renders tool icons as token-colored compact text labels (`doc`, `pen`, `>_`, `src`, `web`) instead of SVG/lucide icons because no icon package is installed and adding one would introduce a new dependency category. The color mapping matches the mockup tokens.
+- Phase 10 code-edit preview work is present in the current worktree, but this Phase 09 review pass only changed it where shared verification commands required current-tree compatibility.
+- The dev QA fixture is dev-only and not backed by live SDK traffic; it exists to smoke-test visual states without API credentials.
+- The wire-level `replayed` flag already exists in shared schemas and server frame building from prior work; Phase 09 did not add replay animation suppression beyond preserving the existing store seam.
+
+---
+
+## Phase 10 Outcomes
+
+### Summary
+
+Implemented server-side code-edit extraction and the client preview stack. Completed tool calls now derive `code_edit.detected` canonical events through the existing normalizer/persist/broadcast pipeline. The web app consumes only that derived event, animates edit insertions with `requestAnimationFrame`, applies Lezer-backed syntax highlighting, and renders the preview both in the right pane and inside the originating tool card.
+
+### Files changed
+
+Shared contracts:
+- `packages/shared/src/models.ts` — `KnownLanguage` schema/type.
+- `packages/shared/src/ws-protocol.ts` — exported `codeEditDetectedPayloadSchema` and `codeEditOperationSchema`; derived frame payload now reuses them.
+- `packages/shared/src/index.ts` — exports the shared code-edit schemas and restored WS frame schemas.
+
+Server extraction and normalization:
+- `apps/server/src/sdk/code-edit-extractors/{types,utils,unified-diff,before-after,old-new-text,result-only,inferred-from-summary,index}.ts`
+- `apps/server/src/sdk/normalizer.ts`
+- `apps/server/src/sdk/code-edit-extractors/code-edit-extractors.test.ts`
+- `apps/server/src/sdk/__tests__/normalizer.test.ts`
+
+Web animation, highlighting, and preview UI:
+- `apps/web/src/lib/lezer-parsers.ts`
+- `apps/web/src/lib/code-edit-events.ts`
+- `apps/web/src/hooks/useCodeEditAnimation.ts`
+- `apps/web/src/hooks/useIncrementalSyntaxHighlighter.ts`
+- `apps/web/src/hooks/useEventById.ts`
+- `apps/web/src/components/streaming/{SyntaxHighlighter,FilePane,CodeEditPreview,CodeEditPreviewPanel,ToolCallCard,ToolCallLane,MarkdownBlockView}.tsx`
+- `apps/web/src/components/shell/RightPane.tsx`
+- `apps/web/src/app/AppShell.tsx`
+- `apps/web/src/state/ui-store.ts`
+- `apps/web/src/styles/app-shell.css`
+- `apps/web/src/pages/StreamingQA.tsx`
+
+Tests, perf, and deps:
+- `apps/web/src/hooks/__tests__/useCodeEditAnimation.test.tsx`
+- `apps/web/src/components/streaming/code-edit-preview.test.tsx`
+- `apps/web/tests/perf/code-edit-animation.bench.ts`
+- `apps/web/package.json`, `pnpm-lock.yaml` — added exact Lezer packages.
+- `docs/SDK_VERIFICATION_LEDGER.md` — OQ-22 Phase 10 shell fallback note.
+
+### Implementation notes
+
+- Extractor registry order: unified diff, before/after, old/new text, result-only write, inferred summary. Truncated tool payloads return `null` and the raw tool call still renders.
+- Unified diffs now split by file segment and emit one edit per path. Hunk operations target the extracted hunk buffer, avoiding multi-file hunk collapse.
+- `before/after` and `old_text/new_text` derive replacement operations locally; write/result-only emits medium-confidence insertions.
+- The client never parses unknown tool args/results. It parses only the shared `code_edit.detected` payload schema.
+- `useCodeEditAnimation` supports seeded buffers for replace/delete previews, keeps speed changes from restarting playback, clears paused wall-clock time, and completes instantly when the user selects `instant`.
+- Default preview speed is animated `1x`; `instant` remains an explicit replay-speed choice.
+- Large edits over 20,000 inserted chars render a bounded first 2,000-char chunk by default and expose `animate first 2,000 chars` for opt-in animation. This keeps the right pane responsive while preserving an inspectable preview.
+- Lezer parsers cover TypeScript, JavaScript, Python, JSON, and Markdown. Shell uses the OQ-22-documented regex fallback because no first-party Lezer shell tree parser exists.
+- `review-2` found two critical bugs and several warnings/suggestions. All were addressed: multi-file diffs, large-edit bounding, default speed, operation deletion text, speed/pause timing, summary false positives, duplicate path keys, shared payload schema reuse, and tests for the new regressions.
+
+### Verification run
+
+Final acceptance commands passed on 2026-05-23:
+- `pnpm typecheck` — passed.
+- `pnpm lint` — passed.
+- `pnpm test` — passed; monorepo total is 216 tests (server 162 + web 46 + shared 2 + eslint plugin 6).
+- `pnpm -F @harness/web exec vitest run --config vitest.perf.config.ts` — passed.
+
+Benchmark results from the final perf run:
+- Code edit animation per-frame p50: `0.000ms` (budget `<4ms`).
+- Lezer parse 5k p50: `0.969ms` (budget `<1ms`); highlight p50 logged separately at `0.072ms`.
+- Large 50,000-char chunk render: `0.001ms` (budget `<100ms`).
+- Mounted streaming markdown block-boundary p50: `0.018ms`; prose p50: `0.017ms`.
+- Event ingest p50: `0.261ms`; p95: `0.481ms`.
+
+Visual smoke:
+- Dev server route: `http://127.0.0.1:5173/__streaming`.
+- Browser console after final fixture load had only the standard React DevTools info line.
+- Playwright accessibility snapshot captured the preview panel after the final fixture load.
+- Screenshot capture was attempted, but Playwright timed out waiting for the animated preview element to become stable; the snapshot and clean console are the recorded visual evidence for this phase.
+
+### Acceptance notes
+
+Satisfied:
+- Three high-confidence extractors plus two fallback extractors exist under `apps/server/src/sdk/code-edit-extractors/`.
+- Normalizer emits `code_edit.detected` after completed matching tool calls and persists before broadcast through the existing pipeline.
+- Right-pane placeholder is replaced by `CodeEditPreviewPanel`, with navigation, pause/resume, and 1x/2x/4x/instant replay speed controls.
+- Originating tool cards render compact inline previews and a `view full` affordance into the right pane.
+- Code fences and edit previews use `SyntaxHighlighter` with Lezer/parser-registry tokens mapped to `.tk-*` classes from the mockup.
+- Chunked-mode regression tests cover the 50,000-char fixture path and the `animate first 2,000 chars` control text.
+
+Deviation / clarification:
+- The initial prompt said insertions reveal 1-4 chars per frame, but replay-speed acceptance requires 4x (`480 chars/sec`) to exceed that at 60Hz. The hook now caps at 8 chars per frame so 4x can be honored while still bounding per-frame work; perf remains comfortably inside the Section 13 budget.
+- `Tree.applyChanges` is not used yet. The highlighter reparses the full buffer for the current small/medium preview path and keeps the parse budget under 1ms for the 5k benchmark; OQ-22 and this status note document the fallback.
+
+---
+
+## Phase 11 Outcomes
+
+### Summary
+
+Implemented the durable history/replay/usage surfaces. Run history now reads the indexed `/api/runs` query with URL-synced filters, cost/tokens columns, pagination, bulk delete, and virtualization for large pages. Replay fetches persisted event rows only, converts them back to server frames, and rebuilds the existing live timeline through `run-store.ingestServerFrame`. Usage endpoints aggregate daily/model/agent totals and expose pricing freshness so the Usage page and CostBadge warn when pricing has never been verified or is older than 30 days.
+
+### Files changed
+
+Shared contracts:
+- `packages/shared/src/rest-contracts.ts` — history query extensions, run summary tool-count fields, replay event response, transcript response, usage responses, pricing freshness schema.
+- `packages/shared/src/index.ts` — exports for the new schemas/types.
+
+Server:
+- `apps/server/src/db/repositories/events.repo.ts` — run event count/all helpers.
+- `apps/server/src/db/repositories/runs.repo.ts` — indexed history query, usage summary/daily/model/agent aggregates, multi-agent history filtering.
+- `apps/server/src/routes/runs.routes.ts` — filtered `/api/runs`, `/api/runs/:runId/events`, transcript JSON/Markdown, delete.
+- `apps/server/src/routes/usage.routes.ts` — cached usage aggregate endpoints plus pricing freshness.
+- `apps/server/src/routes/index.ts`, `apps/server/src/app.ts` — route registration/dependencies.
+- `apps/server/src/routes/__tests__/history-usage-transcript.routes.test.ts` — history, replay events, transcript, usage route coverage.
+
+Web:
+- `apps/web/src/hooks/useRunHistory.ts`, `useRunReplay.ts`, `useRunSummary.ts`, `useUsage.ts`, `useSettings.ts`.
+- `apps/web/src/pages/RunHistory.tsx`, `RunReplay.tsx`, `Usage.tsx`.
+- `apps/web/src/components/history/RunHistoryRow.tsx`.
+- `apps/web/src/components/usage/{UsageSummaryCards,UsageTrendChart,UsageBreakdownTable}.tsx`.
+- `apps/web/src/components/settings/PricingSettingsDialog.tsx`.
+- `apps/web/src/components/streaming/{PricingFreshnessBanner,CostBadge}.tsx`.
+- `apps/web/src/lib/format.ts`, `apps/web/src/app/App.tsx`, `apps/web/src/styles/app-shell.css`.
+- `apps/web/package.json`, `pnpm-lock.yaml` — exact `@tanstack/react-virtual@3.13.25` dependency.
+
+### Verification run
+
+Final acceptance commands passed on 2026-05-23:
+- `pnpm typecheck` — passed.
+- `pnpm lint` — passed.
+- `pnpm test` — passed; monorepo total is 221 tests (server 167 + web 46 + shared 2 + eslint plugin 6).
+- `pnpm build` — passed; production chunks include `RunHistory`, `RunReplay`, and `Usage`.
+- Focused route test: `pnpm --filter @harness/server exec vitest run src/routes/__tests__/history-usage-transcript.routes.test.ts` — 5 tests passed.
+
+Visual / replay smoke:
+- Dev server started at `http://127.0.0.1:5173/`.
+- Rendered browser smoke and side-by-side live/replay screenshots were not captured in this pass because the shared Playwright browser profile was locked and the repo does not install Playwright locally. Build output verifies route/module wiring, and the replay engine is covered by server-frame reconstruction plus store ingestion paths, but screenshot evidence remains a follow-up when a browser session is available.
+
+### Acceptance notes
+
+Satisfied:
+- `/runs` lists run history with status, title, agent, model, started, duration, tool-call counts, cost, and tokens, with URL-synced filters/sort and bulk delete.
+- `/runs/:runId/replay` reconstructs from `/api/runs/:runId/events`, never from `runs.final_text`, and feeds the same `EventTimeline`/`RightPane` component tree through `run-store.ingestServerFrame`.
+- `GET /api/runs/:runId/transcript` returns schema-validated JSON and Markdown transcript output.
+- `/usage` shows summary cards, daily chart, model/agent breakdown tables, and pricing freshness controls.
+- `PATCH /api/settings/pricing` was already present from prior settings work; Phase 11 wired the dialog flow through `useSettings.updatePricing` and the freshness banner.
+- Cost/tokens show unavailable states rather than estimating when `usage_source = "unavailable"`.
+- Usage aggregates sum input + output tokens only; cached/reasoning remain separate fields and are not double-counted in totals.
+- Transcript JSON intentionally exports canonical event payloads verbatim for local replay portability. This is a local-only developer export; any future sharing flow must add a separate redacted export mode instead of weakening replay data.
+- `review-2` found active-run deletion, replay pagination, history refetch, pricing freshness, replay step refetch, virtualized column, CostBadge freshness, and pricing dialog issues. The address pass fixed each item and added regression coverage for active-run delete.
+
+Deferred / limitation:
+- Side-by-side visual comparison of live vs replay could not be captured without an available browser automation session and fixture run data.
+- OQ-05 reasoning-token reporting remains unverified; Phase 11 preserves null reasoning tokens and does not include them in cost/token totals.
+
 ## Next prompt to run
 
-`09_STREAMING_SURFACES.md`
+`12_MCP_SUBAGENTS_AND_ADVANCED_AGENT_CREATION.md`

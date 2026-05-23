@@ -150,6 +150,44 @@ export class EventsRepo {
     return row ? rowToDomain(row) : null;
   }
 
+  getPayloadById(id: string): { value: unknown; byteCount: number } | null {
+    const row = this.raw
+      .prepare("SELECT payload_json, payload_bytes FROM events WHERE id = ?")
+      .get(id) as { payload_json: string; payload_bytes: number } | undefined;
+    if (!row) return null;
+    return { value: JSON.parse(row.payload_json), byteCount: row.payload_bytes };
+  }
+
+  getLargePayloadField(
+    id: string,
+    field: "args" | "result" | "raw",
+  ): { value: unknown; byteCount: number } | null {
+    if (field === "raw") {
+      const row = this.raw
+        .prepare("SELECT raw_json, raw_bytes FROM events WHERE id = ?")
+        .get(id) as { raw_json: string | null; raw_bytes: number } | undefined;
+      if (!row || row.raw_json === null) return null;
+      return { value: JSON.parse(row.raw_json), byteCount: row.raw_bytes };
+    }
+
+    const row = this.raw
+      .prepare("SELECT payload_json, payload_bytes FROM events WHERE id = ?")
+      .get(id) as { payload_json: string; payload_bytes: number } | undefined;
+    if (!row) return null;
+    const parsed = JSON.parse(row.payload_json) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return null;
+    }
+
+    const payload = parsed as Record<string, unknown>;
+    if (!(field in payload)) {
+      return null;
+    }
+
+    const value = payload[field];
+    return { value, byteCount: Buffer.byteLength(JSON.stringify(value ?? null), "utf8") };
+  }
+
   getRawById(id: string): { rawJson: string | null; rawBytes: number } | null {
     const row = this.raw
       .prepare("SELECT raw_json, raw_bytes FROM events WHERE id = ?")
@@ -168,6 +206,20 @@ export class EventsRepo {
         "SELECT * FROM events WHERE run_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?",
       )
       .all(runId, afterSeq, limit) as EventDbRow[];
+    return rows.map(rowToDomain);
+  }
+
+  countByRunId(runId: string, afterSeq = 0): number {
+    const row = this.raw
+      .prepare("SELECT COUNT(*) AS n FROM events WHERE run_id = ? AND seq > ?")
+      .get(runId, afterSeq) as { n: number };
+    return row.n;
+  }
+
+  getAllByRunId(runId: string): EventRow[] {
+    const rows = this.raw
+      .prepare("SELECT * FROM events WHERE run_id = ? ORDER BY seq ASC")
+      .all(runId) as EventDbRow[];
     return rows.map(rowToDomain);
   }
 

@@ -17,6 +17,7 @@ export function Composer({ activeAgent, onSubmit }: ComposerProps) {
   const draft = useUiStore((s) => s.composerDraft);
   const setDraft = useUiStore((s) => s.setComposerDraft);
   const [busy, setBusy] = useState(false);
+  const [focused, setFocused] = useState(false);
   const { report } = useErrorReporter("composer");
 
   const submit = useCallback(async () => {
@@ -67,9 +68,12 @@ export function Composer({ activeAgent, onSubmit }: ComposerProps) {
           placeholder={placeholder}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           onKeyDown={onKeyDown}
           disabled={!activeAgent || busy}
         />
+        {focused && draft.length === 0 ? <span className="composer-caret" aria-hidden="true" /> : null}
         <div className="mt-2 flex items-center gap-1.5 text-xs text-text-tertiary">
           <button
             type="button"

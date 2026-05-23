@@ -5,6 +5,7 @@ import { EventTimeline } from "./EventTimeline.js";
 import { Composer } from "./Composer.js";
 import { ConnectionBanner } from "./ConnectionBanner.js";
 import type { ConnectionState } from "../../state/ui-store.js";
+import { StreamingSurfaceBoundary } from "../streaming/StreamingSurfaceBoundary.js";
 
 export interface CenterPaneProps {
   activeAgent: AgentSummary | null;
@@ -40,7 +41,9 @@ export function CenterPane({
       />
       <div className="center-scroll">
         <ConnectionBanner connectionState={connectionState} />
-        <EventTimeline runId={activeRunId} />
+        <StreamingSurfaceBoundary surface="chat-timeline">
+          <EventTimeline runId={activeRunId} />
+        </StreamingSurfaceBoundary>
       </div>
       <Composer activeAgent={activeAgent} onSubmit={onSubmit} />
     </main>

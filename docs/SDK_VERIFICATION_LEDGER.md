@@ -774,6 +774,16 @@ Phase 01 output — resolves every Open Question from `spec-v1.1.md` Section 14 
   any parser that emits highlight tags compatible with `@lezer/highlight`.
   Add `cwd`-aware language detection for unknown files (e.g. `*.tsx` →
   TypeScript + JSX, `*.sh` → shell) in the file extension table.
+- **Phase 10 resolution note (2026-05-23)**: Implemented the first-party
+  Lezer parsers for TypeScript/JavaScript, Python, JSON, and Markdown,
+  with `@lezer/highlight` and `@lezer/common` pinned at the audited
+  versions. Shell highlighting intentionally uses a lightweight local
+  regex tokenizer (`comment`, `string`, `command`, `flag`) instead of
+  adding `@codemirror/language` + `@codemirror/legacy-modes`: OQ-22
+  confirmed there is no clean Lezer shell tree parser, and the Phase 10
+  animation loop only needs minimal visible shell categories. Revisit the
+  `StreamLanguage` adapter if shell previews become a richer editing
+  surface.
 
 ---
 

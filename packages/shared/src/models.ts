@@ -65,3 +65,14 @@ export type McpValidationStatus = z.infer<typeof mcpValidationStatusSchema>;
 
 export const replaySpeedSchema = z.enum(["instant", "1x", "2x", "4x"]);
 export type ReplaySpeed = z.infer<typeof replaySpeedSchema>;
+
+export const knownLanguageSchema = z.enum([
+  "typescript",
+  "javascript",
+  "python",
+  "json",
+  "markdown",
+  "shell",
+  "plain-text",
+]);
+export type KnownLanguage = z.infer<typeof knownLanguageSchema>;

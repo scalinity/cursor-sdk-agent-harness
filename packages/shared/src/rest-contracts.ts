@@ -11,10 +11,12 @@ import {
   settingSourceSchema,
   usageSourceSchema,
 } from "./models.js";
+import { serverFrameSchema } from "./ws-protocol.js";
 import {
   cloudAgentOptionsSchema,
   mcpServerConfigSchema,
   subagentModelSchema,
+  tokenUsageSchema,
 } from "./sdk-surface.js";
 
 // REST request/response contracts. Each route block below is paired with the
@@ -162,13 +164,27 @@ export type ErrorEnvelope = z.infer<typeof errorEnvelopeSchema>;
 // to a number, rejecting NaN/non-numeric strings with a Zod issue.
 export const listRunsQuerySchema = z.object({
   agentId: z.string().optional(),
-  // The Phase 11 implementation will add the rest of these filters
-  // (status / modelId / usageSource / hasCost / startedAfter /
-  // startedBefore). Until then the API contract advertises only what the
-  // route actually applies, so clients can't be misled by silently-
-  // ignored filter values. See SDK_VERIFICATION_LEDGER OQ-19.
-  limit: z.coerce.number().int().min(1).max(500).default(50),
-  offset: z.coerce.number().int().nonnegative().default(0),
+  status: z.string().optional(),
+  modelId: z.string().optional(),
+  from: isoDateTimeSchema.optional(),
+  to: isoDateTimeSchema.optional(),
+  hasCost: z.enum(["any", "available", "unavailable", "none"]).default("any"),
+  sort: z
+    .enum([
+      "started_desc",
+      "started_asc",
+      "duration_desc",
+      "duration_asc",
+      "cost_desc",
+      "cost_asc",
+      "tokens_desc",
+      "tokens_asc",
+    ])
+    .default("started_desc"),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(500).default(50),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+  offset: z.coerce.number().int().nonnegative().optional(),
 });
 export type ListRunsQuery = z.infer<typeof listRunsQuerySchema>;
 
@@ -181,6 +197,7 @@ export type ListAgentsQuery = z.infer<typeof listAgentsQuerySchema>;
 export const runSummarySchema = z.object({
   id: z.string(),
   agentId: z.string(),
+  agentName: z.string().nullable(),
   status: sdkRunStatusSchema,
   promptPreview: z.string(),
   modelId: z.string().nullable(),
@@ -193,6 +210,8 @@ export const runSummarySchema = z.object({
   reasoningTokens: z.number().int().nonnegative().nullable(),
   costUsdMicros: z.number().int().nonnegative().nullable(),
   usageSource: usageSourceSchema.nullable(),
+  toolCallCount: z.number().int().nonnegative(),
+  errorToolCallCount: z.number().int().nonnegative(),
 });
 export type RunSummary = z.infer<typeof runSummarySchema>;
 
@@ -202,14 +221,70 @@ export const listRunsResponseSchema = z.object({
 });
 
 export const getRunEventsQuerySchema = z.object({
-  after_seq: z.number().int().nonnegative().default(0),
-  limit: z.number().int().min(1).max(2000).default(500),
+  after_seq: z.coerce.number().int().nonnegative().default(0),
+  limit: z.coerce.number().int().min(1).max(2000).default(500),
   direction: z.enum(["asc", "desc"]).default("asc"),
 });
+
+export const getRunEventsResponseSchema = z.object({
+  items: z.array(serverFrameSchema),
+  total: z.number().int().nonnegative(),
+  nextAfterSeq: z.number().int().nonnegative().nullable(),
+});
+export type GetRunEventsResponse = z.infer<typeof getRunEventsResponseSchema>;
+
+export const canonicalTranscriptEventSchema = z.object({
+  event_id: z.string(),
+  schema_version: z.literal(1),
+  seq: z.number().int().nonnegative(),
+  agent_id: z.string(),
+  run_id: z.string(),
+  occurred_at: isoDateTimeSchema,
+  received_at: isoDateTimeSchema,
+  sdk_type: eventSdkTypeSchema,
+  kind: z.string(),
+  payload: z.unknown(),
+});
+export type CanonicalTranscriptEvent = z.infer<typeof canonicalTranscriptEventSchema>;
+
+export const transcriptResponseSchema = z.object({
+  run: z.object({
+    id: z.string(),
+    agentId: z.string(),
+    status: sdkRunStatusSchema,
+    startedAt: isoDateTimeSchema,
+    finishedAt: isoDateTimeSchema.nullable(),
+    durationMs: z.number().int().nonnegative().nullable(),
+    modelId: z.string().nullable(),
+    promptPreview: z.string(),
+    usage: tokenUsageSchema,
+    finalText: z.string().nullable(),
+    gitMetadata: z.unknown(),
+  }),
+  agent: z.object({ id: z.string(), name: z.string(), mode: agentModeSchema }),
+  events: z.array(canonicalTranscriptEventSchema),
+  schemaVersion: z.literal(1),
+  exportedAt: isoDateTimeSchema,
+});
+export type TranscriptResponse = z.infer<typeof transcriptResponseSchema>;
 
 // ============================================================================
 // Events
 // ============================================================================
+
+export const eventPayloadResponseSchema = z.object({
+  value: z.unknown(),
+});
+export type EventPayloadResponse = z.infer<typeof eventPayloadResponseSchema>;
+
+export const largePayloadFieldSchema = z.enum(["args", "result", "raw"]);
+export type LargePayloadField = z.infer<typeof largePayloadFieldSchema>;
+
+export const eventLargePayloadResponseSchema = z.object({
+  value: z.unknown(),
+  byteCount: z.number().int().nonnegative(),
+});
+export type EventLargePayloadResponse = z.infer<typeof eventLargePayloadResponseSchema>;
 
 export const eventEnvelopeSchema = z.object({
   id: z.string(),
@@ -299,17 +374,50 @@ export type SetApiKeyRequest = z.infer<typeof setApiKeyRequestSchema>;
 export const usageDateRangeQuerySchema = z.object({
   from: isoDateTimeSchema.optional(),
   to: isoDateTimeSchema.optional(),
+  agentId: z.string().optional(),
+  modelId: z.string().optional(),
 });
+
+export const pricingFreshnessSchema = z.object({
+  lastVerifiedAt: isoDateTimeSchema.nullable(),
+  staleness: z.enum(["fresh", "stale", "never_verified"]),
+});
+export type PricingFreshness = z.infer<typeof pricingFreshnessSchema>;
 
 export const usageSummaryResponseSchema = z.object({
   totalRuns: z.number().int().nonnegative(),
+  totalCost: z.number().int().nonnegative(),
+  totalTokens: z.number().int().nonnegative(),
+  unavailableCount: z.number().int().nonnegative(),
   totalInputTokens: z.number().int().nonnegative(),
   totalOutputTokens: z.number().int().nonnegative(),
   totalCachedInputTokens: z.number().int().nonnegative(),
   totalReasoningTokens: z.number().int().nonnegative(),
   totalCostUsdMicros: z.number().int().nonnegative(),
   bySource: z.record(usageSourceSchema, z.number().int().nonnegative()),
+  pricingFreshness: pricingFreshnessSchema,
 });
+export type UsageSummary = z.infer<typeof usageSummaryResponseSchema>;
+
+export const usageDailyPointSchema = z.object({
+  date: z.string(),
+  cost: z.number().int().nonnegative(),
+  tokens: z.number().int().nonnegative(),
+});
+export const usageDailyResponseSchema = z.array(usageDailyPointSchema);
+export type UsageDailyPoint = z.infer<typeof usageDailyPointSchema>;
+
+export const usageBreakdownRowSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  runs: z.number().int().nonnegative(),
+  cost: z.number().int().nonnegative(),
+  tokens: z.number().int().nonnegative(),
+});
+export const usageBreakdownResponseSchema = z.object({
+  items: z.array(usageBreakdownRowSchema),
+});
+export type UsageBreakdownRow = z.infer<typeof usageBreakdownRowSchema>;
 
 // ============================================================================
 // MCP Servers — TODO: implement routes in Phase 05

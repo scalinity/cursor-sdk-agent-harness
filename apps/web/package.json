@@ -12,10 +12,18 @@
   },
   "dependencies": {
     "@harness/shared": "workspace:*",
+    "@lezer/common": "1.5.2",
+    "@lezer/highlight": "1.2.3",
+    "@lezer/javascript": "1.5.4",
+    "@lezer/json": "1.0.3",
+    "@lezer/markdown": "1.6.3",
+    "@lezer/python": "1.1.18",
+    "@tanstack/react-virtual": "3.13.25",
     "clsx": "2.1.1",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "react-router-dom": "7.1.1",
+    "streaming-markdown": "0.2.15",
     "zod": "3.24.1",
     "zustand": "5.0.2"
   },

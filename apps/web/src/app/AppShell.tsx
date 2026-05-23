@@ -120,7 +120,7 @@ export function AppShell() {
         connectionState={connectionState}
         onSubmit={onSubmit}
       />
-      <RightPane />
+      <RightPane activeRunId={activeRunId} />
       <Statusbar
         connectionState={connectionState}
         modelLabel={activeAgent?.modelId ?? null}
