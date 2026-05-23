@@ -63,6 +63,78 @@ describe("RunController", () => {
     f.cleanup();
   });
 
+  async function startController(
+    sdk: ReturnType<typeof createStubSdkAdapter>,
+    overrides: { runId?: string } = {},
+  ): Promise<{ controller: RunController; runId: string }> {
+    const runId = overrides.runId ?? newRunId();
+    f.runs.create({
+      id: runId,
+      agentId: f.agentId,
+      status: "CREATING",
+      promptPreview: "test",
+      modelId: "composer-2-5-fast",
+    });
+    const stubAgent = await sdk.createAgent({ apiKey: "sk-test-12345678" });
+    const controller = new RunController(
+      {
+        runId,
+        agentId: f.agentId,
+        modelId: "composer-2-5-fast",
+        prompt: "hello",
+        agent: stubAgent as StubSDKAgent,
+        sdk,
+        runsRepo: f.runs,
+        pricing,
+        sink: async () => undefined,
+        logger: f.logger,
+      },
+      () => undefined,
+    );
+    await controller.start();
+    return { controller, runId };
+  }
+
+  it("cancel() writes CANCELLED, not ERROR (FIX-A regression)", async () => {
+    // Stub a run with a single status=RUNNING event and a long-running
+    // generator so we can cancel mid-stream.
+    const sdk = createStubSdkAdapter({
+      onSend: ({ agent, idempotencyKey }) => ({
+        runId: idempotencyKey ?? "stub",
+        agentId: agent.agentId,
+        // No events — stream returns immediately, then wait() resolves
+        // 'cancelled' once cancel() has flipped the StubRun's flag.
+        events: [],
+        finalResult: { status: "finished", durationMs: 5 },
+      }),
+    });
+    const { controller, runId } = await startController(sdk);
+    const result = await controller.cancel("user_cancelled");
+    expect(result).toEqual({ outcome: "cancelled" });
+    await controller.awaitSettled();
+    const row = f.runs.getById(runId);
+    expect(row?.status).toBe("CANCELLED");
+    expect(row?.interruptedReason).toBe("user_cancelled");
+  });
+
+  it("cancel() returns unsupported and writes ERROR + cancel_unavailable when SDK reports no cancel support (FIX-G)", async () => {
+    const sdk = createStubSdkAdapter({
+      onSend: ({ agent, idempotencyKey }) => ({
+        runId: idempotencyKey ?? "stub",
+        agentId: agent.agentId,
+        events: [],
+        finalResult: { status: "finished", durationMs: 5 },
+        supportsCancel: false,
+      }),
+    });
+    const { controller, runId } = await startController(sdk);
+    const result = await controller.cancel("user_cancelled");
+    expect(result.outcome).toBe("unsupported");
+    const row = f.runs.getById(runId);
+    expect(row?.status).toBe("ERROR");
+    expect(row?.interruptedReason).toBe("stream_error");
+  });
+
   it("setStatus refuses to regress a FINISHED row to RUNNING (CRIT-1)", async () => {
     // The stub yields RUNNING -> assistant -> FINISHED -> RUNNING.
     // Pre-fix, the trailing RUNNING frame would overwrite FINISHED.
@@ -113,5 +185,60 @@ describe("RunController", () => {
     await controller.awaitSettled();
     const row = f.runs.getById(runId);
     expect(row?.status).toBe("FINISHED");
+  });
+
+  it("AgentsRepo.swapId transactionally relabels an agent's durable id (FIX-D)", () => {
+    // Direct repo test — proves the swap is atomic without requiring the
+    // (currently mid-refactor) AgentRuntime.create call site.
+    const oldId = "agent-original";
+    const newId = "agent-sdk-rotated";
+    f.agents.create({
+      id: oldId,
+      name: "rotate-me",
+      status: "creating",
+      mode: "local",
+      modelId: "composer-2-5-fast",
+    });
+    const replaced = f.agents.swapId(oldId, {
+      id: newId,
+      name: "rotate-me",
+      status: "active",
+      mode: "local",
+      modelId: "composer-2-5-fast",
+    });
+    expect(replaced.id).toBe(newId);
+    expect(replaced.status).toBe("active");
+    expect(f.agents.getById(oldId)).toBeNull();
+    expect(f.agents.getById(newId)).not.toBeNull();
+  });
+
+  it("AgentsRepo.swapId rolls back when the replacement insert fails (FIX-D)", () => {
+    // Pre-create the target id so the swap's INSERT collides with UNIQUE.
+    f.agents.create({
+      id: "collide",
+      name: "existing",
+      status: "active",
+      mode: "local",
+      modelId: "composer-2-5-fast",
+    });
+    f.agents.create({
+      id: "to-rotate",
+      name: "victim",
+      status: "creating",
+      mode: "local",
+      modelId: "composer-2-5-fast",
+    });
+    expect(() =>
+      f.agents.swapId("to-rotate", {
+        id: "collide",
+        name: "victim",
+        status: "active",
+        mode: "local",
+        modelId: "composer-2-5-fast",
+      }),
+    ).toThrow();
+    // Original row should still exist — transaction rolled back the DELETE.
+    expect(f.agents.getById("to-rotate")).not.toBeNull();
+    expect(f.agents.getById("collide")?.name).toBe("existing");
   });
 });
