@@ -2,6 +2,10 @@ import type { FastifyBaseLogger } from "fastify";
 import type { AgentMode, EventRow, SDKMessage } from "@harness/shared";
 import { sdkMessageSchema } from "@harness/shared";
 import type { EventsRepo } from "../db/repositories/events.repo.js";
+import {
+  NOOP_PERF_COUNTERS,
+  type PerfCounters,
+} from "../observability/perf-counters.js";
 import type { RunBus } from "../ws/run-bus.js";
 import { normalize, type RunContext } from "./normalizer.js";
 import type { StreamSink } from "./stream-stub.js";
@@ -22,6 +26,12 @@ export interface PipelineDeps {
   events: EventsRepo;
   bus: RunBus;
   logger: FastifyBaseLogger;
+  /**
+   * Phase 14 perf counters. Optional so existing callers don't have to
+   * thread the recorder through every test fixture; defaults to the
+   * no-op recorder.
+   */
+  perfCounters?: PerfCounters;
 }
 
 export interface IngestArgs {
@@ -114,6 +124,7 @@ export function createPersistAndBroadcast(
   options: PipelineOptions = {},
 ): PersistAndBroadcastPipeline {
   const capacity = options.bufferCapacity ?? DEFAULT_BUFFER_CAPACITY;
+  const perf = deps.perfCounters ?? NOOP_PERF_COUNTERS;
   // Map preserves insertion order; we promote to most-recently-used on
   // every `getBuffer` so the LRU eviction picks a genuinely stale run.
   const bufferByRun = new Map<string, RunBufferState>();
@@ -182,6 +193,7 @@ export function createPersistAndBroadcast(
       // broadcast loop only sees committed rows.
       const persisted: EventRow[] = [];
       for (const draft of drafts) {
+        const commitStart = performance.now();
         try {
           const row = deps.events.appendCanonicalEvent({
             runId: args.runId,
@@ -196,6 +208,10 @@ export function createPersistAndBroadcast(
             occurredAt: draft.occurredAt,
             receivedAt: draft.receivedAt,
           });
+          perf.observe(
+            "sdk_event_received_to_db_commit_ms",
+            performance.now() - commitStart,
+          );
           persisted.push(row);
         } catch (err) {
           deps.logger.error(
@@ -231,7 +247,12 @@ export function createPersistAndBroadcast(
       // which a WS frame can leave the server for this event. No other code
       // path may call bus.publish() for canonical events.
       for (const row of persisted) {
+        const broadcastStart = performance.now();
         deps.bus.publish(args.runId, row);
+        perf.observe(
+          "db_commit_to_ws_broadcast_ms",
+          performance.now() - broadcastStart,
+        );
       }
     },
 
@@ -295,6 +316,7 @@ export function createPersistAndBroadcast(
       // ack-ok the client on a failed persist. The caller now sees
       // failures and can convert them to an INTERNAL_ERROR frame.
       const occurredAt = args.occurredAt ?? new Date().toISOString();
+      const commitStart = performance.now();
       const row = deps.events.appendCanonicalEvent({
         runId: args.runId,
         agentId: args.agentId,
@@ -308,7 +330,16 @@ export function createPersistAndBroadcast(
         occurredAt,
         receivedAt: occurredAt,
       });
+      perf.observe(
+        "sdk_event_received_to_db_commit_ms",
+        performance.now() - commitStart,
+      );
+      const broadcastStart = performance.now();
       deps.bus.publish(args.runId, row);
+      perf.observe(
+        "db_commit_to_ws_broadcast_ms",
+        performance.now() - broadcastStart,
+      );
     },
   };
 }

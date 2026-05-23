@@ -4,6 +4,7 @@ import websocket from "@fastify/websocket";
 import { registerRoutes } from "./routes/index.js";
 import type { Env } from "./config/env.js";
 import { REDACT_CONFIG, safeReqSerializer } from "./observability/logger.js";
+import { createPerfCounters, type PerfCounters } from "./observability/perf-counters.js";
 import {
   CursorApiKeyStore,
   CsrfSecretStore,
@@ -65,6 +66,13 @@ export interface AppDeps {
    * inspect them before recovery flips them set this to true.
    */
   skipStartupRecovery?: boolean;
+  /**
+   * Phase 14 — injected perf counters. Production builds a real
+   * recorder via `createPerfCounters()` so the
+   * `/api/observability/perf` route can surface live histograms.
+   * Tests may pass a shared instance to assert observation behavior.
+   */
+  perfCounters?: PerfCounters;
 }
 
 export interface BuiltApp {
@@ -85,6 +93,11 @@ export interface BuiltApp {
    * cancellation through a single source of truth.
    */
   activeRuns: ActiveRuns;
+  /**
+   * Phase 14 — exposed so tests can assert observation behaviour and the
+   * `/api/observability/perf` route can read live snapshots.
+   */
+  perfCounters: PerfCounters;
 }
 
 export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
@@ -147,6 +160,11 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   });
   await app.register(websocket);
 
+  // Phase 14 — perf counters live above the pipeline so both the
+  // persist-and-broadcast pipeline and the WS plugin share one
+  // observation surface.
+  const perfCounters = deps.perfCounters ?? createPerfCounters();
+
   // Phase 07 pipeline. Build the run bus + persist-and-broadcast first so
   // the agent runtime gets the real sink — the stub Phase 06 sink is now
   // dead code outside tests.
@@ -156,6 +174,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     events: repos.events,
     bus: runBus,
     logger: app.log,
+    perfCounters,
   });
 
   const sdk = deps.sdk ?? createCursorSdkAdapter();
@@ -185,6 +204,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     activeRuns,
     approvalResponder,
     pipeline,
+    perfCounters,
     ...(deps.wsHeartbeatIntervalMs !== undefined
       ? { heartbeatIntervalMs: deps.wsHeartbeatIntervalMs }
       : {}),
@@ -226,6 +246,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     usage: { runsRepo: repos.runs, settingsRepo: repos.settings },
     mcpServers: { mcpServers: repos.mcpServers },
     subagents: { subagents: repos.subagents, mcpServers: repos.mcpServers },
+    observability: { perfCounters },
   });
 
   return {
@@ -236,5 +257,6 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     agentRuntime,
     runBus,
     activeRuns,
+    perfCounters,
   };
 }

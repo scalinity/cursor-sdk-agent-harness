@@ -20,6 +20,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { serverFrameSchema, type ClientFrame, type ServerFrame } from "@harness/shared";
+import { clientPerf } from "../lib/perf-counters.js";
 import type { ConnectionState } from "../state/ui-store.js";
 
 const RECONNECT_BASE_MS = 250;
@@ -224,7 +225,12 @@ export function useWebSocket(config: UseWebSocketConfig): UseWebSocketResult {
         } catch {
           return;
         }
+        const validateStart = performance.now();
         const result = serverFrameSchema.safeParse(parsed);
+        clientPerf.observe(
+          "client_frame_validation_ms",
+          performance.now() - validateStart,
+        );
         if (!result.success) return;
         const frame = result.data;
         // Auto-ack heartbeats. Drive everything else through the consumer.

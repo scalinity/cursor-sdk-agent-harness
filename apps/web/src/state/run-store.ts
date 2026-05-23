@@ -25,6 +25,7 @@ import type {
   UsageSource,
 } from "@harness/shared";
 import { create } from "zustand";
+import { clientPerf } from "../lib/perf-counters.js";
 
 /**
  * The shape of every canonical event the client knows about. We type the
@@ -224,6 +225,7 @@ export const useRunStore = create<RunState>((set) => ({
   activeRunId: null,
 
   ingestServerFrame: (frame, options) => {
+    const ingestStart = performance.now();
     set((state) => {
       // Acks and heartbeats don't carry events.
       if (frame.type === "ack" || frame.type === "heartbeat" || frame.type === "error") {
@@ -390,6 +392,10 @@ export const useRunStore = create<RunState>((set) => ({
         eventsByRunId: { ...state.eventsByRunId, [runId]: nextEvents },
       };
     });
+    clientPerf.observe(
+      "client_event_ingest_ms",
+      performance.now() - ingestStart,
+    );
   },
 
   upsertRunSummary: (summary) => {

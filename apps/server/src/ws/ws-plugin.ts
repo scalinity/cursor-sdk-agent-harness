@@ -18,6 +18,10 @@ import {
 } from "@harness/shared";
 import type { EventsRepo } from "../db/repositories/events.repo.js";
 import type { RunsRepo } from "../db/repositories/runs.repo.js";
+import {
+  NOOP_PERF_COUNTERS,
+  type PerfCounters,
+} from "../observability/perf-counters.js";
 import type { ActiveRuns } from "../sdk/active-runs.js";
 import type {
   ApprovalResponder,
@@ -120,6 +124,12 @@ export interface WsPluginOptions {
       occurredAt: string;
     }) => void;
   };
+  /**
+   * Phase 14 perf counters. Optional — the plugin defaults to a no-op
+   * recorder so existing call sites don't need to thread the counter
+   * through every test fixture.
+   */
+  perfCounters?: PerfCounters;
 }
 
 /**
@@ -512,7 +522,7 @@ async function handleSubscribeRun(
       }
       return;
     }
-    deliverEvent(state, event, false);
+    deliverEvent(state, event, false, opts.perfCounters ?? NOOP_PERF_COUNTERS);
   });
   subscription.unsubscribe = unsubscribe;
   state.subscriptions.set(frame.run_id, subscription);
@@ -528,8 +538,9 @@ async function handleSubscribeRun(
   // subscription to live mode. Otherwise a race could deliver a live event
   // ahead of the queued ones.
   const drained = subscription.liveQueue.splice(0, subscription.liveQueue.length);
+  const perf = opts.perfCounters ?? NOOP_PERF_COUNTERS;
   for (const event of drained) {
-    deliverEvent(state, event, false);
+    deliverEvent(state, event, false, perf);
   }
   subscription.replaying = false;
   sendFrame(state, ackFrame(frame.id, { replay_complete: true }));
@@ -542,6 +553,7 @@ async function runReplay(
   opts: WsPluginOptions,
 ): Promise<void> {
   let cursor = afterSeq;
+  const perf = opts.perfCounters ?? NOOP_PERF_COUNTERS;
   // Paginate through SQLite so a 50k-event run doesn't allocate the whole
   // list in memory at once. Loop breaks via internal returns once the
   // last page is exhausted or the connection closes.
@@ -550,7 +562,7 @@ async function runReplay(
     const rows = opts.events.getByRunIdAfterSeq(runId, cursor, REPLAY_PAGE_SIZE);
     if (rows.length === 0) return;
     for (const row of rows) {
-      deliverEvent(state, row, true);
+      deliverEvent(state, row, true, perf);
     }
     const last = rows[rows.length - 1];
     if (!last) return;
@@ -575,7 +587,9 @@ function deliverEvent(
   state: ConnectionState,
   row: EventRow,
   replayed: boolean,
+  perf: PerfCounters,
 ): void {
+  const flushStart = performance.now();
   const frame = buildServerFrame(row, { replayed });
   if (frame === null) return;
   // Validate every outbound event frame against the shared schema before
@@ -596,6 +610,11 @@ function deliverEvent(
     return;
   }
   sendFrame(state, frame);
+  // ws_flush_delay_ms — wall clock from listener entry to the
+  // socket.send() return. Captures schema validation + JSON.stringify +
+  // native send-buffer write; spec §13 budget treats this as the
+  // "server WS flush delay" target.
+  perf.observe("ws_flush_delay_ms", performance.now() - flushStart);
 }
 
 function handleUnsubscribeRun(
