@@ -153,14 +153,13 @@ describe("Phase 12 — agent create wiring", () => {
       prompt: "do work",
       model: null, // inherit
     });
-    h.repos.subagents.create({
+    const offSub = h.repos.subagents.create({
       name: "off-sub",
       enabled: false,
       description: "off",
       prompt: "do nothing",
       model: { id: "composer-2-5" },
     });
-    void enabledSub;
 
     const token = await h.csrfToken();
     const res = await h.app.inject({
@@ -174,7 +173,9 @@ describe("Phase 12 — agent create wiring", () => {
         sandboxEnabled: true,
         settingSources: ["project"],
         mcpServerIds: [],
-        subagentDefinitionIds: [],
+        // REVIEW-W11: the agent must reference subagents explicitly. We
+        // include both so the test exercises the disabled-row filter.
+        subagentDefinitionIds: [enabledSub.id, offSub.id],
       },
       headers: {
         origin: "http://127.0.0.1:5173",
@@ -188,5 +189,47 @@ describe("Phase 12 — agent create wiring", () => {
     expect(Object.keys(opts.agents ?? {})).toEqual(["active-sub"]);
     // Inherit → model field is omitted, not set to null.
     expect(opts.agents?.["active-sub"]?.model).toBeUndefined();
+  });
+
+  it("REVIEW-W11: a subagent NOT in agent.subagentDefinitionIds is excluded even if enabled", async () => {
+    h = await buildHarness();
+    const wanted = h.repos.subagents.create({
+      name: "wanted",
+      enabled: true,
+      description: "wanted",
+      prompt: "do work",
+      model: null,
+    });
+    h.repos.subagents.create({
+      name: "unwanted",
+      enabled: true,
+      description: "unwanted",
+      prompt: "do nothing",
+      model: null,
+    });
+
+    const token = await h.csrfToken();
+    const res = await h.app.inject({
+      method: "POST",
+      url: "/api/agents",
+      payload: {
+        name: "scoped",
+        mode: "local",
+        modelId: "composer-2-5-fast",
+        cwd: [h.allowedDir],
+        sandboxEnabled: true,
+        settingSources: ["project"],
+        mcpServerIds: [],
+        subagentDefinitionIds: [wanted.id],
+      },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": token,
+        "content-type": "application/json",
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const opts = h.capturedOptions[0]!;
+    expect(Object.keys(opts.agents ?? {})).toEqual(["wanted"]);
   });
 });

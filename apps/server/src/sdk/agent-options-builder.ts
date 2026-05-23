@@ -88,8 +88,17 @@ export async function buildAgentOptions(
     }
   }
 
+  // REVIEW-W11: respect the per-agent selection. The agent row's
+  // `mcpServerIds` and `subagentDefinitionIds` are the user's explicit
+  // pick from the NewAgentDialog tabs. Only rows referenced there get
+  // materialised onto AgentOptions. Empty arrays mean "no MCP servers /
+  // subagents for this agent" — the dialog default reflects that.
+  const selectedMcpIds = new Set(agent.mcpServerIds);
+  const selectedSubagentIds = new Set(agent.subagentDefinitionIds);
+
   const mcp: NonNullable<AgentOptions["mcpServers"]> = {};
   for (const server of mcpServers) {
+    if (!selectedMcpIds.has(server.id)) continue;
     if (!server.enabled) continue;
     if (server.validationStatus !== "valid") continue;
     // shared/zod infers `type?: "stdio" | undefined`; the SDK's exported type
@@ -100,10 +109,18 @@ export async function buildAgentOptions(
 
   const agentsDefinitions: NonNullable<AgentOptions["agents"]> = {};
   for (const sub of subagents) {
+    if (!selectedSubagentIds.has(sub.id)) continue;
     if (!sub.enabled) continue;
+    // subagent.mcpServerIds is the subagent's own allowlist; we also
+    // gate by the parent agent's selection so a subagent can't reach
+    // into a server the agent didn't pick.
     const subagentMcp: string[] = sub.mcpServerIds.filter((id) =>
       mcpServers.some(
-        (s) => s.id === id && s.enabled && s.validationStatus === "valid",
+        (s) =>
+          s.id === id &&
+          selectedMcpIds.has(s.id) &&
+          s.enabled &&
+          s.validationStatus === "valid",
       ),
     );
     agentsDefinitions[sub.name] = {

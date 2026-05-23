@@ -118,7 +118,7 @@ describe("buildAgentOptions", () => {
     ).rejects.toBeInstanceOf(WorkspaceRejectedError);
   });
 
-  it("only includes MCP servers that are enabled AND validation=valid", async () => {
+  it("only includes MCP servers that are enabled AND validation=valid AND selected by the agent", async () => {
     const servers: McpServerRow[] = [
       mcpRow({ id: "m1", name: "good", enabled: true, validationStatus: "valid" }),
       mcpRow({ id: "m2", name: "disabled", enabled: false, validationStatus: "valid" }),
@@ -126,13 +126,35 @@ describe("buildAgentOptions", () => {
       mcpRow({ id: "m4", name: "bad", enabled: true, validationStatus: "invalid" }),
     ];
     const opts = await buildAgentOptions({
-      agent: agentRow({ cwd: [allowedDir] }),
+      agent: agentRow({
+        cwd: [allowedDir],
+        // REVIEW-W11: agent must reference servers explicitly.
+        mcpServerIds: ["m1", "m2", "m3", "m4"],
+      }),
       apiKey: "sk-test-12345678",
       mcpServers: servers,
       subagents: [],
       workspacePolicy: policy,
     });
     expect(Object.keys(opts.mcpServers ?? {})).toEqual(["good"]);
+  });
+
+  it("REVIEW-W11: an MCP server that exists+valid but is NOT in agent.mcpServerIds is excluded", async () => {
+    const servers: McpServerRow[] = [
+      mcpRow({ id: "m-yes", name: "selected", enabled: true, validationStatus: "valid" }),
+      mcpRow({ id: "m-no", name: "unselected", enabled: true, validationStatus: "valid" }),
+    ];
+    const opts = await buildAgentOptions({
+      agent: agentRow({
+        cwd: [allowedDir],
+        mcpServerIds: ["m-yes"],
+      }),
+      apiKey: "sk-test-12345678",
+      mcpServers: servers,
+      subagents: [],
+      workspacePolicy: policy,
+    });
+    expect(Object.keys(opts.mcpServers ?? {})).toEqual(["selected"]);
   });
 
   it("includes enabled subagents with their referenced MCP server names", async () => {
@@ -158,7 +180,11 @@ describe("buildAgentOptions", () => {
       }),
     ];
     const opts = await buildAgentOptions({
-      agent: agentRow({ cwd: [allowedDir] }),
+      agent: agentRow({
+        cwd: [allowedDir],
+        mcpServerIds: ["m-keep", "m-drop"],
+        subagentDefinitionIds: ["s1", "s2"],
+      }),
       apiKey: "sk-test-12345678",
       mcpServers: servers,
       subagents: subs,
@@ -166,6 +192,24 @@ describe("buildAgentOptions", () => {
     });
     expect(Object.keys(opts.agents ?? {})).toEqual(["explorer"]);
     expect(opts.agents?.explorer?.mcpServers).toEqual(["m-keep"]);
+  });
+
+  it("REVIEW-W11: a subagent that exists+enabled but is NOT in agent.subagentDefinitionIds is excluded", async () => {
+    const subs: SubagentDefinitionRow[] = [
+      subRow({ id: "s-yes", name: "selected", enabled: true, model: null }),
+      subRow({ id: "s-no", name: "unselected", enabled: true, model: null }),
+    ];
+    const opts = await buildAgentOptions({
+      agent: agentRow({
+        cwd: [allowedDir],
+        subagentDefinitionIds: ["s-yes"],
+      }),
+      apiKey: "sk-test-12345678",
+      mcpServers: [],
+      subagents: subs,
+      workspacePolicy: policy,
+    });
+    expect(Object.keys(opts.agents ?? {})).toEqual(["selected"]);
   });
 
   it("omits subagent.model when model is null (inherit)", async () => {
@@ -180,7 +224,7 @@ describe("buildAgentOptions", () => {
       }),
     ];
     const opts = await buildAgentOptions({
-      agent: agentRow({ cwd: [allowedDir] }),
+      agent: agentRow({ cwd: [allowedDir], subagentDefinitionIds: ["s1"] }),
       apiKey: "sk-test-12345678",
       mcpServers: [],
       subagents: subs,
@@ -202,7 +246,7 @@ describe("buildAgentOptions", () => {
       }),
     ];
     const opts = await buildAgentOptions({
-      agent: agentRow({ cwd: [allowedDir] }),
+      agent: agentRow({ cwd: [allowedDir], subagentDefinitionIds: ["s1"] }),
       apiKey: "sk-test-12345678",
       mcpServers: [],
       subagents: subs,
