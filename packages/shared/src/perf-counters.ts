@@ -50,10 +50,25 @@ interface RingState {
    */
   filled: number;
   cursor: number;
+  /**
+   * P14-S6: cached snapshot, valid until the next `observe` invalidates
+   * it. Avoids the O(n log n) sort + 8KB Float64Array allocation on
+   * every read. Hot callers (a future watchdog that polls
+   * /api/observability/perf at WS rates, or snapshotAll inside a tight
+   * loop) get O(1) reads between writes; cold callers (the existing
+   * stress test, periodic /usage page footer polls) see no behavior
+   * change.
+   */
+  cachedSnapshot: CounterSnapshot | null;
 }
 
 function newRing(capacity: number): RingState {
-  return { buffer: new Float64Array(capacity), filled: 0, cursor: 0 };
+  return {
+    buffer: new Float64Array(capacity),
+    filled: 0,
+    cursor: 0,
+    cachedSnapshot: null,
+  };
 }
 
 function ringObserve(ring: RingState, value: number): void {
@@ -61,6 +76,9 @@ function ringObserve(ring: RingState, value: number): void {
   ring.buffer[ring.cursor] = value;
   ring.cursor = (ring.cursor + 1) % ring.buffer.length;
   if (ring.filled < ring.buffer.length) ring.filled += 1;
+  // Invalidate the cached snapshot — the next snapshot() call will
+  // recompute and re-cache.
+  ring.cachedSnapshot = null;
 }
 
 function percentile(sorted: Float64Array, length: number, p: number): number {
@@ -70,20 +88,33 @@ function percentile(sorted: Float64Array, length: number, p: number): number {
 }
 
 function ringSnapshot(ring: RingState): CounterSnapshot {
+  // P14-S6: return cached snapshot when no observation has invalidated
+  // it. The cache is invalidated by ringObserve on the next write.
+  if (ring.cachedSnapshot !== null) return ring.cachedSnapshot;
   if (ring.filled === 0) {
-    return { count: 0, p50: null, p95: null, p99: null, max: null };
+    const empty: CounterSnapshot = {
+      count: 0,
+      p50: null,
+      p95: null,
+      p99: null,
+      max: null,
+    };
+    ring.cachedSnapshot = empty;
+    return empty;
   }
   // Float64Array.slice + sort sorts numerically — avoids the JS
   // Array.prototype.sort lexical-order pitfall.
   const live = ring.buffer.slice(0, ring.filled);
   live.sort();
-  return {
+  const snap: CounterSnapshot = {
     count: ring.filled,
     p50: percentile(live, ring.filled, 0.5),
     p95: percentile(live, ring.filled, 0.95),
     p99: percentile(live, ring.filled, 0.99),
     max: live[ring.filled - 1] ?? null,
   };
+  ring.cachedSnapshot = snap;
+  return snap;
 }
 
 export const EMPTY_SNAPSHOT: CounterSnapshot = {
