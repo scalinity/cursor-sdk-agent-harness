@@ -184,8 +184,12 @@ export class RunController {
         try {
           await this.init.sink(event);
         } catch (sinkErr) {
-          // Sink errors are logged but never abort the SDK stream — the
-          // normalizer that lands in Phase 07 has its own retry semantics.
+          // Sink errors are logged but never abort the SDK stream while
+          // the stub sink is in place. TODO(Phase 07): the normalizer
+          // must NOT tolerate sink failures silently — persist-before-
+          // broadcast requires that a failed persist abort the broadcast
+          // (and ideally the consume loop). Tighten this contract when
+          // the normalizer replaces the stub.
           this.init.logger.error(
             { err: sinkErr, runId: this.runId },
             "sink threw on SDK event",
@@ -279,17 +283,40 @@ export class RunController {
       upper === "EXPIRED"
     ) {
       this.setStatus(upper as SdkRunStatus);
+      return;
     }
+    // Unknown status literal — log at debug so Phase 14 observability can
+    // surface SDK drift (new status values shipped by future SDK
+    // releases) without polluting normal-flow logs.
+    this.init.logger.debug(
+      { runId: this.runId, status: next },
+      "sdk.status: unknown status literal — ignoring",
+    );
   }
+
+  private onDeltaParseFailureLogged = false;
 
   private onDelta(update: unknown): void {
     if (update === null || typeof update !== "object") return;
     const rec = update as Record<string, unknown>;
     if (rec.type === "turn-ended") {
-      this.accumulatedUsage = accumulateTurnEndedUsage(
+      const next = accumulateTurnEndedUsage(
         this.accumulatedUsage,
         (rec as { usage?: unknown }).usage,
       );
+      if (next === this.accumulatedUsage && this.accumulatedUsage !== null) {
+        // accumulator returned the previous snapshot unchanged → the new
+        // payload failed Zod parse. Log once per run to surface SDK shape
+        // drift without flooding logs on every turn.
+        if (!this.onDeltaParseFailureLogged) {
+          this.onDeltaParseFailureLogged = true;
+          this.init.logger.warn(
+            { runId: this.runId },
+            "onDelta: turn-ended payload failed to parse — usage from this turn dropped",
+          );
+        }
+      }
+      this.accumulatedUsage = next;
     }
   }
 

@@ -18,6 +18,10 @@ export function createStubSink(logger: FastifyBaseLogger): StreamSink {
   };
 }
 
+// TODO(Phase 07): the Phase 07 normalizer will canonicalize SDK event
+// shapes into camelCase canonical events. Once that lands, drop the
+// dual-casing (snake `agent_id` AND camel `agentId`) reads below — the
+// summariser will see canonical events only.
 function summariseEvent(event: unknown): {
   type: string;
   agentId?: string;
