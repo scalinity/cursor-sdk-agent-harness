@@ -490,7 +490,18 @@ async function runReplay(
     }
     const last = rows[rows.length - 1];
     if (!last) return;
-    if (last.seq <= cursor) return; // safety guard against pathological data
+    if (last.seq <= cursor) {
+      // Unreachable today — the query is `seq > cursor ORDER BY seq
+      // ASC`, so `last.seq > cursor` is a SQL invariant. If we ever
+      // see this, the schema or the query changed in a way that
+      // would silently truncate replay; log loudly and bail rather
+      // than infinite-loop on stuck pagination.
+      state.log.error(
+        { runId, cursor, lastSeq: last.seq, pageSize: rows.length },
+        "ws: replay pagination produced a non-advancing cursor — schema regression?",
+      );
+      return;
+    }
     cursor = last.seq;
     if (rows.length < REPLAY_PAGE_SIZE) return;
   }
