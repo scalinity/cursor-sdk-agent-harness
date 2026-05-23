@@ -1,17 +1,27 @@
 import type { ConnectionState } from "../../state/ui-store.js";
 
 /**
- * Statusbar — bottom rail. Shows live-write indicator, model/subagents/mcp
- * status, and right-hand metrics. The animated pulse is Phase 14; this
- * phase uses a static accent dot.
+ * Statusbar — bottom rail. Shows live-write indicator, model/ws status, and
+ * a right-hand slot that surfaces the active workspace when idle and the
+ * cancel-key hint while a run is in flight.
  */
 export interface StatusbarProps {
   connectionState: ConnectionState;
   modelLabel: string | null;
   runningRunId: string | null;
+  /**
+   * Phase 16 — active workspace label (or null when none is selected, but
+   * the WorkspaceRequiredModal will be up in that case).
+   */
+  workspaceName?: string | null;
 }
 
-export function Statusbar({ connectionState, modelLabel, runningRunId }: StatusbarProps) {
+export function Statusbar({
+  connectionState,
+  modelLabel,
+  runningRunId,
+  workspaceName,
+}: StatusbarProps) {
   return (
     <div className="statusbar">
       <span className="inline-flex flex-none items-center gap-1.5 text-accent-primary">
@@ -28,8 +38,14 @@ export function Statusbar({ connectionState, modelLabel, runningRunId }: Statusb
           ws <span className={connectionState === "open" ? "text-success" : "text-warning"}>{connectionState}</span>
         </span>
       </span>
-      <span className="ml-auto flex flex-none gap-2.5 border-l border-border-subtle pl-2.5">
-        <span>⌘. cancel</span>
+      <span className="ml-auto flex flex-none items-center gap-2.5 border-l border-border-subtle pl-2.5">
+        {runningRunId ? (
+          <span className="mono text-text-tertiary">⌘. cancel</span>
+        ) : workspaceName ? (
+          <span className="mono text-text-tertiary" title={workspaceName}>
+            {workspaceName}
+          </span>
+        ) : null}
       </span>
     </div>
   );
