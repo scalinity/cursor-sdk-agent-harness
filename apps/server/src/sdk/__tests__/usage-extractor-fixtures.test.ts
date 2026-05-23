@@ -98,30 +98,42 @@ describe("Phase 14 usage parse fixtures", () => {
   });
 
   it("unknown-shape: final_result.usage has keys we don't recognize", () => {
+    // P14-S13: use key names that can't collide with future SDK aliases
+    // (the ledger discussion around OQ-05 entertains `reasoning_tokens`
+    // and similar). `totally_unknown_field_a/b/c` is deliberately weird
+    // so the test pins which branch of extractUsage is exercised, even
+    // after an SDK swap.
     const out = extractUsage({
       rawUsage: {
-        totalTokens: 1_500,
-        billing_unit: "characters",
-        weirdKey: { nested: true },
+        totally_unknown_field_a: 1_500,
+        totally_unknown_field_b: "characters",
+        totally_unknown_field_c: { nested: true },
       },
       modelId: "composer-2-5-fast",
       pricing: PRICING,
     });
     expect(out.usage_source).toBe("unavailable");
     expect(out.parseError).toBeDefined();
+    // P14-W1 + P14-S13: pin the message so the test distinguishes the
+    // safeParse-failure branch from the "parseable but all-null" branch.
+    // After P14-W1 (`looksParsed` requires a canonical key), this fixture
+    // genuinely exercises the safeParse path.
+    expect(out.parseError?.message).toBe(
+      "Usage payload did not match TurnEndedUpdate.usage shape",
+    );
     // The rawShape should capture the keys (without their values) for
     // ledger feedback when the SDK shifts.
     const shape = out.parseError?.rawShape as Record<string, unknown>;
     expect(shape).toBeDefined();
     expect(Object.keys(shape).sort()).toEqual([
-      "billing_unit",
-      "totalTokens",
-      "weirdKey",
+      "totally_unknown_field_a",
+      "totally_unknown_field_b",
+      "totally_unknown_field_c",
     ]);
     // Values should be the type tags, not the literal data, so secrets
     // can't ride into the parse-error log.
-    expect(shape.totalTokens).toBe("<number>");
-    expect(shape.billing_unit).toBe("<string>");
+    expect(shape.totally_unknown_field_a).toBe("<number>");
+    expect(shape.totally_unknown_field_b).toBe("<string>");
   });
 
   it("malformed: final_result.usage with a string token count", () => {

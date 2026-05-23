@@ -22,6 +22,13 @@ import { z } from "zod";
  *   - `"derived"`: reserved for future harness-side derivation (not used in v1).
  */
 
+// P14-W1: `.strict()` so safeParse rejects payloads whose entire key
+// set falls outside the canonical names. Without strict, Zod's default
+// behavior is to strip unknown keys silently, leaving `{}` and a
+// success result — which routed unknown-shape payloads through the
+// "parseable but all token fields missing" branch instead of the
+// safeParse-failure branch. Strict makes those two failure modes
+// distinguishable to the `parseError.message` field.
 const turnEndedUsageShape = z.object({
   inputTokens: z.number().int().nonnegative().optional(),
   outputTokens: z.number().int().nonnegative().optional(),
@@ -31,7 +38,7 @@ const turnEndedUsageShape = z.object({
   // we accept either alias if a future SDK version exposes it.
   reasoningTokens: z.number().int().nonnegative().optional(),
   reasoning_tokens: z.number().int().nonnegative().optional(),
-});
+}).strict();
 export type ParsedTurnEndedUsage = z.infer<typeof turnEndedUsageShape>;
 
 export interface ExtractedUsageInput {
@@ -116,29 +123,44 @@ export function extractUsage(input: ExtractedUsageInput): ExtractedUsage {
   };
 }
 
+const CANONICAL_USAGE_KEYS = [
+  "inputTokens",
+  "outputTokens",
+  "cacheReadTokens",
+  "cacheWriteTokens",
+  "reasoningTokens",
+  "reasoning_tokens",
+] as const;
+
 /**
  * Cheap structural test: does `value` already look like a
  * `ParsedTurnEndedUsage` snapshot? If yes we skip the Zod re-parse on the
  * happy path (see `extractUsage`). False negatives are safe — we fall
  * back to safeParse — but a true positive saves the issue-array
  * allocation per call.
+ *
+ * P14-W1: require at least one canonical key to be present. The
+ * previous implementation returned `true` for objects with zero
+ * canonical-key overlap (e.g. `{ totalTokens, billing_unit }`), which
+ * silently routed unknown-shape payloads down the "parseable but all
+ * token fields missing" branch instead of the safeParse-failure branch.
+ * Both branches yielded `usage_source: "unavailable"` so behavior was
+ * indistinguishable to current callers, but the `parseError.message`
+ * field diverged — and a future consumer that branches on it would get
+ * the wrong path. Now: must have at least one canonical key AND every
+ * present canonical key must be a number.
  */
 function looksParsed(value: unknown): boolean {
   if (value === null || typeof value !== "object") return false;
   const v = value as Record<string, unknown>;
-  // Require every present field to be a number; reject objects with
-  // unexpected keys to keep the fast-path conservative.
-  for (const k of [
-    "inputTokens",
-    "outputTokens",
-    "cacheReadTokens",
-    "cacheWriteTokens",
-    "reasoningTokens",
-    "reasoning_tokens",
-  ]) {
-    if (k in v && typeof v[k] !== "number") return false;
+  let sawCanonical = false;
+  for (const k of CANONICAL_USAGE_KEYS) {
+    if (k in v) {
+      if (typeof v[k] !== "number") return false;
+      sawCanonical = true;
+    }
   }
-  return true;
+  return sawCanonical;
 }
 
 function unavailable(): TokenUsage {
