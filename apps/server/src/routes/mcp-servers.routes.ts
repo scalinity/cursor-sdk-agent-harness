@@ -284,6 +284,17 @@ export async function registerMcpServersRoutes(
   app.delete<{ Params: { id: string } }>(
     "/api/mcp-servers/:id",
     async (req, reply) => {
+      // REVIEW-W9: deletion does NOT cascade to subagent.mcpServerIds.
+      // Subagents that reference this server row keep the stale id.
+      // Runtime tolerates this: `buildAgentOptions` filters unknown
+      // ids before assembling the SDK request. The next time a user
+      // edits the subagent, the referential-integrity check at
+      // subagents.routes.ts will reject the (now-unknown) id —
+      // forcing the user to drop the stale reference.
+      //
+      // A full cascade — or an active-agent guard that blocks
+      // deletion when any agent currently uses the server — is
+      // deferred to Phase 13 (see IMPLEMENTATION_STATUS.md).
       const existing = deps.mcpServers.getById(req.params.id);
       if (!existing) return reply.code(404).send({ code: "NOT_FOUND" });
       deps.mcpServers.delete(req.params.id);
