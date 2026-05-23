@@ -7,7 +7,7 @@
  *   - WS connection    (useAgentStream)
  *   - ⌘J / ⌘K bindings (useKeyboardShortcuts)
  */
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useCsrfToken } from "../hooks/useCsrfToken.js";
 import { useAgents } from "../hooks/useAgents.js";
 import { useRunHistory } from "../hooks/useRunHistory.js";
@@ -23,14 +23,16 @@ import { CenterPane } from "../components/shell/CenterPane.js";
 import { RightPane } from "../components/shell/RightPane.js";
 import { Statusbar } from "../components/shell/Statusbar.js";
 import { BootstrapBanner } from "../components/shell/BootstrapBanner.js";
+import { NewAgentDialog } from "../components/agents/NewAgentDialog.js";
 import { cn } from "../lib/cn.js";
 
 export function AppShell() {
   const csrf = useCsrfToken(); // bootstrap CSRF into ui-store.
   useSettings(); // hydrate settings on mount.
   useToastSweeper(); // dismiss expired toasts automatically (RV2-S8).
-  const { activeAgent } = useAgents();
+  const { activeAgent, selectAgent } = useAgents();
   const { runs } = useRunHistory();
+  const [newAgentOpen, setNewAgentOpen] = useState(false);
   const activeRunId = useRunStore((s) => s.activeRunId);
   const setActiveRunId = useRunStore((s) => s.setActiveRunId);
 
@@ -111,7 +113,7 @@ export function AppShell() {
           onRetry={() => void csrf.refresh()}
         />
       ) : null}
-      <Titlebar />
+      <Titlebar onNewAgent={() => setNewAgentOpen(true)} />
       <SessionsRail runs={runs} activeRunId={activeRunId} onSelectRun={setActiveRunId} />
       <CenterPane
         activeAgent={activeAgent}
@@ -125,6 +127,11 @@ export function AppShell() {
         connectionState={connectionState}
         modelLabel={activeAgent?.modelId ?? null}
         runningRunId={activeRunId}
+      />
+      <NewAgentDialog
+        open={newAgentOpen}
+        onClose={() => setNewAgentOpen(false)}
+        onCreated={(agentId) => selectAgent(agentId)}
       />
     </div>
   );

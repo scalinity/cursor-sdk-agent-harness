@@ -1,6 +1,9 @@
 import type { Database as BetterSqlite3Database } from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import type { SubagentDefinitionRow, SubagentModel } from "@harness/shared";
+import type {
+  SubagentDefinitionRow,
+  SubagentModelOverride,
+} from "@harness/shared";
 import { boolFromInt, intFromBool, isoNow, parseJsonArray } from "./mapping.js";
 
 export interface CreateSubagentInput {
@@ -9,7 +12,7 @@ export interface CreateSubagentInput {
   enabled?: boolean;
   description: string;
   prompt: string;
-  model: SubagentModel;
+  model: SubagentModelOverride;
   mcpServerIds?: ReadonlyArray<string>;
 }
 
@@ -18,7 +21,11 @@ export interface UpdateSubagentInput {
   enabled?: boolean;
   description?: string;
   prompt?: string;
-  model?: SubagentModel;
+  /**
+   * `null` ⇒ store inherit; `{ id }` ⇒ override. Use the explicit
+   * `undefined` to skip the field, since `null` is meaningful here.
+   */
+  model?: SubagentModelOverride;
   mcpServerIds?: ReadonlyArray<string>;
 }
 
@@ -41,7 +48,9 @@ function rowToDomain(row: SubagentDbRow): SubagentDefinitionRow {
     enabled: boolFromInt(row.enabled),
     description: row.description,
     prompt: row.prompt,
-    model: JSON.parse(row.model_json) as SubagentModel,
+    // model_json stores either the JSON literal "null" (inherit) or a
+    // `{ id }` shape (explicit override). The cast covers both branches.
+    model: JSON.parse(row.model_json) as SubagentModelOverride,
     mcpServerIds: parseJsonArray<string>(row.mcp_server_ids_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -104,7 +113,9 @@ export class SubagentDefinitionsRepo {
       enabled: input.enabled === undefined ? existing.enabled : input.enabled,
       description: input.description ?? existing.description,
       prompt: input.prompt ?? existing.prompt,
-      model: input.model ?? existing.model,
+      // `??` would fold a deliberate `null` ("set to inherit") into the
+      // existing model — distinguish undefined-vs-null explicitly.
+      model: input.model === undefined ? existing.model : input.model,
       mcpServerIds: input.mcpServerIds ?? existing.mcpServerIds,
     };
     this.raw

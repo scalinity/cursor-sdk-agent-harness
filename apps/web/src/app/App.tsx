@@ -23,6 +23,16 @@ const StreamingQA = lazy(async () => {
   return { default: module.StreamingQA };
 });
 
+const McpServers = lazy(async () => {
+  const module = await import("../pages/McpServers.js");
+  return { default: module.McpServers };
+});
+
+const Subagents = lazy(async () => {
+  const module = await import("../pages/Subagents.js");
+  return { default: module.Subagents };
+});
+
 export function App() {
   return (
     <Routes>
@@ -50,6 +60,22 @@ export function App() {
         element={
           <Suspense fallback={null}>
             <Usage />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/settings/mcp-servers"
+        element={
+          <Suspense fallback={null}>
+            <McpServers />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/settings/subagents"
+        element={
+          <Suspense fallback={null}>
+            <Subagents />
           </Suspense>
         }
       />

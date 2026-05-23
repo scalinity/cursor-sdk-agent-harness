@@ -19,7 +19,8 @@ each phase. Use it as the single source of truth for "what is decided" vs
 | 09 | Streaming Surfaces | ✅ complete | Hybrid `StreamingMarkdown` + RAF-batched `StreamingText`, thinking trace, concurrent `ToolCallLane`, tool cards, JSON inspector with lazy payload fetch, status/cost/system banners, dev QA fixture, perf benchmarks. |
 | 10 | Code Edit Preview and Syntax Highlighting | ✅ complete | Server-side code-edit extractors, derived `code_edit.detected` events, RAF edit animation, Lezer syntax highlighting, right-pane + inline previews, replay-speed controls, large-edit bounded preview, review-2 fixes. |
 | 11 | History, Replay, and Usage | ✅ complete | Run history with cost/tokens, replay from `events` via `run-store.ingestServerFrame`, transcript export, usage aggregates, pricing freshness banner/dialog, focused route tests. |
-| ≥12 | (per spec §16) | ⏳ pending | |
+| 12 | MCP, Subagents, and Advanced Agent Creation | ✅ complete | MCP CRUD with stdio + http probes, redacted-on-list + reveal endpoint; Subagent CRUD with referential integrity + nullable model (inherit); NewAgentDialog with five tabs, multi-cwd allowlist quick-add, CloudOptions JSON editor. |
+| ≥13 | (per spec §16) | ⏳ pending | |
 
 ---
 
@@ -1919,4 +1920,217 @@ Deferred / limitation:
 
 ## Next prompt to run
 
-`12_MCP_SUBAGENTS_AND_ADVANCED_AGENT_CREATION.md`
+`13_APPROVAL_CANCELLATION_AND_RESILIENCE.md`
+
+---
+
+## Phase 12 Outcomes
+
+### Summary
+
+Added the MCP server + subagent CRUD surfaces and the advanced
+`NewAgentDialog`. Server side: a transport-aware MCP validator (stdio
+`spawn --help` with a configurable timeout; http/sse `fetch` with the
+same timeout), routes that probe-on-save + probe-on-revalidate, a
+per-server reveal endpoint for the editor, and referential-integrity
+checks on subagent `mcpServerIds`. Client side: list + editor pages
+under `/settings/mcp-servers` and `/settings/subagents`, plus a
+five-tab `NewAgentDialog` (Basics / Local / Cloud / MCP / Subagents)
+wired into the AppShell titlebar with inline workspace-allowlist
+quick-add.
+
+### Decisions made
+
+1. **Subagent model is now `{ id } | null`.** `null` means "inherit
+   the parent agent's model" — the SDK's `AgentDefinition.model` is
+   typed `ModelSelection | "inherit"`, and omitting the field is
+   equivalent to inherit (verified against `options.d.ts`).
+   `agent-options-builder` no longer always emits a `model`; it
+   omits the field when the persisted value is `null`. New shared
+   schema: `subagentModelOverrideSchema = subagentModelSchema
+   .nullable()`. Domain row + REST request schemas use the new
+   shape.
+
+2. **Redact-on-list + reveal-on-demand for MCP secrets.** The
+   `mcpServerSummary` list response masks token-bearing fields
+   (`stdio.env.*` entirely; `http.headers.*` matching a
+   token/secret/key/password/authorization pattern;
+   `http.auth.CLIENT_SECRET`). Editors call
+   `GET /api/mcp-servers/:id/reveal` once the user clicks the
+   "Reveal secrets" button — the reveal payload carries the raw
+   config and is gated by CSRF + Origin. The list never carries
+   the unredacted value.
+
+3. **MCP probe terminology and behaviour.**
+   - `unknown`: persisted default on insert + while a probe is in
+     flight (the route flips to `unknown` first, then to the
+     verdict after the probe resolves).
+   - `valid`: the binary launched or the URL replied 2xx/1xx/3xx.
+     For stdio, a process that does NOT exit within the timeout is
+     treated as `valid` with a `did not exit within Xms
+     (long-running server)` detail — most MCP servers listen on
+     stdio indefinitely, so non-exit is the normal contract.
+   - `invalid`: schema rejected the config, or the HTTP server
+     replied 4xx/5xx.
+   - `unreachable`: spawn/ENOENT for stdio; network failure or
+     timeout for http/sse.
+
+4. **Re-probe is config-change-triggered.** `PUT /api/mcp-servers/:id`
+   re-probes only when the config JSON changes (deep-equal); a
+   metadata-only update (name, enabled) does not consume a probe
+   slot. `PATCH /api/mcp-servers/:id` accepts only `name`/`enabled`
+   and never re-probes. The explicit `POST /:id/revalidate` endpoint
+   exists for "I changed nothing but want to recheck" flows.
+
+5. **Inherit model branch in subagent repo.** The repo's `update`
+   distinguishes `undefined` (skip field) from `null` (set to
+   inherit) via an explicit `=== undefined` check rather than
+   `??`, which would have folded `null` into the existing model.
+
+6. **Workspace allowlist quick-add inline in NewAgentDialog.** The
+   "Add to allowlist" inline action posts to
+   `POST /api/workspace-allowlist` with the raw user-entered path;
+   the server resolves to a realpath, persists the entry, and the
+   dialog re-validates the same row so the green allowed-check
+   appears without a manual refresh.
+
+7. **`exactOptionalPropertyTypes` ripples for optional probe
+   timeout.** `RequestInit.headers` cannot accept `undefined`
+   under that flag, so the probe builds `RequestInit` conditionally
+   instead of spreading `config.headers` directly. Same pattern in
+   the validator's options-shaping for the `spawn` env merge.
+
+### Files added
+
+Server:
+- `apps/server/src/mcp/mcp-validator.ts` — pure `validateMcpServerConfig`
+  plus the `redactMcpConfig` helper.
+- `apps/server/src/mcp/__tests__/mcp-validator.test.ts` — 15 tests:
+  schema rejection, stdio ENOENT vs long-running, http 2xx/4xx/5xx,
+  network failure, abort-on-timeout, redaction round-trip.
+- `apps/server/src/routes/mcp-servers.routes.ts` — full CRUD + reveal
+  + revalidate.
+- `apps/server/src/routes/__tests__/mcp-servers.routes.test.ts` — 7
+  tests: probe-on-create, redaction on list, reveal endpoint,
+  re-probe on config change but not on PATCH, duplicate-name 409,
+  422 on malformed, DELETE idempotence.
+- `apps/server/src/routes/subagents.routes.ts` — full CRUD with
+  `mcpServerIds` referential integrity.
+- `apps/server/src/routes/__tests__/subagents.routes.test.ts` — 6
+  tests: explicit override, inherit (null), unknown mcp 422,
+  PATCH null-vs-undefined, DELETE.
+- `apps/server/src/__tests__/integration/agent-create-mcp-subagents.test.ts`
+  — captures `AgentOptions` from the stub adapter and asserts the
+  disabled-MCP / disabled-subagent filtering at the public seam.
+
+Web:
+- `apps/web/src/hooks/useMcpServers.ts`.
+- `apps/web/src/hooks/useSubagents.ts`.
+- `apps/web/src/hooks/useWorkspaceAllowlist.ts` — list + add +
+  batch-validate, used by the NewAgentDialog cwd row.
+- `apps/web/src/hooks/__tests__/useMcpServers.test.tsx` — 2 tests
+  for list + create round-trip with CSRF.
+- `apps/web/src/pages/McpServers.tsx`.
+- `apps/web/src/pages/Subagents.tsx`.
+- `apps/web/src/components/settings/StatusBadge.tsx`.
+- `apps/web/src/components/settings/McpServerEditor.tsx`.
+- `apps/web/src/components/settings/SubagentEditor.tsx`.
+- `apps/web/src/components/agents/CwdAllowlistChecker.tsx`.
+- `apps/web/src/components/agents/NewAgentDialog.tsx`.
+
+Shared:
+- `subagentModelOverrideSchema` + `SubagentModelOverride` in
+  `packages/shared/src/sdk-surface.ts`.
+- `listMcpServersResponseSchema`, `mcpServerRevealResponseSchema`,
+  extended `mcpServerSummarySchema` (now carries
+  `configRedacted` + `transport`), extended
+  `updateSubagentRequestSchema` (accepts `model`, `prompt`,
+  `description`, `mcpServerIds`), `subagentSummarySchema`,
+  `listSubagentsResponseSchema` in
+  `packages/shared/src/rest-contracts.ts`.
+
+Edits:
+- `apps/server/src/db/repositories/subagents.repo.ts` — accepts
+  nullable model.
+- `apps/server/src/sdk/agent-options-builder.ts` — omits
+  subagent `model` when null (inherit).
+- `apps/server/src/routes/index.ts`, `apps/server/src/app.ts` —
+  register the new routes.
+- `apps/web/src/app/App.tsx` — adds `/settings/mcp-servers` and
+  `/settings/subagents` lazy routes.
+- `apps/web/src/app/AppShell.tsx`,
+  `apps/web/src/components/shell/Titlebar.tsx` — adds the
+  "+ New agent" button and wires `NewAgentDialog`.
+- `packages/shared/src/index.ts` — exports the new schemas and
+  types.
+
+### Commands run and results
+
+- `pnpm typecheck` — passed across all four workspaces.
+- `pnpm lint` — clean, no warnings.
+- `pnpm test` — 255 tests across 45 files:
+  - server: 199 across 30 files.
+  - web: 48 across 11 files.
+  - shared: 2.
+  - eslint-plugin-harness: 6.
+
+### Acceptance gates satisfied
+
+- ✅ `pnpm typecheck && pnpm lint && pnpm test` all pass.
+- ✅ MCP server save → probe → status persists; the explicit
+  re-check button re-runs the probe. (`mcp-servers.routes.test.ts`)
+- ✅ A subagent that references a deleted MCP server is rejected at
+  save (`UNKNOWN_MCP_SERVER`).
+  (`subagents.routes.test.ts` + `agent-create-mcp-subagents.test.ts`)
+- ✅ Disabled MCP / subagents do not appear in `Agent.create`
+  options (captured options assertion in the integration test).
+- ✅ New Agent dialog blocks creation when any cwd is not
+  allowlisted (`collectBlockers` returns a non-empty list, the
+  submit button disables, and the inline checker shows the
+  "Add to allowlist" affordance).
+- ✅ Token-like fields render as `[REDACTED]` in the list view
+  (`mcp-servers.routes.test.ts` "redacts env tokens..." and
+  `useMcpServers.test.tsx` schema validation). Reveal is per-field
+  via the dedicated endpoint.
+- ✅ A created agent (via the dialog → `useAgents.createAgent` →
+  `POST /api/agents`) appears in the sessions rail and becomes the
+  selected agent (covered by existing `useAgents` flow; the
+  dialog's `onCreated` callback calls `selectAgent`).
+
+### OQs resolved or revisited this phase
+
+- **OQ-16 (CloudAgentOptions)** — already verified in Phase 01;
+  this phase consumed the schema as-is via a JSON editor with
+  client-side `cloudAgentOptionsSchema` validation. The
+  spec-§5 "swap to a typed form" remediation is deferred to a
+  later UX polish phase; the schema notice is rendered above the
+  editor.
+- **OQ-17 (sandboxOptions)** — surfaced as a single boolean in
+  the Local tab with help text grounded in the verified
+  semantics.
+- **OQ-18 (McpServerConfig)** — used verbatim by the validator
+  and the editor's JSON textarea; redaction logic targets the
+  documented field set.
+- **OQ-10 (approval resolver)** — still unresolved; the phase
+  prompt called this out and Phase 13 is the next chance.
+
+### Known limitations / deferred items
+
+1. The MCP editor uses a `<textarea>` with JSON parse-on-blur
+   rather than Monaco. This is intentional per the phase prompt;
+   a richer editor lands when the surface grows complex enough
+   to need it.
+2. CloudOptions editing remains a JSON textarea even though OQ-16
+   is verified. Spec §5 calls for a typed form; that work is
+   deferred to a UX polish pass.
+3. The "Re-check" status badge transiently shows `unknown` while
+   the probe runs (the route flips to `unknown` then to the
+   verdict). The UI does not yet show a spinner during that
+   window — a low-risk polish item.
+4. No active-agent guard for MCP / subagent deletion. The
+   spec's "warn when a row is in use" flow lands when the
+   deletion surface gets more eyes (Phase 13+).
+5. Phase 13 should re-check OQ-10 (SDK approval resolver) per
+   the spec callout in `12_*`.
+
+

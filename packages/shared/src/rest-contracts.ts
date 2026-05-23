@@ -15,7 +15,7 @@ import { serverFrameSchema } from "./ws-protocol.js";
 import {
   cloudAgentOptionsSchema,
   mcpServerConfigSchema,
-  subagentModelSchema,
+  subagentModelOverrideSchema,
   tokenUsageSchema,
 } from "./sdk-surface.js";
 
@@ -448,8 +448,37 @@ export const mcpServerSummarySchema = z.object({
   lastCheckedAt: isoDateTimeSchema.nullable(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
+  /**
+   * The config with token-like fields replaced by the `[REDACTED]` sentinel.
+   * Spec §5 MCP Server CRUD requires the list view to never carry raw
+   * secrets — the editor dialog fetches the raw value via the per-server
+   * reveal endpoint.
+   */
+  configRedacted: mcpServerConfigSchema,
+  /**
+   * Discriminator that lets the UI render the right form. `stdio` for
+   * command-line transports, `http`/`sse` for URL transports.
+   */
+  transport: z.enum(["stdio", "http", "sse"]),
 });
 export type McpServerSummary = z.infer<typeof mcpServerSummarySchema>;
+
+export const listMcpServersResponseSchema = z.object({
+  items: z.array(mcpServerSummarySchema),
+});
+export type ListMcpServersResponse = z.infer<typeof listMcpServersResponseSchema>;
+
+/**
+ * Editor-only response — the unredacted config. Returned by
+ * `GET /api/mcp-servers/:id/reveal`. The reveal endpoint is rate-limited
+ * to one request per second per server in the route handler.
+ */
+export const mcpServerRevealResponseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  config: mcpServerConfigSchema,
+});
+export type McpServerRevealResponse = z.infer<typeof mcpServerRevealResponseSchema>;
 
 // ============================================================================
 // Subagent Definitions — TODO: implement routes in Phase 05
@@ -459,7 +488,9 @@ export const createSubagentRequestSchema = z.object({
   name: z.string().min(1),
   description: z.string().min(1),
   prompt: z.string().min(1),
-  model: subagentModelSchema,
+  // `null` ⇒ inherit the parent agent's model (spec §5 Subagent CRUD).
+  // `{ id }` ⇒ explicit per-subagent override.
+  model: subagentModelOverrideSchema,
   mcpServerIds: z.array(z.string()).default([]),
   enabled: z.boolean().default(true),
 });
@@ -468,10 +499,33 @@ export type CreateSubagentRequest = z.infer<typeof createSubagentRequestSchema>;
 export const updateSubagentRequestSchema = z.object({
   name: z.string().min(1).optional(),
   enabled: z.boolean().optional(),
+  description: z.string().min(1).optional(),
+  prompt: z.string().min(1).optional(),
+  model: subagentModelOverrideSchema.optional(),
+  mcpServerIds: z.array(z.string()).optional(),
 });
 export type UpdateSubagentRequest = z.infer<typeof updateSubagentRequestSchema>;
 
 export const replaceSubagentRequestSchema = createSubagentRequestSchema;
+export type ReplaceSubagentRequest = z.infer<typeof replaceSubagentRequestSchema>;
+
+export const subagentSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  enabled: z.boolean(),
+  description: z.string(),
+  prompt: z.string(),
+  model: subagentModelOverrideSchema,
+  mcpServerIds: z.array(z.string()),
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
+});
+export type SubagentSummary = z.infer<typeof subagentSummarySchema>;
+
+export const listSubagentsResponseSchema = z.object({
+  items: z.array(subagentSummarySchema),
+});
+export type ListSubagentsResponse = z.infer<typeof listSubagentsResponseSchema>;
 
 // ============================================================================
 // Workspace Allowlist — TODO: implement routes in Phase 05

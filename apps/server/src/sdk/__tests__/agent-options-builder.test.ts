@@ -168,6 +168,49 @@ describe("buildAgentOptions", () => {
     expect(opts.agents?.explorer?.mcpServers).toEqual(["m-keep"]);
   });
 
+  it("omits subagent.model when model is null (inherit)", async () => {
+    const subs: SubagentDefinitionRow[] = [
+      subRow({
+        id: "s1",
+        name: "inheritor",
+        enabled: true,
+        description: "inherits",
+        prompt: "p",
+        model: null,
+      }),
+    ];
+    const opts = await buildAgentOptions({
+      agent: agentRow({ cwd: [allowedDir] }),
+      apiKey: "sk-test-12345678",
+      mcpServers: [],
+      subagents: subs,
+      workspacePolicy: policy,
+    });
+    expect(opts.agents?.inheritor).toBeDefined();
+    expect(opts.agents?.inheritor?.model).toBeUndefined();
+  });
+
+  it("forwards subagent.model when explicit override is set", async () => {
+    const subs: SubagentDefinitionRow[] = [
+      subRow({
+        id: "s1",
+        name: "explicit",
+        enabled: true,
+        description: "explicit",
+        prompt: "p",
+        model: { id: "composer-2-5" },
+      }),
+    ];
+    const opts = await buildAgentOptions({
+      agent: agentRow({ cwd: [allowedDir] }),
+      apiKey: "sk-test-12345678",
+      mcpServers: [],
+      subagents: subs,
+      workspacePolicy: policy,
+    });
+    expect(opts.agents?.explicit?.model).toEqual({ id: "composer-2-5" });
+  });
+
   it("builds cloud options when mode=cloud and skips workspace validation", async () => {
     const opts = await buildAgentOptions({
       agent: agentRow({
@@ -213,7 +256,7 @@ function subRow(over: Partial<SubagentDefinitionRow>): SubagentDefinitionRow {
     enabled: over.enabled ?? true,
     description: over.description ?? "x",
     prompt: over.prompt ?? "x",
-    model: { id: "composer-2-5-fast" },
+    model: over.model === undefined ? { id: "composer-2-5-fast" } : over.model,
     mcpServerIds: over.mcpServerIds ?? [],
     createdAt: "2026-05-23T00:00:00.000Z",
     updatedAt: "2026-05-23T00:00:00.000Z",

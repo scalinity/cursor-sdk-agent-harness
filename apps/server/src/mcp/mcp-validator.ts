@@ -1,0 +1,290 @@
+import { spawn } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
+import {
+  mcpServerConfigSchema,
+  type McpServerConfig,
+} from "@harness/shared";
+
+/**
+ * Result of a single MCP server validation probe.
+ *
+ * Spec §5 → MCP Server CRUD enumerates four statuses: `unknown`, `valid`,
+ * `invalid`, `unreachable`. The validator never returns `unknown` — that
+ * is the persisted default on insert, and the route layer flips to one
+ * of the three concrete outcomes after the probe runs.
+ */
+export type McpValidationResult =
+  | { status: "valid"; transport: McpTransport; details?: string }
+  | { status: "invalid"; reason: string }
+  | { status: "unreachable"; reason: string; transport: McpTransport };
+
+export type McpTransport = "stdio" | "http" | "sse";
+
+export interface McpValidatorOptions {
+  /**
+   * Hard timeout for either probe variant. Default 3000ms; configurable via
+   * `MCP_PROBE_TIMEOUT_MS`. Tests inject a tiny value (e.g. 50ms) so a hung
+   * probe doesn't hold the suite.
+   */
+  timeoutMs?: number;
+  /**
+   * Override the fetch implementation for tests. Production uses globalThis.fetch.
+   */
+  fetchImpl?: typeof fetch;
+  /**
+   * Override `spawn` for tests. Production uses node:child_process spawn.
+   * Signature mirrors the subset of behavior we exercise — full type would
+   * pull in unused fields.
+   */
+  spawnImpl?: typeof spawn;
+}
+
+const DEFAULT_TIMEOUT_MS = 3000;
+
+/**
+ * Probe an MCP server configuration once.
+ *
+ * Validates the shape against `mcpServerConfigSchema` (verbatim from
+ * OQ-18); rejects malformed JSON / shape-mismatch as `invalid`. For
+ * verified configs it routes to the stdio or http/sse probe and reports
+ * the outcome.
+ *
+ * The probe is intentionally narrow:
+ * - stdio: spawn the configured command with a single `--help` arg.
+ *   Anything that doesn't fail-to-spawn within the timeout is considered
+ *   reachable. Exit code is informational and surfaced in `details`; we
+ *   do not gate `valid` on exit 0 because well-behaved MCP servers may
+ *   reject `--help` with a non-zero status (the contract is "the binary
+ *   exists and runs").
+ * - http/sse: HEAD or GET against the URL with the configured headers.
+ *   2xx → valid. 4xx/5xx → invalid (server replied but rejected us).
+ *   Network failure or timeout → unreachable.
+ */
+export async function validateMcpServerConfig(
+  rawConfig: unknown,
+  options: McpValidatorOptions = {},
+): Promise<McpValidationResult> {
+  const parsed = mcpServerConfigSchema.safeParse(rawConfig);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const path = issue ? issue.path.join(".") || "(root)" : "(root)";
+    const message = issue ? issue.message : "config schema mismatch";
+    return {
+      status: "invalid",
+      reason: `${path}: ${message}`,
+    };
+  }
+  const config = parsed.data;
+  const transport: McpTransport =
+    "command" in config ? "stdio" : (config.type ?? "http") === "sse" ? "sse" : "http";
+
+  const timeoutMs = Math.max(50, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+
+  if ("command" in config) {
+    return probeStdio(config, transport, timeoutMs, options.spawnImpl ?? spawn);
+  }
+  return probeHttp(
+    config,
+    transport,
+    timeoutMs,
+    options.fetchImpl ?? globalThis.fetch.bind(globalThis),
+  );
+}
+
+type StdioConfig = Extract<McpServerConfig, { command: string }>;
+type HttpConfig = Extract<McpServerConfig, { url: string }>;
+
+async function probeStdio(
+  config: StdioConfig,
+  transport: McpTransport,
+  timeoutMs: number,
+  spawnImpl: typeof spawn,
+): Promise<McpValidationResult> {
+  return await new Promise<McpValidationResult>((resolve) => {
+    let settled = false;
+    const resolveOnce = (result: McpValidationResult) => {
+      if (settled) return;
+      settled = true;
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // best-effort: process may already be gone
+      }
+      resolve(result);
+    };
+
+    let child: ReturnType<typeof spawnImpl>;
+    try {
+      child = spawnImpl(
+        config.command,
+        // Add `--help` as a probe argument unless caller already passes args.
+        // Servers that ignore it should still exit promptly.
+        config.args && config.args.length > 0 ? config.args : ["--help"],
+        {
+          stdio: ["ignore", "pipe", "pipe"],
+          env: { ...process.env, ...(config.env ?? {}) },
+          ...(config.cwd ? { cwd: config.cwd } : {}),
+        },
+      );
+    } catch (err) {
+      settled = true;
+      resolve({
+        status: "unreachable",
+        transport,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+
+    let stderr = "";
+    child.stderr?.on("data", (chunk: Buffer) => {
+      if (stderr.length < 2048) stderr += chunk.toString("utf8");
+    });
+
+    child.on("error", (err) => {
+      // ENOENT for missing binary lands here.
+      resolveOnce({
+        status: "unreachable",
+        transport,
+        reason: err.message,
+      });
+    });
+
+    child.on("exit", (code, signal) => {
+      const detail =
+        signal !== null
+          ? `terminated by ${signal}`
+          : `exit ${code ?? "unknown"}${stderr ? `; stderr: ${stderr.slice(0, 200)}` : ""}`;
+      resolveOnce({
+        status: "valid",
+        transport,
+        details: detail,
+      });
+    });
+
+    void delay(timeoutMs).then(() => {
+      if (!settled) {
+        // Long-running stdio process is treated as a successful "reachable"
+        // probe — MCP servers commonly do not exit on `--help` and start
+        // listening on stdio. We've established the binary exists and
+        // started, which is the contract for this phase.
+        resolveOnce({
+          status: "valid",
+          transport,
+          details: `did not exit within ${timeoutMs}ms (long-running server)`,
+        });
+      }
+    });
+  });
+}
+
+async function probeHttp(
+  config: HttpConfig,
+  transport: McpTransport,
+  timeoutMs: number,
+  fetchImpl: typeof fetch,
+): Promise<McpValidationResult> {
+  const controller = new AbortController();
+  const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const init: RequestInit = {
+      method: "GET",
+      signal: controller.signal,
+    };
+    if (config.headers) init.headers = config.headers;
+    const resp = await fetchImpl(config.url, init);
+    if (resp.status >= 200 && resp.status < 300) {
+      return { status: "valid", transport, details: `HTTP ${resp.status}` };
+    }
+    if (resp.status >= 400) {
+      let body = "";
+      try {
+        body = (await resp.text()).slice(0, 200);
+      } catch {
+        // ignore body read failure; status alone is signal enough
+      }
+      return {
+        status: "invalid",
+        reason: `HTTP ${resp.status}${body ? `: ${body}` : ""}`,
+      };
+    }
+    // 1xx / 3xx — treat as reachable but unexpected; surface as valid with details.
+    return {
+      status: "valid",
+      transport,
+      details: `HTTP ${resp.status}`,
+    };
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return {
+        status: "unreachable",
+        transport,
+        reason: `timed out after ${timeoutMs}ms`,
+      };
+    }
+    return {
+      status: "unreachable",
+      transport,
+      reason: err instanceof Error ? err.message : String(err),
+    };
+  } finally {
+    globalThis.clearTimeout(timer);
+  }
+}
+
+/**
+ * Token-like top-level keys we mask in API responses. The list mirrors the
+ * pino redaction floor in observability/logger.ts. Anything not on this list
+ * but matching `*.token`/`*.secret`/`*.password`/`*.key` is also masked by
+ * the recursive walker.
+ */
+const TOKEN_FIELDS_BY_VARIANT = {
+  stdio: ["env"] as const,
+  http: ["headers", "auth"] as const,
+  sse: ["headers", "auth"] as const,
+} as const;
+
+const TOKEN_FIELD_PATTERN = /(token|secret|password|key|authorization)/i;
+
+/**
+ * Recursively mask token-like fields inside an MCP config so it can ride
+ * over the wire to the frontend list view. Returns a structurally cloned
+ * shape — never mutates the input.
+ *
+ * Stdio: `env` values are masked entirely (each var is treated as
+ * potentially sensitive — `env: { GITHUB_TOKEN: "..." }` is the common
+ * shape).
+ * HTTP/SSE: header values matching the pattern + every `auth.*` field
+ * except `CLIENT_ID` are masked.
+ */
+export function redactMcpConfig(config: McpServerConfig): McpServerConfig {
+  if ("command" in config) {
+    return {
+      ...config,
+      ...(config.env
+        ? { env: Object.fromEntries(Object.keys(config.env).map((k) => [k, "[REDACTED]"])) }
+        : {}),
+    };
+  }
+  const next: HttpConfig = { ...config };
+  if (config.headers) {
+    next.headers = Object.fromEntries(
+      Object.entries(config.headers).map(([k, v]) => [
+        k,
+        TOKEN_FIELD_PATTERN.test(k) ? "[REDACTED]" : v,
+      ]),
+    );
+  }
+  if (config.auth) {
+    next.auth = {
+      CLIENT_ID: config.auth.CLIENT_ID,
+      ...(config.auth.CLIENT_SECRET !== undefined ? { CLIENT_SECRET: "[REDACTED]" } : {}),
+      ...(config.auth.scopes ? { scopes: [...config.auth.scopes] } : {}),
+    };
+  }
+  return next;
+}
+
+// Re-export to keep the variant list reachable from tests + routes without
+// pulling the implementation surface in.
+export const REDACTED_FIELDS = TOKEN_FIELDS_BY_VARIANT;

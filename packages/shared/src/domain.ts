@@ -19,7 +19,7 @@ import {
 import {
   cloudAgentOptionsSchema,
   mcpServerConfigSchema,
-  subagentModelSchema,
+  subagentModelOverrideSchema,
 } from "./sdk-surface.js";
 
 // Domain row shapes — these are the camelCase TypeScript projections that
@@ -194,7 +194,7 @@ export const subagentDefinitionRowSchema = z.object({
   enabled: z.boolean(),
   description: z.string(),
   prompt: z.string(),
-  model: subagentModelSchema,
+  model: subagentModelOverrideSchema,
   mcpServerIds: z.array(z.string()),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,

@@ -184,8 +184,23 @@ export const mcpServerConfigSchema = z.union([
 ]);
 export type McpServerConfig = z.infer<typeof mcpServerConfigSchema>;
 
-// Subagent definition model selector. Mirrors AgentOptions.subagents[*].model.
+// Subagent definition model selector. Mirrors AgentOptions.agents[*].model
+// — the SDK accepts `ModelSelection | "inherit"` (verified against
+// options.d.ts AgentDefinition). The harness persists this as either
+// `{ id }` for an explicit override, or `null` for inherit.
 export const subagentModelSchema = z.object({
   id: z.string().min(1),
 });
 export type SubagentModel = z.infer<typeof subagentModelSchema>;
+
+/**
+ * Model override on a subagent definition. `null` means "inherit the
+ * parent agent's model"; an object means "override with this model id".
+ *
+ * The SDK exposes the same choice as `ModelSelection | "inherit"` on
+ * `AgentDefinition.model`; the harness translation step in
+ * `agent-options-builder` omits the field entirely when `null`, since the
+ * SDK already treats an absent `model` as "inherit".
+ */
+export const subagentModelOverrideSchema = subagentModelSchema.nullable();
+export type SubagentModelOverride = z.infer<typeof subagentModelOverrideSchema>;

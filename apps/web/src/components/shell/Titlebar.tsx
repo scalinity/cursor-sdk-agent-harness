@@ -1,12 +1,16 @@
 import { useUiStore } from "../../state/ui-store.js";
 import { cn } from "../../lib/cn.js";
 
+export interface TitlebarProps {
+  onNewAgent?: () => void;
+}
+
 /**
  * Titlebar — traffic lights, repo crumb, branch/diff stats, code-toggle,
  * timer pill. Matches the mockup's `.titlebar` row using shell CSS for
  * layout and Tailwind utilities for token-driven colours/sizes.
  */
-export function Titlebar() {
+export function Titlebar({ onNewAgent }: TitlebarProps = {}) {
   const codeHidden = useUiStore((s) => s.codeHidden);
   const toggleCodeHidden = useUiStore((s) => s.toggleCodeHidden);
   return (
@@ -38,6 +42,15 @@ export function Titlebar() {
 
       {/* Right group */}
       <div className="flex items-center gap-1.5 pl-2">
+        {onNewAgent ? (
+          <button
+            type="button"
+            onClick={onNewAgent}
+            className="inline-flex h-control-md items-center gap-1.5 rounded-md border border-border-subtle bg-surface-1 px-2 text-md font-medium text-text-secondary hover:bg-surface-2"
+          >
+            <span>+ New agent</span>
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={toggleCodeHidden}

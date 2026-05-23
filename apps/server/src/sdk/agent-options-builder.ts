@@ -109,9 +109,11 @@ export async function buildAgentOptions(
     agentsDefinitions[sub.name] = {
       description: sub.description,
       prompt: sub.prompt,
-      // SubagentModel in the harness is always `{ id }`; the SDK accepts
-      // ModelSelection | "inherit". We persist `{ id }` so it maps 1:1.
-      model: sub.model,
+      // SubagentModelOverride is `{ id } | null`. The SDK accepts
+      // `ModelSelection | "inherit"`; omitting the field is equivalent
+      // to "inherit", so we only set it when the user picked an
+      // explicit override.
+      ...(sub.model !== null ? { model: sub.model } : {}),
       ...(subagentMcp.length > 0 ? { mcpServers: subagentMcp } : {}),
     };
   }

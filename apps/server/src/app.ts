@@ -193,6 +193,8 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     },
     events: { events: repos.events },
     usage: { runsRepo: repos.runs, settingsRepo: repos.settings },
+    mcpServers: { mcpServers: repos.mcpServers },
+    subagents: { subagents: repos.subagents, mcpServers: repos.mcpServers },
   });
 
   return {
