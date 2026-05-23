@@ -5,9 +5,7 @@ import type {
   AgentSummary,
   CreateAgentRequest,
   CreateRunResponse,
-  SDKMessage,
 } from "@harness/shared";
-import { sdkMessageSchema } from "@harness/shared";
 import type { AgentsRepo, CreateAgentInput } from "../db/repositories/agents.repo.js";
 import type { McpServersRepo } from "../db/repositories/mcp-servers.repo.js";
 import type { RunsRepo } from "../db/repositories/runs.repo.js";
@@ -19,9 +17,11 @@ import type { SettingsRepo } from "../db/repositories/settings.repo.js";
 import { buildAgentOptions } from "./agent-options-builder.js";
 import type { ActiveRuns } from "./active-runs.js";
 import { LiveAgents } from "./live-agents.js";
-import type { PersistAndBroadcastPipeline } from "./persist-and-broadcast.js";
+import {
+  createPipelineSink,
+  type PersistAndBroadcastPipeline,
+} from "./persist-and-broadcast.js";
 import { RunController, newRunId } from "./run-controller.js";
-import type { StreamSink } from "./stream-stub.js";
 import type { SDKAgent, SdkAdapter } from "./sdk-adapter.js";
 
 /**
@@ -418,54 +418,6 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
       liveAgents.clear();
       activeRuns.clear();
     },
-  };
-}
-
-/**
- * Build the per-run stream sink that hands every SDK event to the
- * persist-then-broadcast pipeline. Events that fail Zod validation
- * against `sdkMessageSchema` get persisted as
- * `system.unknown_sdk_message` so Phase 14 observability can see SDK
- * shape drift — the row carries the offending raw payload and is
- * inspectable, but the frame-builder returns null for that kind so
- * live UIs are protected from unknown shapes. Validation failures do
- * NOT advance the run's text-buffer cursor (the unknown shape is not
- * an assistant/thinking event by construction).
- */
-function createPipelineSink(args: {
-  runId: string;
-  agentId: string;
-  agentMode: "local" | "cloud";
-  pipeline: PersistAndBroadcastPipeline;
-  logger: FastifyBaseLogger;
-}): StreamSink {
-  return (event: unknown) => {
-    const parsed = sdkMessageSchema.safeParse(event);
-    if (!parsed.success) {
-      args.logger.warn(
-        {
-          runId: args.runId,
-          agentId: args.agentId,
-          sdkType: (event as { type?: unknown })?.type,
-          errors: parsed.error.flatten(),
-        },
-        "pipeline-sink: SDK event failed sdkMessageSchema; persisting as system.unknown_sdk_message",
-      );
-      args.pipeline.ingestUnknownSDKMessage({
-        raw: event,
-        runId: args.runId,
-        agentId: args.agentId,
-        parseError: parsed.error,
-      });
-      return;
-    }
-    const raw: SDKMessage = parsed.data;
-    args.pipeline.ingestSDKMessage({
-      raw,
-      runId: args.runId,
-      agentId: args.agentId,
-      agentMode: args.agentMode,
-    });
   };
 }
 

@@ -1,8 +1,10 @@
 import type { FastifyBaseLogger } from "fastify";
 import type { AgentMode, EventRow, SDKMessage } from "@harness/shared";
+import { sdkMessageSchema } from "@harness/shared";
 import type { EventsRepo } from "../db/repositories/events.repo.js";
 import type { RunBus } from "../ws/run-bus.js";
 import { normalize, type RunContext } from "./normalizer.js";
+import type { StreamSink } from "./stream-stub.js";
 
 /**
  * Phase 07 — single persist-then-broadcast pipeline. Replaces the Phase 06
@@ -263,5 +265,55 @@ export function createPersistAndBroadcast(
     bufferCount(): number {
       return bufferByRun.size;
     },
+  };
+}
+
+/**
+ * Build the per-run stream sink that hands every SDK event to a
+ * pipeline. Events that fail Zod validation against `sdkMessageSchema`
+ * get persisted as `system.unknown_sdk_message` so Phase 14
+ * observability can see SDK shape drift — the row carries the
+ * offending raw payload and is inspectable, but the frame-builder
+ * returns null for that kind so live UIs are protected from unknown
+ * shapes.
+ *
+ * Co-located with the pipeline so the validation boundary lives next
+ * to the persistence boundary; AgentRuntime just calls this helper
+ * and stays unaware of the schema shape.
+ */
+export function createPipelineSink(args: {
+  runId: string;
+  agentId: string;
+  agentMode: AgentMode;
+  pipeline: PersistAndBroadcastPipeline;
+  logger: FastifyBaseLogger;
+}): StreamSink {
+  return (event: unknown) => {
+    const parsed = sdkMessageSchema.safeParse(event);
+    if (!parsed.success) {
+      args.logger.warn(
+        {
+          runId: args.runId,
+          agentId: args.agentId,
+          sdkType: (event as { type?: unknown })?.type,
+          errors: parsed.error.flatten(),
+        },
+        "pipeline-sink: SDK event failed sdkMessageSchema; persisting as system.unknown_sdk_message",
+      );
+      args.pipeline.ingestUnknownSDKMessage({
+        raw: event,
+        runId: args.runId,
+        agentId: args.agentId,
+        parseError: parsed.error,
+      });
+      return;
+    }
+    const raw: SDKMessage = parsed.data;
+    args.pipeline.ingestSDKMessage({
+      raw,
+      runId: args.runId,
+      agentId: args.agentId,
+      agentMode: args.agentMode,
+    });
   };
 }

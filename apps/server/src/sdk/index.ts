@@ -40,6 +40,7 @@ export {
 } from "./normalizer.js";
 export {
   createPersistAndBroadcast,
+  createPipelineSink,
   type IngestArgs,
   type PersistAndBroadcastPipeline,
   type PipelineDeps,
