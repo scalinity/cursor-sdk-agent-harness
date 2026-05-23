@@ -62,12 +62,13 @@ export async function buildAgentOptions(
 ): Promise<AgentOptions> {
   const { agent, apiKey, mcpServers, subagents, workspacePolicy } = input;
 
-  // Local mode: validate every cwd via WorkspacePolicy first. The narrowed
-  // `localCwd` is non-empty by construction; we capture it here so the
-  // SDK-options assembly below doesn't need a non-null assertion.
-  let localCwd: ReadonlyArray<string> | undefined;
-  if (agent.mode === "local") {
-    localCwd = requireCwd(agent);
+  // REVIEW-S8: local-mode workspace validation. `localCwd` is undefined
+  // for cloud mode and non-empty for local (requireCwd throws otherwise),
+  // so the assembly below narrows correctly via `if (localCwd)` — no
+  // cast needed.
+  const localCwd: ReadonlyArray<string> | undefined =
+    agent.mode === "local" ? requireCwd(agent) : undefined;
+  if (localCwd) {
     const decisions = await Promise.all(
       localCwd.map(async (candidate) => ({
         input: candidate,
@@ -146,14 +147,15 @@ export async function buildAgentOptions(
       : {}),
   };
 
-  if (agent.mode === "local") {
-    // localCwd was set + validated by the guard at the top; capture in a
-    // local so future refactors can't break the invariant.
-    const cwdArray = localCwd as ReadonlyArray<string>;
-    const cwdValue: string | string[] | undefined =
-      cwdArray.length === 1 ? cwdArray[0] : [...cwdArray];
+  if (localCwd) {
+    // REVIEW-S8: `if (localCwd)` narrows away the optional without a
+    // cast — the previous `agent.mode === "local"` branch needed
+    // `localCwd as ReadonlyArray<string>` because TS couldn't relate
+    // the two branches.
+    const cwdValue: string | string[] =
+      localCwd.length === 1 ? localCwd[0]! : [...localCwd];
     const local: NonNullable<AgentOptions["local"]> = {};
-    if (cwdValue !== undefined) local.cwd = cwdValue;
+    local.cwd = cwdValue;
     if (agent.settingSources && agent.settingSources.length > 0) {
       local.settingSources = [...agent.settingSources];
     }
