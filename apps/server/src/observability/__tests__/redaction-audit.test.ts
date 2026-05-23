@@ -129,7 +129,29 @@ describe("Phase 14 redaction audit", () => {
       remoteAddress: "127.0.0.1",
     });
     expect(out.url).toBe("/ws?csrf=[REDACTED]");
-    // The serializer doesn't redact headers itself — that's the Pino
-    // redact paths' job — but the URL leak is closed.
+  });
+
+  it("safeReqSerializer drops headers outside the whitelist (P14-S10)", () => {
+    const out = safeReqSerializer({
+      method: "POST",
+      url: "/api/some-endpoint",
+      headers: {
+        host: "127.0.0.1:4783",
+        "user-agent": "vitest",
+        "content-type": "application/json",
+        authorization: "Bearer super-secret",
+        "x-csrf-token": "csrf-secret",
+        cookie: "session=...",
+        "x-api-key": "future-leak-vector",
+      },
+    });
+    const headers = out.headers as Record<string, unknown>;
+    expect(Object.keys(headers).sort()).toEqual(
+      ["content-type", "host", "user-agent"].sort(),
+    );
+    expect(headers.authorization).toBeUndefined();
+    expect(headers["x-csrf-token"]).toBeUndefined();
+    expect(headers.cookie).toBeUndefined();
+    expect(headers["x-api-key"]).toBeUndefined();
   });
 });

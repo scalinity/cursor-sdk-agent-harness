@@ -67,8 +67,40 @@ export function redactCsrfFromUrl(url: string): string {
 }
 
 /**
+ * P14-S10: headers we explicitly forward in access logs. Anything outside
+ * this whitelist is dropped before serialization, so a forgotten redact
+ * path (e.g. a future custom `X-API-Key` header) cannot leak. The
+ * REDACT_PATHS list provides depth-in-defense for `Authorization` /
+ * `x-csrf-token` / cookie variants in case they ever ride through other
+ * fields, but the serializer no longer trusts them by default.
+ */
+const SAFE_HEADER_KEYS = new Set([
+  "host",
+  "user-agent",
+  "content-type",
+  "content-length",
+  "accept",
+  "accept-encoding",
+  "origin",
+  "referer",
+]);
+
+function pickSafeHeaders(
+  headers: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(headers)) {
+    if (SAFE_HEADER_KEYS.has(k.toLowerCase())) {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+/**
  * Fastify request serializer. Drop-in replacement for pino's default
- * that also strips CSRF tokens from the captured URL.
+ * that also strips CSRF tokens from the captured URL and explicitly
+ * whitelists which request headers are logged (P14-S10).
  */
 export function safeReqSerializer(req: {
   id?: string | number;
@@ -82,7 +114,7 @@ export function safeReqSerializer(req: {
     ...(req.id !== undefined ? { id: req.id } : {}),
     ...(req.method !== undefined ? { method: req.method } : {}),
     ...(req.url !== undefined ? { url: redactCsrfFromUrl(req.url) } : {}),
-    ...(req.headers !== undefined ? { headers: req.headers } : {}),
+    ...(req.headers !== undefined ? { headers: pickSafeHeaders(req.headers) } : {}),
     ...(req.remoteAddress !== undefined ? { remoteAddress: req.remoteAddress } : {}),
     ...(req.remotePort !== undefined ? { remotePort: req.remotePort } : {}),
   };

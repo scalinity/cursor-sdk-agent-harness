@@ -172,9 +172,15 @@ describe("Phase 14 pricing settings validation", () => {
     expect(body.pricing.lastVerifiedAt).toBeNull();
   });
 
-  it("staleness: a lastVerifiedAt > 30 days old can be detected from the snapshot", () => {
-    // Drive the service layer directly with a fixed clock so this test
-    // doesn't have to wait 30 days.
+});
+
+// P14-S9: staleness check is a service-layer fixed-clock test — it
+// doesn't need the Fastify harness the parent describe sets up. Lifted
+// to its own describe so beforeEach/afterEach don't waste cycles
+// building and tearing down a server for a test that touches only the
+// settings service.
+describe("Phase 14 pricing staleness (service-layer)", () => {
+  it("a lastVerifiedAt > 30 days old can be detected from the snapshot", () => {
     const dbClient = openTestDb();
     const repos = createRepositories(dbClient.raw);
     try {
