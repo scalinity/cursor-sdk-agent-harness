@@ -47,9 +47,17 @@ export function createRunBus(): RunBus {
       // unsubscribes itself (e.g. an error-handling close path) can't mutate
       // the set mid-iteration.
       const snapshot = Array.from(set);
-      // Defer to a microtask so the persist-and-broadcast caller is never
-      // blocked on slow socket writes. The DB commit already happened — the
-      // bus is the moral equivalent of a setImmediate fanout.
+      // Defer the fanout to setImmediate so the persist-and-broadcast
+      // caller returns control to the event loop after the DB commit
+      // instead of running listeners synchronously on the commit path.
+      //
+      // IMPORTANT: each listener still runs SYNCHRONOUSLY inside the
+      // for-loop below. A listener that writes to a slow socket
+      // (TCP send-buffer backpressure) WILL head-of-line block every
+      // subsequent listener on the same tick. Single-user/local this
+      // is fine; if a future phase adds multiple subscribers per run
+      // (replay viewer + live viewer), give each subscription its own
+      // per-listener queue + drain loop to break the HoL coupling.
       setImmediate(() => {
         for (const listener of snapshot) {
           try {
