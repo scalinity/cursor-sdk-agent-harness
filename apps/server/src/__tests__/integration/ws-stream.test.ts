@@ -35,6 +35,16 @@ interface Harness {
 async function buildHarness(opts: {
   events: ReadonlyArray<unknown>;
   beforeEachOnDelta?: ReadonlyArray<unknown>;
+  /**
+   * Optional per-test heartbeat overrides. The default cadence is
+   * forgiving (1s ping / 30s pong) so subscribe/replay/large-payload
+   * tests don't flake on slow CI when the missed-pong timeout fires
+   * mid-test. The dedicated heartbeat-arrival test overrides with a
+   * tighter ping (50ms) so it doesn't have to wait a full second to
+   * observe its first beat.
+   */
+  wsHeartbeatIntervalMs?: number;
+  wsMissedPongTimeoutMs?: number;
 }): Promise<Harness> {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "harness-ws-"));
   const allowedDir = path.join(tmpDir, "ws");
@@ -67,9 +77,11 @@ async function buildHarness(opts: {
     apiKeyStore,
     csrfSecretStore: new CsrfSecretStore({ service: env.KEYCHAIN_SERVICE }),
     sdk,
-    // Short cadence so the heartbeat test doesn't have to wait 15s.
-    wsHeartbeatIntervalMs: 50,
-    wsMissedPongTimeoutMs: 1_000,
+    // Default: 1s ping + 30s pong. Forgiving enough that CI under load
+    // won't hit the missed-pong timeout mid-test; the heartbeat-arrival
+    // test overrides with a tighter ping to keep its own wall-clock low.
+    wsHeartbeatIntervalMs: opts.wsHeartbeatIntervalMs ?? 1_000,
+    wsMissedPongTimeoutMs: opts.wsMissedPongTimeoutMs ?? 30_000,
   });
   // Force the HTTP server to listen so injectWS can dial a real socket.
   await app.listen({ host: "127.0.0.1", port: 0 });
@@ -363,7 +375,14 @@ describe("WebSocket — Phase 07 streaming + reconnect", () => {
   });
 
   it("emits server heartbeat frames at startup", async () => {
-    h = await buildHarness({ events: [] });
+    // Tighter ping so we don't have to wait 1s for the first beat,
+    // but keep the missed-pong timeout long enough that the socket
+    // doesn't close mid-test before we observe the heartbeat.
+    h = await buildHarness({
+      events: [],
+      wsHeartbeatIntervalMs: 50,
+      wsMissedPongTimeoutMs: 30_000,
+    });
     const token = await h.csrfToken();
     const socket = await h.app.injectWS(`/ws?csrf=${encodeURIComponent(token)}`, {
       headers: { origin: "http://127.0.0.1:5173" },
