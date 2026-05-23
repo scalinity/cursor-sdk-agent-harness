@@ -19,7 +19,17 @@ export interface UseRunHistoryResult {
   reload: () => Promise<void>;
 }
 
-export function useRunHistory(filters: RunHistoryFilters = {}): UseRunHistoryResult {
+/**
+ * Filters are destructured at the signature with defaults so the effect's
+ * dependencies are primitive values, not an object reference. Without this,
+ * any caller writing `useRunHistory({ agentId })` inline would produce a
+ * fresh object per parent render and trigger a full /api/runs refetch on
+ * every render.
+ */
+export function useRunHistory({
+  agentId,
+  limit = 100,
+}: RunHistoryFilters = {}): UseRunHistoryResult {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,9 +39,8 @@ export function useRunHistory(filters: RunHistoryFilters = {}): UseRunHistoryRes
     setLoading(true);
     setError(null);
     try {
-      const query: Record<string, string | number | undefined> = {};
-      if (filters.agentId) query.agentId = filters.agentId;
-      query.limit = filters.limit ?? 100;
+      const query: Record<string, string | number | undefined> = { limit };
+      if (agentId) query.agentId = agentId;
       const res = await httpRequest("/api/runs", {
         query,
         responseSchema: listRunsResponseSchema,
@@ -43,7 +52,7 @@ export function useRunHistory(filters: RunHistoryFilters = {}): UseRunHistoryRes
     } finally {
       setLoading(false);
     }
-  }, [filters.agentId, filters.limit, upsertRunSummary]);
+  }, [agentId, limit, upsertRunSummary]);
 
   useEffect(() => {
     void reload();
