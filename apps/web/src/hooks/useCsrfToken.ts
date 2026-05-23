@@ -7,7 +7,7 @@
  * Phase 08 we treat it as effectively long-lived; if a mutating call fails
  * with `CSRF_FAILED` the caller can trigger `refresh()` to re-mint.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { csrfTokenResponseSchema } from "@harness/shared";
 import { httpRequest } from "../lib/http-client.js";
 import { useUiStore } from "../state/ui-store.js";
@@ -20,17 +20,21 @@ export interface UseCsrfTokenResult {
   refresh: () => Promise<string | null>;
 }
 
+// F-002: module-scoped in-flight promise. Hoisted out of the hook so all
+// useCsrfToken consumers (and StrictMode's double-mount) share a single
+// cold-start fetch. Without this, each hook instance had its own ref and
+// they all raced — each writing a different freshly-minted token to
+// ui-store, which made useWebSocket tear down + reconnect once per fetch.
+let bootstrapInFlight: Promise<string | null> | null = null;
+
 export function useCsrfToken(): UseCsrfTokenResult {
   const token = useUiStore((s) => s.csrfToken);
   const setCsrfToken = useUiStore((s) => s.setCsrfToken);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Share an in-flight fetch across concurrent callers so the cold-load
-  // race doesn't double-fetch the bootstrap token. (Addressed in RV2-W19.)
-  const inFlightRef = useRef<Promise<string | null> | null>(null);
 
   const refresh = useCallback(async (): Promise<string | null> => {
-    if (inFlightRef.current) return inFlightRef.current;
+    if (bootstrapInFlight) return bootstrapInFlight;
     setLoading(true);
     setError(null);
     const promise = (async (): Promise<string | null> => {
@@ -45,10 +49,10 @@ export function useCsrfToken(): UseCsrfTokenResult {
         return null;
       } finally {
         setLoading(false);
-        inFlightRef.current = null;
+        bootstrapInFlight = null;
       }
     })();
-    inFlightRef.current = promise;
+    bootstrapInFlight = promise;
     return promise;
   }, [setCsrfToken]);
 
