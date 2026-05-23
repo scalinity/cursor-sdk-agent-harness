@@ -32,6 +32,26 @@ export class WorkspaceRejectedError extends Error {
   }
 }
 
+/**
+ * F-004: harness-internal model IDs do not match `@cursor/sdk@1.0.13`'s
+ * `Cursor.models.list()` enum. The SDK rejects `composer-2-5-fast` /
+ * `composer-2-5` with `Cannot use this model` because the real IDs use
+ * dots and have no "fast" tier. Translate here at the boundary so the
+ * harness schema, pricing keys, and settings rows can keep their
+ * existing shapes (which carry the fast-vs-standard pricing distinction
+ * for cost accounting). When the SDK schema stabilises, the harness
+ * model IDs should be aligned to the SDK's literals and this map can
+ * collapse.
+ */
+const HARNESS_TO_SDK_MODEL_ID: Record<string, string> = {
+  "composer-2-5-fast": "composer-2.5",
+  "composer-2-5": "composer-2",
+};
+
+function toSdkModelId(harnessModelId: string): string {
+  return HARNESS_TO_SDK_MODEL_ID[harnessModelId] ?? harnessModelId;
+}
+
 export interface BuildAgentOptionsInput {
   agent: AgentRow;
   apiKey: string;
@@ -130,8 +150,9 @@ export async function buildAgentOptions(
       // SubagentModelOverride is `{ id } | null`. The SDK accepts
       // `ModelSelection | "inherit"`; omitting the field is equivalent
       // to "inherit", so we only set it when the user picked an
-      // explicit override.
-      ...(sub.model !== null ? { model: sub.model } : {}),
+      // explicit override. F-004: translate to the SDK's literal so
+      // override values picked from the harness UI don't get rejected.
+      ...(sub.model !== null ? { model: { id: toSdkModelId(sub.model.id) } } : {}),
       ...(subagentMcp.length > 0 ? { mcpServers: subagentMcp } : {}),
     };
   }
@@ -140,7 +161,7 @@ export async function buildAgentOptions(
     apiKey,
     agentId: agent.id,
     name: agent.name,
-    model: { id: agent.modelId },
+    model: { id: toSdkModelId(agent.modelId) },
     ...(Object.keys(mcp).length > 0 ? { mcpServers: mcp } : {}),
     ...(Object.keys(agentsDefinitions).length > 0
       ? { agents: agentsDefinitions }

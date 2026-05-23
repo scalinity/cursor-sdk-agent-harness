@@ -68,7 +68,7 @@ describe("buildAgentOptions", () => {
     });
     expect(opts.apiKey).toBe("sk-test-12345678");
     expect(opts.agentId).toBe("agent-1");
-    expect(opts.model).toEqual({ id: "composer-2-5-fast" });
+    expect(opts.model).toEqual({ id: "composer-2.5" });
     expect(opts.local).toBeDefined();
     expect(opts.local?.cwd).toBe(allowedDir);
     expect(opts.local?.settingSources).toEqual(["project"]);
@@ -252,7 +252,7 @@ describe("buildAgentOptions", () => {
       subagents: subs,
       workspacePolicy: policy,
     });
-    expect(opts.agents?.explicit?.model).toEqual({ id: "composer-2-5" });
+    expect(opts.agents?.explicit?.model).toEqual({ id: "composer-2" });
   });
 
   it("builds cloud options when mode=cloud and skips workspace validation", async () => {
