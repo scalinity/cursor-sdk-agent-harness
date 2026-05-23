@@ -23,6 +23,223 @@ each phase. Use it as the single source of truth for "what is decided" vs
 | 13 | Approval, Cancellation, and Resilience | ✅ complete | ApprovalResponder seam with OQ-10 probe (throws `UnimplementedApprovalError` against `@cursor/sdk@1.0.13`); approval canonical events (`approval.resolved`, `approval.failed`) with `APPROVAL_UNIMPLEMENTED` banner; cancel button in titlebar + ⌘.; `CANCEL_UNAVAILABLE` banner; startup recovery finalizes RUNNING runs with `run.interrupted` reason `server_restart`; `useRunHealth` per-tool stall warnings and run stalled banner. |
 | 14 | Performance, Polish, and Hardening | ✅ complete | Ring-buffer perf counters (server + client) wired through persist-and-broadcast + ws-plugin deliverEvent + useWebSocket + run-store; `/api/observability/perf` route; 10k-event stress fixture (10k events in 364ms, commit p95 0.038ms); timeline render bench (10k events in ~15ms cold mount); usage parse fixtures across five named cases; pricing validation + 30-day staleness test; secret redaction audit (closed `config.*.password` / `config.*.key` gap); design QA pass with zero P0 deltas; README; v1.1 release-ready. |
 | 15 | Post-Build Remediation | ✅ complete | Six P0s found and fixed: F-001 Zustand `?? []` infinite render loop (blank screen), F-002 CSRF cold-start race tearing down WS, F-003 `.env` not loaded by dev orchestrator (API key never imported), F-004 harness model IDs (`composer-2-5-fast` / `composer-2-5`) not in `@cursor/sdk@1.0.13` enum, F-005 normalizer treating per-message deltas as snapshot replacements, F-006 streaming-text channel buffer wiped by StrictMode unsubscribe. Live smoke loop verified end-to-end through the UI: create agent → submit prompt → events stream → "SMOKE LOOP COMPLETE" rendered correctly → FINISHED status → run appears in `/runs` history with tokens → `/usage` totals roll up. Full ledger in `docs/POST_BUILD_REVIEW.md`. OQ-06 (assistant delta vs snapshot) now confirmed: per-message deltas. |
+| 16 | Desktop App + Workspace Selection | ✅ complete | Electron main process at `apps/desktop/` boots Fastify in-process via the new `apps/server/src/programmatic.ts`. Origin policy + WS upgrade accept both the dev Vite origin and the `app://harness` custom protocol when `HARNESS_DESKTOP=1`. New `app.activeWorkspaceId` setting + GET/PUT `/api/workspace-allowlist/active` endpoints; `useActiveWorkspace` + `useWorkspacePicker` hooks wire the native folder dialog (or `window.prompt` browser fallback) through the existing allowlist add path. `WorkspaceRequiredModal` blocks the shell until a workspace is chosen. Native menu bar with ⌘O Open Workspace, ⌘N New Agent, ⌘J Toggle Code Pane, ⌘, Preferences. Window state persisted to `userData/window-state.json`. Mockup remnants stripped from Titlebar (fake `cinder/api-gateway` crumb + `feat/pagination… +184 −72` branch slot + `12m 04s` timer pill), RightPane (synthetic `no-file-open` tab + breadcrumb), RightTabs (`Placeholder`), and Statusbar (unconditional `⌘. cancel` slot now context-sensitive). `pnpm typecheck && pnpm lint && pnpm test` all green: 256 server tests (including 2 new active-workspace route tests), 69 web tests, 6 plugin tests, 2 shared tests, 11 scripts tests. |
+
+---
+
+## Phase 16 Outcomes — Desktop App + Workspace Selection
+
+### Decisions made (binding for downstream phases)
+
+1. **Fastify runs in the Electron main process, in-process.** Not as a
+   child process. The single Node runtime owns Keychain, SQLite, CSRF
+   secrets, and the workspace policy — adding IPC between two Node
+   processes for things that work over loopback would have been an
+   unnecessary failure surface for a single-user local app.
+2. **Renderer is sandboxed.** `contextIsolation: true`,
+   `sandbox: true`, `nodeIntegration: false`. The renderer talks to
+   the server over `http://127.0.0.1:4783` and
+   `ws://127.0.0.1:4783/ws` exactly as in browser mode. The only IPC
+   surface exposed via the preload bridge is
+   `openWorkspaceFolderDialog`, `platform`, and `onMenuAction`.
+3. **Two-origin policy.** When `HARNESS_DESKTOP=1` the server accepts
+   both `env.WEB_ORIGIN` and `app://harness`. Both `originPolicyPlugin`
+   and the WS upgrade gate share the same `allowedOrigins` array.
+4. **Active workspace persisted in `settings`, not a new column.** The
+   single-row pattern would have required a Phase 04 migration; reusing
+   `settings` with key `app.activeWorkspaceId` plus a stale-id sweep on
+   GET keeps the schema unchanged. Tradeoff: no FK guarantee, so the
+   GET handler clears the setting if the referenced allowlist row was
+   deleted.
+5. **`@harness/shared` now ships compiled JS.** Earlier phases consumed
+   it source-only through tsx. Electron's main process runs plain Node,
+   so the package gained a `tsconfig.build.json` and a `dist/`-pointing
+   exports map. `pnpm dev` still works because tsx prefers the
+   `default` (source) condition.
+6. **Server build copies `migrations/*.sql` into `dist/`.** The
+   migration runner resolves migrations from `path.dirname(importMeta)`;
+   without the copy, the compiled programmatic startup couldn't apply
+   the schema.
+
+### Files created in this phase
+
+`apps/desktop/`:
+- `package.json` — Electron 33.2.1 + electron-builder 25.1.8.
+- `tsconfig.json` — emits CJS to `dist/`.
+- `electron-builder.json` — macOS DMG config; unsigned by default.
+- `build/entitlements.mac.plist` — Keychain + network + dialog
+  entitlements for the hardened-runtime build.
+- `src/main.ts` — main-process entry: registers `app://harness`,
+  starts Fastify via `require('@harness/server/dist/programmatic.js')`,
+  creates BrowserWindow, builds the native menu, persists window
+  state, closes Fastify cleanly on `before-quit`.
+- `src/preload.ts` — context-isolated bridge exposing
+  `window.harness.{openWorkspaceFolderDialog, platform, onMenuAction}`.
+- `src/menu.ts` — native macOS menu bar.
+- `src/dialogs.ts` — `dialogs:openWorkspaceFolder` IPC handler.
+- `src/app-protocol.ts` — `app://harness/...` file-fetch with
+  traversal guard.
+- `src/window-state.ts` — `userData/window-state.json` persistence
+  (debounced 500ms).
+- `scripts/start-electron.mjs` — dev-loop wrapper that builds the
+  desktop and server packages then launches Electron with
+  `HARNESS_DEV=1 HARNESS_DESKTOP=1`.
+- `vitest.config.ts` — placeholder with `passWithNoTests: true`.
+
+`apps/server/`:
+- `src/programmatic.ts` — `startServer({ envOverrides? })` returns
+  `{ built, env, port, url, close }` without auto-listen.
+- `src/index.ts` — thin wrapper around `startServer`.
+
+`apps/web/src/`:
+- `lib/desktop-bridge.ts` — feature-detected `desktopBridge` + the
+  `isDesktop` helper. Null in browser mode.
+- `hooks/useActiveWorkspace.ts` — wraps GET/PUT
+  `/api/workspace-allowlist/active`.
+- `hooks/useWorkspacePicker.ts` — composes native dialog (or
+  `window.prompt` fallback) → validate → add (if new) → set active.
+- `hooks/useNativeMenuActions.ts` — subscribes to menu IPC channels
+  with a `ref`-stable handler dispatch.
+- `components/workspace/WorkspaceRequiredModal.tsx` — blocking modal
+  shown while `activeWorkspaceId` is null.
+
+`packages/shared/`:
+- `tsconfig.build.json` — emit-on config (extends the no-emit base).
+
+`scripts/`:
+- `dev-desktop.mjs` — repo-root orchestrator: load `.env`, spawn Vite,
+  spawn Electron with `HARNESS_DESKTOP=1 HARNESS_DEV=1`.
+
+### Files modified in this phase
+
+- `apps/server/src/security/origin-policy.ts` — accepts an
+  `allowedOrigins` array (back-compat with single `allowedOrigin`).
+- `apps/server/src/ws/ws-plugin.ts` — same multi-origin shape on the
+  WS upgrade gate.
+- `apps/server/src/app.ts` — composes the multi-origin list (Vite
+  + `app://harness` when `HARNESS_DESKTOP=1`).
+- `apps/server/src/routes/workspace-allowlist.routes.ts` —
+  `GET /api/workspace-allowlist/active`,
+  `PUT /api/workspace-allowlist/active`; settings repo plumbed
+  through `WorkspaceAllowlistRoutesDeps`.
+- `apps/server/package.json` — `build` script now copies
+  `src/db/migrations/*.sql` into `dist/db/migrations/`.
+- `packages/shared/package.json` — exports + `main`/`types` now point
+  at compiled output; `build` script invokes `tsc -p tsconfig.build.json`.
+- `packages/shared/src/rest-contracts.ts` — `activeWorkspaceResponseSchema`,
+  `setActiveWorkspaceRequestSchema`.
+- `packages/shared/src/index.ts` — barrel exports for the new
+  schemas + types.
+- `apps/web/src/app/AppShell.tsx` — hydrates active workspace, wires
+  native menu actions, mounts `WorkspaceRequiredModal` over a blurred
+  shell when no workspace is selected.
+- `apps/web/src/components/shell/Titlebar.tsx` — workspace crumb +
+  picker click. Hides the never-implemented branch slot and the
+  static `12m 04s` timer.
+- `apps/web/src/components/shell/Statusbar.tsx` — adds the
+  workspace name to the idle right-hand slot.
+- `apps/web/src/components/shell/RightPane.tsx` — drops the
+  synthetic `no-file-open` tab + breadcrumb.
+- `apps/web/src/components/shell/RightTabs.tsx` — real empty-state.
+- `package.json` — `dev:desktop` + `build:desktop` scripts;
+  `electron` + `electron-winstaller` added to
+  `pnpm.onlyBuiltDependencies`.
+
+### Commands run and results
+
+- `pnpm install` — added 200 packages (Electron + electron-builder
+  and their tree); electron post-install ran after pnpm rebuild.
+- `pnpm typecheck` — all five workspaces clean.
+- `pnpm lint` — no errors. (Initial pass surfaced one
+  `harness/no-hardcoded-visuals` violation in the modal — fixed by
+  swapping `w-[440px]` for `max-w-lg`.)
+- `pnpm test` — 333 vitest tests pass:
+  - `packages/shared`: 2
+  - `tooling/eslint-plugin-harness`: 6
+  - `apps/web`: 69
+  - `apps/server`: 256 (was 254; +2 for active-workspace endpoints)
+  - `apps/desktop`: 0 (`passWithNoTests: true`)
+  - scripts tests: 11
+- Build smoke: `pnpm --filter @harness/shared build` →
+  `dist/index.js` + d.ts files; `pnpm --filter @harness/server build`
+  → `dist/programmatic.js` + migrations copied;
+  `pnpm --filter @harness/desktop build` → `dist/main.js` +
+  `dist/preload.js`.
+- End-to-end programmatic boot (off-port 4788 to avoid clobbering
+  the dev server):
+  - `startServer()` → 200 on `/api/health/live` with
+    `Origin: app://harness`
+  - `GET /api/workspace-allowlist` → 200 `{ items: [] }`
+  - `GET /api/workspace-allowlist/active` → 200
+    `{ activeWorkspaceId: null, workspace: null }`
+  - `GET /api/health/live` with `Origin: http://evil.example.com` →
+    403 `ORIGIN_FORBIDDEN`
+  - `s.close()` resolves cleanly.
+
+### Acceptance gates satisfied
+
+- ✅ `apps/desktop/` skeleton exists with main, preload, menu,
+  dialogs, app-protocol, window-state.
+- ✅ `pnpm dev:desktop` script available at the repo root; Electron
+  picks up `HARNESS_DESKTOP=1` and the embedded Fastify accepts
+  `app://harness` as a second origin.
+- ✅ `pnpm build:desktop` chain wired (web build → server build →
+  desktop build → electron-builder DMG step). The DMG step itself
+  requires actually invoking electron-builder on macOS, which is
+  outside the test loop; the chain typechecks and the artifacts
+  required for packaging are produced.
+- ✅ Native folder picker accessible from the titlebar workspace
+  crumb (re-pick), from File → Open Workspace (⌘O), and from the
+  WorkspaceRequiredModal when no workspace is active.
+- ✅ Active workspace persisted via `settings.app.activeWorkspaceId`
+  and surfaced on every launch through `useActiveWorkspace`.
+- ✅ Browser-mode (`pnpm dev`) still works — `desktopBridge` is null
+  there, and `useWorkspacePicker` falls back to `window.prompt`.
+- ✅ Phase 05 integration tests pass unchanged: 11 `security.test.ts`
+  + 3 (5 with new active-workspace tests) workspace-allowlist routes
+  + 3 api-key-bootstrap.
+- ✅ Mockup remnants removed:
+  - Titlebar fake repo crumb, branch slot, timer pill — gone.
+  - RightTabs `Placeholder` — replaced with empty-state hint.
+  - RightPane synthetic `no-file-open` tab/breadcrumb — removed.
+  - Statusbar unconditional `⌘. cancel` — now context-sensitive
+    (only shown while a run is streaming; workspace name when idle).
+
+### Known limitations / deferred items
+
+1. **DMG signing / notarization not configured.** Slots are present
+   in `electron-builder.json` and the entitlements file is shipped,
+   but the build doesn't enforce `APPLE_ID` / `APPLE_TEAM_ID`. The
+   produced DMG is unsigned, which is fine for personal use but will
+   trigger Gatekeeper warnings.
+2. **Branch indicator deferred.** The mockup showed a git branch +
+   diff badges next to the workspace crumb. That requires reading
+   real git state from the workspace path — a future "git
+   integration" phase. The slot is intentionally empty until then.
+3. **`useRunDuration` not implemented.** The titlebar's `12m 04s`
+   timer pill is gone; a future phase can re-add it once a ticker
+   hook exists.
+4. **`WorkspaceTextInputModal` not built.** The browser-mode fallback
+   uses `window.prompt` for path entry. A nicer in-shell modal can
+   replace it when the browser-mode UX gets dedicated attention; the
+   desktop bridge is the supported path.
+5. **No multi-window support.** One BrowserWindow per process. No
+   tray icon, no global shortcuts, no auto-updates.
+6. **In-process Fastify means Electron crash = server crash.**
+   Accepted — for a single-user local app, crash isolation between
+   the renderer and the server adds no value (if Fastify dies the
+   app is dead anyway), and the simpler ownership model is worth it.
+7. **Compiled `@harness/shared` is an ESM-only bundle.** The Electron
+   main process uses CommonJS and reaches `@harness/server` through
+   `require()`, which is fine because the server is also compiled
+   CJS. Anyone wanting to call the shared package from a CJS context
+   would need a dual-output build.
+
+### No next prompt
+
+Phase 16 has no successor in the planned phase ladder. Future work
+goes through normal feature requests against the now-shipping
+desktop harness.
 
 ---
 
