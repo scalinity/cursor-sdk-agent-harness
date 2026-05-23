@@ -9,6 +9,15 @@ export interface AgentState {
   byId: Record<string, AgentSummary>;
   ids: string[];
   activeAgentId: string | null;
+  /**
+   * Set to true the first time the user explicitly chooses an agent via the
+   * picker (or any external `setActiveAgentId` with a non-null value).
+   * `useAgents.reload` consults this to avoid clobbering an explicit selection
+   * with auto-select when a refetch fires after the user cleared the picker.
+   */
+  hasUserSelected: boolean;
+  /** Epoch ms of the last successful agent list fetch (RV2-S10 stale-time). */
+  lastFetchedAt: number | null;
   loading: boolean;
   lastError: string | null;
 
@@ -18,12 +27,15 @@ export interface AgentState {
   setActiveAgentId: (agentId: string | null) => void;
   setLoading: (loading: boolean) => void;
   setLastError: (msg: string | null) => void;
+  setLastFetchedAt: (ts: number | null) => void;
 }
 
 export const useAgentStore = create<AgentState>((set) => ({
   byId: {},
   ids: [],
   activeAgentId: null,
+  hasUserSelected: false,
+  lastFetchedAt: null,
   loading: false,
   lastError: null,
 
@@ -54,7 +66,14 @@ export const useAgentStore = create<AgentState>((set) => ({
         activeAgentId: s.activeAgentId === agentId ? null : s.activeAgentId,
       };
     }),
-  setActiveAgentId: (agentId) => set({ activeAgentId: agentId }),
+  setActiveAgentId: (agentId) =>
+    set((s) => ({
+      activeAgentId: agentId,
+      // Any explicit selection (including manual clear-and-reselect) flips
+      // the flag so future auto-selects don't override the user's intent.
+      hasUserSelected: agentId !== null ? true : s.hasUserSelected,
+    })),
   setLoading: (loading) => set({ loading }),
   setLastError: (msg) => set({ lastError: msg }),
+  setLastFetchedAt: (ts) => set({ lastFetchedAt: ts }),
 }));
