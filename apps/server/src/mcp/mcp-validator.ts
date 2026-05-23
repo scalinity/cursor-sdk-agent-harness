@@ -1,4 +1,32 @@
-import { spawn } from "node:child_process";
+/**
+ * MCP server validation probe.
+ *
+ * THREAT MODEL (REVIEW-W4)
+ * ------------------------
+ * The harness binds to loopback (127.0.0.1) by default and gates every
+ * mutating REST route behind CSRF + Origin. `validateMcpServerConfig`
+ * accepts a user-supplied stdio command and spawns it directly (no
+ * shell). For the documented single-user local harness, this is
+ * acceptable — an authenticated local caller is trusted to supply
+ * commands that should run as the harness user.
+ *
+ * If `ALLOW_REMOTE_BIND=true` is ever set, or the CSRF/Origin gate is
+ * relaxed, this module's threat surface widens dramatically and must
+ * be re-evaluated before re-enabling the probe. The minimum changes
+ * would include:
+ *   - require a stronger authn proof than CSRF (e.g. a session bound
+ *     to a verified user identity);
+ *   - clamp `config.command` to a server-side allowlist (no
+ *     arbitrary binaries);
+ *   - clamp `config.cwd` to the workspace allowlist (today any path
+ *     reaches `spawn`);
+ *   - lift the env-allowlist below if upstream MCP servers need more.
+ *
+ * REVIEW-W3: parent env is restricted to a small allowlist so a
+ * malicious command (`/bin/sh -c "env > /tmp/leak"`) cannot exfiltrate
+ * bootstrap-time secrets like `CURSOR_API_KEY`.
+ */
+import { spawn, type ChildProcess } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   mcpServerConfigSchema,
@@ -94,6 +122,30 @@ export async function validateMcpServerConfig(
 type StdioConfig = Extract<McpServerConfig, { command: string }>;
 type HttpConfig = Extract<McpServerConfig, { url: string }>;
 
+/**
+ * REVIEW-W3: parent env vars the probe child is allowed to inherit.
+ * Everything else (including `CURSOR_API_KEY` if bootstrapped via env)
+ * is withheld so a malicious command can't exfiltrate the harness's
+ * own secrets via the spawned subprocess.
+ */
+const PARENT_ENV_ALLOWLIST: ReadonlyArray<string> = [
+  "PATH",
+  "HOME",
+  "USER",
+  "LANG",
+  "LC_ALL",
+  "TZ",
+];
+
+function buildProbeEnv(extra: Record<string, string> | undefined): NodeJS.ProcessEnv {
+  const parent: NodeJS.ProcessEnv = {};
+  for (const key of PARENT_ENV_ALLOWLIST) {
+    const value = process.env[key];
+    if (value !== undefined) parent[key] = value;
+  }
+  return { ...parent, ...(extra ?? {}) };
+}
+
 async function probeStdio(
   config: StdioConfig,
   transport: McpTransport,
@@ -102,18 +154,37 @@ async function probeStdio(
 ): Promise<McpValidationResult> {
   return await new Promise<McpValidationResult>((resolve) => {
     let settled = false;
+    // REVIEW-W2: hoist `child` out of the TDZ — declared up-front as
+    // `ChildProcess | undefined` so `resolveOnce` can null-check before
+    // calling kill(). Future refactors that invoke resolveOnce before
+    // the spawn won't throw ReferenceError.
+    let child: ChildProcess | undefined;
     const resolveOnce = (result: McpValidationResult) => {
       if (settled) return;
       settled = true;
-      try {
-        child.kill("SIGTERM");
-      } catch {
-        // best-effort: process may already be gone
+      if (child) {
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          // best-effort: process may already be gone
+        }
+        // REVIEW-W2: SIGTERM is best-effort; a non-cooperative MCP
+        // server can ignore it. Schedule an unref'd SIGKILL fallback
+        // so a misbehaving binary doesn't accumulate zombies under
+        // repeated re-probes.
+        const c = child;
+        const killTimer = globalThis.setTimeout(() => {
+          try {
+            c.kill("SIGKILL");
+          } catch {
+            // best-effort: process may have exited already
+          }
+        }, 250);
+        killTimer.unref?.();
       }
       resolve(result);
     };
 
-    let child: ReturnType<typeof spawnImpl>;
     try {
       child = spawnImpl(
         config.command,
@@ -122,7 +193,8 @@ async function probeStdio(
         config.args && config.args.length > 0 ? config.args : ["--help"],
         {
           stdio: ["ignore", "pipe", "pipe"],
-          env: { ...process.env, ...(config.env ?? {}) },
+          // REVIEW-W3: minimal parent env + caller-declared additions.
+          env: buildProbeEnv(config.env),
           ...(config.cwd ? { cwd: config.cwd } : {}),
         },
       );

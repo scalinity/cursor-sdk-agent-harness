@@ -170,6 +170,36 @@ describe("validateMcpServerConfig — http probe", () => {
   });
 });
 
+describe("REVIEW-W3 env allowlist", () => {
+  it("does not pass non-allowlisted parent env vars to the child", async () => {
+    const originalSecret = process.env.CURSOR_API_KEY;
+    const originalPath = process.env.PATH;
+    process.env.CURSOR_API_KEY = "sk-should-not-leak";
+    let observedEnv: NodeJS.ProcessEnv | undefined;
+    await validateMcpServerConfig(
+      { command: "/usr/bin/echo", env: { MCP_OWN_VAR: "hello" } },
+      {
+        spawnImpl: ((_cmd, _args, opts) => {
+          observedEnv = opts?.env as NodeJS.ProcessEnv | undefined;
+          const child = makeFakeChild();
+          queueMicrotask(() => child.emit("exit", 0, null));
+          return child as unknown as ReturnType<typeof spawn>;
+        }) as typeof spawn,
+        timeoutMs: 200,
+      },
+    );
+    expect(observedEnv).toBeDefined();
+    if (originalSecret === undefined) delete process.env.CURSOR_API_KEY;
+    else process.env.CURSOR_API_KEY = originalSecret;
+    expect(observedEnv?.CURSOR_API_KEY).toBeUndefined();
+    expect(observedEnv?.MCP_OWN_VAR).toBe("hello");
+    // PATH is on the allowlist — present.
+    if (originalPath !== undefined) {
+      expect(observedEnv?.PATH).toBe(originalPath);
+    }
+  });
+});
+
 describe("redactMcpConfig", () => {
   it("masks every stdio env var", () => {
     const masked = redactMcpConfig({
