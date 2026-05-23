@@ -176,6 +176,41 @@ describe("persist-and-broadcast pipeline", () => {
     expect(codeEdit?.callId).toBe("c-1");
   });
 
+  it("LRU-evicts the oldest buffer when capacity is reached", () => {
+    const pipeline = createPersistAndBroadcast(
+      { events, bus, logger: silentLogger },
+      { bufferCapacity: 2 },
+    );
+    // Create two more runs so we have three distinct runIds in play. We
+    // can't use the same runId across all three calls because seq would
+    // overflow into another agent's events, and the second run we create
+    // needs its own runId so the eviction test exercises distinct keys.
+    const runB = runs.create({ agentId, status: "RUNNING", modelId: "composer-2-5-fast", mode: "local" });
+    const runC = runs.create({ agentId, status: "RUNNING", modelId: "composer-2-5-fast", mode: "local" });
+
+    pipeline.ingestSDKMessage({
+      raw: { type: "assistant", agent_id: agentId, run_id: runId, message: { role: "assistant", content: [{ type: "text", text: "A" }] } },
+      runId,
+      agentId,
+      agentMode: "local",
+    });
+    pipeline.ingestSDKMessage({
+      raw: { type: "assistant", agent_id: agentId, run_id: runB.id, message: { role: "assistant", content: [{ type: "text", text: "B" }] } },
+      runId: runB.id,
+      agentId,
+      agentMode: "local",
+    });
+    expect(pipeline.bufferCount()).toBe(2);
+    // Third runId should evict the oldest (runId).
+    pipeline.ingestSDKMessage({
+      raw: { type: "assistant", agent_id: agentId, run_id: runC.id, message: { role: "assistant", content: [{ type: "text", text: "C" }] } },
+      runId: runC.id,
+      agentId,
+      agentMode: "local",
+    });
+    expect(pipeline.bufferCount()).toBe(2);
+  });
+
   it("dropRun forgets the text buffer so a recycled runId starts fresh", () => {
     const pipeline = createPersistAndBroadcast({ events, bus, logger: silentLogger });
     pipeline.ingestSDKMessage({

@@ -48,20 +48,58 @@ export interface PersistAndBroadcastPipeline {
   dropRun(runId: string): void;
   /** Test/teardown hook: clear ALL per-run buffers. */
   clear(): void;
+  /** Test inspection hook: current count of buffered runs. */
+  bufferCount(): number;
+}
+
+/**
+ * Cap on simultaneously-buffered runs. A single-user local harness
+ * realistically has at most a handful of active runs at a time; 512
+ * leaves enough headroom for fire-and-forget background runs while
+ * bounding memory if an `onTerminate` callback is ever missed (e.g.
+ * runtime exception before dropRun fires). Mirrors the LiveAgents LRU
+ * pattern.
+ */
+const DEFAULT_BUFFER_CAPACITY = 512;
+
+export interface PipelineOptions {
+  /** Override the LRU cap on `bufferByRun` size. */
+  bufferCapacity?: number;
 }
 
 export function createPersistAndBroadcast(
   deps: PipelineDeps,
+  options: PipelineOptions = {},
 ): PersistAndBroadcastPipeline {
+  const capacity = options.bufferCapacity ?? DEFAULT_BUFFER_CAPACITY;
+  // Map preserves insertion order; we promote to most-recently-used on
+  // every `getBuffer` so the LRU eviction picks a genuinely stale run.
   const bufferByRun = new Map<string, RunBufferState>();
 
   function getBuffer(runId: string): RunBufferState {
-    let buf = bufferByRun.get(runId);
-    if (!buf) {
-      buf = { assistantText: "", thinkingText: "" };
-      bufferByRun.set(runId, buf);
+    const existing = bufferByRun.get(runId);
+    if (existing !== undefined) {
+      // Promote to MRU: delete + re-insert moves the key to the tail.
+      bufferByRun.delete(runId);
+      bufferByRun.set(runId, existing);
+      return existing;
     }
-    return buf;
+    if (bufferByRun.size >= capacity) {
+      // Evict the oldest entry — first key in insertion order. This is
+      // a safety net; production paths always call dropRun on
+      // termination. An eviction here means somebody forgot to drop.
+      const firstKey = bufferByRun.keys().next().value;
+      if (firstKey !== undefined) {
+        bufferByRun.delete(firstKey);
+        deps.logger.warn(
+          { evictedRunId: firstKey, capacity },
+          "persist-and-broadcast: LRU-evicted a per-run text buffer (forgot dropRun?)",
+        );
+      }
+    }
+    const fresh: RunBufferState = { assistantText: "", thinkingText: "" };
+    bufferByRun.set(runId, fresh);
+    return fresh;
   }
 
   return {
@@ -161,6 +199,10 @@ export function createPersistAndBroadcast(
 
     clear(): void {
       bufferByRun.clear();
+    },
+
+    bufferCount(): number {
+      return bufferByRun.size;
     },
   };
 }

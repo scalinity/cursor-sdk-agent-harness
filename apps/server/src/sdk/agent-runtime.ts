@@ -361,6 +361,12 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
         await controller.start();
       } catch (err) {
         activeRuns.unregister(controller.runId);
+        // Symmetric cleanup with the onTerminate callback below: if
+        // start() ingested any events before throwing, the per-run
+        // text accumulator is now orphaned (the consume loop never
+        // ran, so onTerminate won't fire). Drop it explicitly to
+        // match the happy-path lifecycle.
+        deps.pipeline.dropRun(controller.runId);
         deps.runsRepo.setInterrupted(
           controller.runId,
           "stream_error",

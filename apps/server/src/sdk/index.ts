@@ -43,4 +43,5 @@ export {
   type IngestArgs,
   type PersistAndBroadcastPipeline,
   type PipelineDeps,
+  type PipelineOptions,
 } from "./persist-and-broadcast.js";
