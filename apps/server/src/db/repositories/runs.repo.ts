@@ -385,6 +385,49 @@ export class RunsRepo {
    * grows to multi-tenant or aggregate-across-tenants reporting, swap to
    * `better-sqlite3`'s `safeIntegers` mode and BigInt arithmetic.
    */
+  /**
+   * Per-agent aggregates for a single agent. Same shape as one row of
+   * `aggregatesByAgent()` but filters in SQL so we don't scan all runs
+   * for a `getById` request. Returns null when the agent has zero runs
+   * (caller substitutes zeros for missing keys per the same convention
+   * as `aggregatesByAgent`).
+   */
+  aggregatesForAgent(agentId: string): {
+    runCount: number;
+    activeRunCount: number;
+    totalCostUsdMicros: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+  } | null {
+    const row = this.raw
+      .prepare(
+        `SELECT COUNT(*)                                            AS run_count,
+                SUM(CASE WHEN status IN ('CREATING','RUNNING') THEN 1 ELSE 0 END) AS active_run_count,
+                COALESCE(SUM(cost_usd_micros), 0)                   AS total_cost,
+                COALESCE(SUM(input_tokens), 0)                      AS total_input,
+                COALESCE(SUM(output_tokens), 0)                     AS total_output
+           FROM runs
+          WHERE agent_id = ?`,
+      )
+      .get(agentId) as
+      | {
+          run_count: number;
+          active_run_count: number;
+          total_cost: number;
+          total_input: number;
+          total_output: number;
+        }
+      | undefined;
+    if (!row || row.run_count === 0) return null;
+    return {
+      runCount: row.run_count,
+      activeRunCount: row.active_run_count,
+      totalCostUsdMicros: row.total_cost,
+      totalInputTokens: row.total_input,
+      totalOutputTokens: row.total_output,
+    };
+  }
+
   aggregatesByAgent(): Map<
     string,
     {
