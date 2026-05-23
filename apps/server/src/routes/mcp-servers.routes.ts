@@ -112,6 +112,29 @@ function probeOutcomeFromResult(result: McpValidationResult): ProbeOutcome {
   }
 }
 
+/**
+ * REVIEW-W1: never strand a row at `validation_status='unknown'` on a
+ * thrown probe. `validateMcpServerConfig` is designed to return a result
+ * for every input, but a future change (or a custom `validatorOverride`
+ * in tests) could throw. Wrap so a throw becomes a synthetic
+ * `unreachable` verdict carrying the error message.
+ */
+async function runProbe(
+  validate: (config: unknown, options: McpValidatorOptions) => Promise<McpValidationResult>,
+  config: unknown,
+  options: McpValidatorOptions,
+): Promise<McpValidationResult> {
+  try {
+    return await validate(config, options);
+  } catch (err) {
+    return {
+      status: "unreachable",
+      transport: "stdio",
+      reason: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 export async function registerMcpServersRoutes(
   app: FastifyInstance,
   deps: McpServersRoutesDeps,
@@ -154,7 +177,7 @@ export async function registerMcpServersRoutes(
       enabled: parsed.data.enabled,
       config: parsed.data.config,
     });
-    const probe = await validate(parsed.data.config, probeOptions);
+    const probe = await runProbe(validate, parsed.data.config, probeOptions);
     const outcome = probeOutcomeFromResult(probe);
     const updated = deps.mcpServers.update(row.id, {
       validationStatus: outcome.status,
@@ -209,7 +232,7 @@ export async function registerMcpServersRoutes(
         validationStatus: "unknown",
         validationMessage: null,
       });
-      const probe = await validate(parsed.data.config, probeOptions);
+      const probe = await runProbe(validate, parsed.data.config, probeOptions);
       const outcome = probeOutcomeFromResult(probe);
       const row = deps.mcpServers.update(req.params.id, {
         validationStatus: outcome.status,
@@ -266,7 +289,7 @@ export async function registerMcpServersRoutes(
         validationStatus: "unknown",
         validationMessage: null,
       });
-      const probe = await validate(existing.config, probeOptions);
+      const probe = await runProbe(validate, existing.config, probeOptions);
       const outcome = probeOutcomeFromResult(probe);
       const row = deps.mcpServers.update(req.params.id, {
         validationStatus: outcome.status,

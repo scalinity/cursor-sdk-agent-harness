@@ -248,6 +248,30 @@ describe("/api/mcp-servers", () => {
     expect(put.json().code).toBe("REDACTED_SENTINEL_PRESENT");
   });
 
+  it("REVIEW-W1: a throwing probe lands as 'unreachable' instead of stranding the row at 'unknown'", async () => {
+    const { db, repos, app } = setup();
+    cleanup.push(() => app.close(), () => db.close());
+    await registerMcpServersRoutes(app, {
+      mcpServers: repos.mcpServers,
+      validatorOverride: async () => {
+        throw new Error("synthetic probe failure");
+      },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/mcp-servers",
+      payload: {
+        name: "probe-throws",
+        enabled: true,
+        config: { command: "/usr/bin/echo" },
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.validationStatus).toBe("unreachable");
+    expect(body.validationMessage).toMatch(/synthetic probe failure/);
+  });
+
   it("422s a malformed config", async () => {
     const { db, repos, app } = setup();
     cleanup.push(() => app.close(), () => db.close());
