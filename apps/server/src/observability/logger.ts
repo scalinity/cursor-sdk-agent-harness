@@ -32,8 +32,13 @@ export const REDACT_PATHS = [
   "*.secret",
   "*.password",
   "*.key",
+  // Pino `*` wildcards match exactly one level. MCP / DB config blocks
+  // routinely nest secrets two levels deep (`config.<name>.<field>`),
+  // so we list every sensitive field-name explicitly at that depth.
   "config.*.token",
   "config.*.secret",
+  "config.*.password",
+  "config.*.key",
 ];
 
 export const REDACT_CONFIG = {
