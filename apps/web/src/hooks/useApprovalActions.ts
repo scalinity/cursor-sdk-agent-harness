@@ -1,32 +1,30 @@
 /**
- * useApprovalActions — Phase 13 client-side approval state machine.
+ * useApprovalActions — Phase 13 client-side approval sender.
  *
- * Subscribes to `run-store.eventsByRunId[runId].approvalsByRequestId` for
- * the current state of every approval prompt and exposes a `resolve`
- * callback that sends an `approval_response` WS frame. The server
- * responds with `approval.resolved` or `approval.failed`, which lands
- * back through the store via `ingestServerFrame` — components observe
- * the state transition through the same selector.
+ * Subscribes to `run-store.eventsByRunId[runId].approvalsByRequestId`
+ * for the current state of every approval prompt and exposes a
+ * `resolve` callback that sends an `approval_response` WS frame. The
+ * server responds with `approval.resolved` or `approval.failed`,
+ * which lands back through the store via `ingestServerFrame` — the
+ * inline `ApprovalPrompt` observes the transition through the same
+ * selector.
  *
- * Notes:
- *   - The hook does NOT mutate `approvalsByRequestId` itself. The store
- *     is the single source of truth; the hook is a sender only.
- *   - "awaiting_server" is purely local — the store still reads
- *     "pending" until the outcome arrives.
+ * RV2-W1 + S2 + S8: the previous version maintained a local
+ * `awaiting_server` overlay with a 10-second setTimeout to clear stale
+ * entries. The timer was never cleared on unmount and a stash of dead
+ * CSRF reads added confusion. The overlay is gone now: the store
+ * status (`pending` until the outcome arrives) is the single source
+ * of truth, and the local RTT is short enough that "Awaiting your
+ * response" reads correctly as soon as the user clicks. If the user
+ * needs a per-click feedback nuance later, build it from the store
+ * status alone — never a leakable timer.
  */
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import type { ClientFrame } from "@harness/shared";
 import { useRunStore, type ApprovalState } from "../state/run-store.js";
-import { useUiStore } from "../state/ui-store.js";
-
-export type ApprovalUiStatus = ApprovalState["status"] | "awaiting_server";
-
-export interface ApprovalUiState extends Omit<ApprovalState, "status"> {
-  status: ApprovalUiStatus;
-}
 
 export interface UseApprovalActionsResult {
-  approvals: ApprovalUiState[];
+  approvals: ApprovalState[];
   resolve: (
     requestId: string,
     decision: "approve" | "deny",
@@ -40,13 +38,6 @@ function makeFrameId(prefix: string): string {
     .slice(2, 10)}`;
 }
 
-/**
- * Build a hook that wraps the store's approvals map with a local
- * "awaiting_server" overlay. The injected `send` function is the WS
- * sender owned by `useAgentStream`; passing it through the props
- * boundary keeps this hook component-side without creating a second
- * socket.
- */
 export function useApprovalActions(
   runId: string | null,
   send: (frame: ClientFrame) => void,
@@ -54,45 +45,14 @@ export function useApprovalActions(
   const approvalsMap = useRunStore((s) =>
     runId ? (s.eventsByRunId[runId]?.approvalsByRequestId ?? null) : null,
   );
-  const [awaitingByRequestId, setAwaitingByRequestId] = useState<
-    Record<string, true>
-  >({});
 
-  const approvals: ApprovalUiState[] = approvalsMap
-    ? Object.values(approvalsMap).map((a): ApprovalUiState => {
-        if (a.status === "pending" && awaitingByRequestId[a.requestId]) {
-          return { ...a, status: "awaiting_server" };
-        }
-        return a;
-      })
+  const approvals: ApprovalState[] = approvalsMap
+    ? Object.values(approvalsMap)
     : [];
 
   const resolve = useCallback(
     (requestId: string, decision: "approve" | "deny", reason?: string) => {
       if (!runId) return;
-      // Optimistic local "awaiting_server" overlay — cleared when the
-      // outcome arrives (resolved or failed both flip the store status
-      // away from "pending", which removes the awaiting key on next
-      // render). We also clear on a 10s timeout so a dropped server
-      // response doesn't leave the prompt stuck.
-      setAwaitingByRequestId((m) => ({ ...m, [requestId]: true }));
-      const timeoutId = setTimeout(() => {
-        setAwaitingByRequestId((m) => {
-          const { [requestId]: _drop, ...rest } = m;
-          void _drop;
-          return rest;
-        });
-      }, 10_000);
-      // Best-effort: clear once the store reports a non-pending status
-      // (subscribe via getState polled at the next macrotask isn't
-      // worth a useEffect — the timeout above is the safety net, and
-      // the visible state is already correct because the selector
-      // re-runs when the outcome lands).
-      void timeoutId;
-
-      const csrfToken = useUiStore.getState().csrfToken ?? "";
-      void csrfToken; // CSRF rides on the WS upgrade query; not per-frame.
-
       const frame: ClientFrame = {
         id: makeFrameId("approval"),
         type: "approval_response",

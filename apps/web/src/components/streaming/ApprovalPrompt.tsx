@@ -11,12 +11,15 @@
  */
 import { useMemo, useState } from "react";
 import { JsonInspector } from "./JsonInspector.js";
-import { useRunStore, type CanonicalRunEvent } from "../../state/run-store.js";
-import type { ApprovalUiState } from "../../hooks/useApprovalActions.js";
+import {
+  useRunStore,
+  type ApprovalState,
+  type CanonicalRunEvent,
+} from "../../state/run-store.js";
 
 export interface ApprovalPromptProps {
   runId: string;
-  approval: ApprovalUiState;
+  approval: ApprovalState;
   onResolve: (
     requestId: string,
     decision: "approve" | "deny",
@@ -75,7 +78,6 @@ export function ApprovalPrompt({
   );
 
   const pending = approval.status === "pending";
-  const awaiting = approval.status === "awaiting_server";
   const resolved = approval.status === "resolved";
   const failed = approval.status === "failed";
   const isUnimplemented = failed && approval.code === "APPROVAL_UNIMPLEMENTED";
@@ -89,9 +91,9 @@ export function ApprovalPrompt({
             req {approval.requestId.slice(0, 8)}
           </span>
         </div>
-        {pending || awaiting ? (
+        {pending ? (
           <span className="text-xs text-text-tertiary">
-            {awaiting ? "Awaiting server…" : "Awaiting your response"}
+            Awaiting your response
           </span>
         ) : resolved ? (
           <span className="text-xs text-success">
@@ -138,13 +140,12 @@ export function ApprovalPrompt({
         </div>
       ) : null}
 
-      {pending || awaiting ? (
+      {pending ? (
         <div className="approval-prompt__actions mt-2 flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => onResolve(approval.requestId, "approve")}
-            disabled={awaiting}
-            className="inline-flex h-control-sm items-center rounded-sm border border-success bg-success px-2 text-xs font-medium text-surface-1 disabled:opacity-50"
+            className="inline-flex h-control-sm items-center rounded-sm border border-success bg-success px-2 text-xs font-medium text-surface-1"
           >
             Approve
           </button>
@@ -157,8 +158,7 @@ export function ApprovalPrompt({
                 reason.length > 0 ? reason : undefined,
               )
             }
-            disabled={awaiting}
-            className="inline-flex h-control-sm items-center rounded-sm border border-danger bg-surface-1 px-2 text-xs font-medium text-danger disabled:opacity-50"
+            className="inline-flex h-control-sm items-center rounded-sm border border-danger bg-surface-1 px-2 text-xs font-medium text-danger"
           >
             Deny
           </button>
