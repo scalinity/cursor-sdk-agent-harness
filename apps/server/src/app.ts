@@ -15,10 +15,13 @@ import { WorkspacePolicy } from "./security/workspace-policy.js";
 import type { Repositories } from "./db/repositories/index.js";
 import {
   ActiveRuns,
+  buildApprovalResponder,
   createAgentRuntime,
   createCursorSdkAdapter,
   createPersistAndBroadcast,
+  runStartupRecovery,
   type AgentRuntime,
+  type ApprovalResponder,
   type SdkAdapter,
 } from "./sdk/index.js";
 import { createRunBus, wsPlugin, type RunBus } from "./ws/index.js";
@@ -48,6 +51,20 @@ export interface AppDeps {
    */
   wsHeartbeatIntervalMs?: number;
   wsMissedPongTimeoutMs?: number;
+  /**
+   * Phase 13 — injected approval responder. Tests provide a stub
+   * that resolves successfully or throws `UnimplementedApprovalError`
+   * deterministically. Production defaults to the probe-based
+   * responder, which throws `UnimplementedApprovalError` against
+   * `@cursor/sdk@1.0.13` (OQ-10 unresolved).
+   */
+  approvalResponder?: ApprovalResponder;
+  /**
+   * Phase 13 — skip startup recovery. Most tests want the default
+   * (recovery runs); the few that pre-seed RUNNING rows AND want to
+   * inspect them before recovery flips them set this to true.
+   */
+  skipStartupRecovery?: boolean;
 }
 
 export interface BuiltApp {
@@ -156,6 +173,9 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     pipeline,
   });
 
+  const approvalResponder =
+    deps.approvalResponder ?? buildApprovalResponder({ activeRuns, logger: app.log });
+
   await app.register(wsPlugin, {
     csrf: csrfTokenizer,
     allowedOrigin: env.WEB_ORIGIN,
@@ -163,6 +183,8 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     runs: repos.runs,
     bus: runBus,
     activeRuns,
+    approvalResponder,
+    pipeline,
     ...(deps.wsHeartbeatIntervalMs !== undefined
       ? { heartbeatIntervalMs: deps.wsHeartbeatIntervalMs }
       : {}),
@@ -170,6 +192,15 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       ? { missedPongTimeoutMs: deps.wsMissedPongTimeoutMs }
       : {}),
   });
+
+  // Phase 13 — finalize any runs left RUNNING by a previous process.
+  // Append the synthetic `run.interrupted` events BEFORE we accept
+  // connections so the first replay sees the truncated timeline.
+  if (deps.skipStartupRecovery !== true) {
+    app.addHook("onReady", async () => {
+      runStartupRecovery({ runs: repos.runs, events: repos.events, logger: app.log });
+    });
+  }
 
   app.addHook("onClose", async () => {
     await agentRuntime.shutdown();

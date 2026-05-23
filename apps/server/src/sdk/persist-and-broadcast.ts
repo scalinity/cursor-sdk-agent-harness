@@ -69,6 +69,29 @@ export interface PersistAndBroadcastPipeline {
   clear(): void;
   /** Test inspection hook: current count of buffered runs. */
   bufferCount(): number;
+  /**
+   * Phase 13 — append a synthetic canonical event whose origin is NOT
+   * an SDK message (e.g. `approval.resolved` / `approval.failed` from
+   * the WS plugin). The caller owns the `(sdkType, kind, payload)`
+   * tuple; the pipeline allocates the seq inside the same transaction
+   * as the row insert and publishes to the bus only after commit.
+   *
+   * The kind is widened to `string` because the harness emits a few
+   * non-canonical kinds (e.g. forensic `system.unknown_sdk_message`);
+   * frame-builder gates broadcast on the closed `CanonicalEventKind`
+   * union.
+   */
+  appendCanonicalEvent(args: {
+    runId: string;
+    agentId: string;
+    sdkType: "request" | "status" | "system";
+    kind: string;
+    callId?: string | null;
+    requestId?: string | null;
+    status?: string | null;
+    payload: unknown;
+    occurredAt?: string;
+  }): void;
 }
 
 /**
@@ -264,6 +287,35 @@ export function createPersistAndBroadcast(
 
     bufferCount(): number {
       return bufferByRun.size;
+    },
+
+    appendCanonicalEvent(args): void {
+      const occurredAt = args.occurredAt ?? new Date().toISOString();
+      try {
+        const row = deps.events.appendCanonicalEvent({
+          runId: args.runId,
+          agentId: args.agentId,
+          sdkType: args.sdkType,
+          kind: args.kind,
+          callId: args.callId ?? null,
+          requestId: args.requestId ?? null,
+          status: args.status ?? null,
+          payload: args.payload,
+          raw: null,
+          occurredAt,
+          receivedAt: occurredAt,
+        });
+        deps.bus.publish(args.runId, row);
+      } catch (err) {
+        deps.logger.error(
+          { err, runId: args.runId, kind: args.kind },
+          "persist-and-broadcast: synthetic canonical event insert failed",
+        );
+        // Don't throw — the caller (WS plugin's approval handler) has
+        // already validated the request and would have no clean way
+        // to recover from a DB write failure mid-frame. We log and
+        // drop; the client times out the in-flight resolve.
+      }
     },
   };
 }

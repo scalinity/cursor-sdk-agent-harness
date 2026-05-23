@@ -130,6 +130,8 @@ export type {
 // WebSocket protocol
 export {
   ackFrameSchema,
+  approvalFailedFrameSchema,
+  approvalResolvedFrameSchema,
   approvalResponseFrameSchema,
   cancelRunFrameSchema,
   clientFrameSchema,

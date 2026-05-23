@@ -13,6 +13,18 @@ import { StreamingSurfaceBoundary } from "./StreamingSurfaceBoundary.js";
 export interface ToolCallCardProps {
   call: ToolCallProjection;
   runId: string;
+  /**
+   * Phase 13 — when true, a pending approval request is keyed to this
+   * tool call's `call_id`. ToolCallLane derives the bit from
+   * `approvalsByRequestId` so cards don't take a store dep of their own.
+   */
+  awaitingApproval?: boolean;
+  /**
+   * Phase 13 — stall thresholds. ToolCallLane computes these from
+   * `useRunHealth` and passes them down so each card stays presentational.
+   */
+  stillRunning?: boolean;
+  longRunning?: boolean;
 }
 
 type ToolIcon = "read" | "write" | "run" | "grep" | "web" | "default";
@@ -75,7 +87,13 @@ function hasContractConfirmation(value: unknown): boolean {
   return typeof (value as Record<string, unknown>).contract === "string";
 }
 
-export function ToolCallCard({ call, runId }: ToolCallCardProps) {
+export function ToolCallCard({
+  call,
+  runId,
+  awaitingApproval = false,
+  stillRunning = false,
+  longRunning = false,
+}: ToolCallCardProps) {
   const [pinned, setPinned] = useState(false);
   const events = useRunStore((s) => s.eventsByRunId[runId]?.events ?? []);
   const selectCodeEditEvent = useUiStore((s) => s.selectCodeEditEvent);
@@ -97,6 +115,27 @@ export function ToolCallCard({ call, runId }: ToolCallCardProps) {
         <span className="arg">{summarizeArgs(call.args)}</span>
         <span className="ms">{statusLabel}</span>
         <span className={cn("tool-state", `tool-state--${call.status}`)}>{call.status}</span>
+        {awaitingApproval ? (
+          <span
+            className="ml-2 inline-flex items-center rounded-sm border border-warning bg-surface-2 px-1.5 py-0.5 text-2xs text-warning"
+            title="Approval requested for this tool call"
+          >
+            awaiting approval
+          </span>
+        ) : null}
+        {stillRunning && call.status === "running" ? (
+          <span
+            className={cn(
+              "ml-2 inline-flex items-center rounded-sm border px-1.5 py-0.5 text-2xs",
+              longRunning
+                ? "border-danger bg-surface-2 text-danger"
+                : "border-warning bg-surface-2 text-warning",
+            )}
+            title={longRunning ? "Long-running tool (>2 min)" : "Still running (>30s)"}
+          >
+            {longRunning ? "long-running" : "still running"}
+          </span>
+        ) : null}
       </div>
       {!collapsed ? (
         <div className="tool-body">

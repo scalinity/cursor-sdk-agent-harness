@@ -354,6 +354,18 @@ Phase 01 output — resolves every Open Question from `spec-v1.1.md` Section 14 
   no code path silently fakes a resolved request. Re-check this OQ when
   `@cursor/sdk` bumps minor versions — when a method appears, the harness
   flips approval from Partial to Verified without protocol changes.
+- **Phase 13 resolution (2026-05-23)**: The harness shipped a
+  probe-based `ApprovalResponder` (`apps/server/src/sdk/approval-responder.ts`).
+  At first `approval_response` from the client, the probe enumerates
+  candidate method names (`respond`, `approve`, `respondToRequest`,
+  `resolveRequest`) against the live `Run` handle. None exist in
+  `@cursor/sdk@1.0.13` — the responder throws
+  `UnimplementedApprovalError` and the WS plugin emits an
+  `approval.failed` canonical event with `code =
+  "APPROVAL_UNIMPLEMENTED"`. The UI surfaces a non-dismissable banner
+  in the inline `ApprovalPrompt`. No code path silently fakes
+  resolution. Status remains **unverified-negative**; re-check on
+  every SDK bump.
 
 ---
 

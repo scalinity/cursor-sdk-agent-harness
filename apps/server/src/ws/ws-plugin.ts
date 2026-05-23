@@ -19,6 +19,11 @@ import {
 import type { EventsRepo } from "../db/repositories/events.repo.js";
 import type { RunsRepo } from "../db/repositories/runs.repo.js";
 import type { ActiveRuns } from "../sdk/active-runs.js";
+import type {
+  ApprovalResponder,
+  ApprovalResolveInput,
+} from "../sdk/approval-responder.js";
+import { UnimplementedApprovalError } from "../sdk/approval-responder.js";
 import type { CancelResult } from "../sdk/run-controller.js";
 import type { CsrfTokenizer } from "../security/csrf.js";
 import { buildServerFrame } from "./frame-builder.js";
@@ -84,12 +89,37 @@ export interface WsPluginOptions {
   heartbeatIntervalMs?: number;
   /** Override the missed-pong timeout (ms). Defaults to 45s. */
   missedPongTimeoutMs?: number;
-  // NOTE: a Phase 07 `onApprovalResponse` hook was intentionally
-  // omitted. OQ-10 stays unverified — there is no SDK method to
-  // resolve a `request` event in @cursor/sdk@1.0.13 — so the plugin
-  // ALWAYS replies with APPROVAL_NOT_PENDING. When Phase 13 lands a
-  // real responder, add the hook then as part of a single coherent
-  // change rather than a half-step here.
+  /**
+   * Phase 13 — approval responder. The default production responder
+   * throws `UnimplementedApprovalError` because OQ-10 has no
+   * resolution in `@cursor/sdk@1.0.13`. The WS plugin converts the
+   * throw into an `approval.failed` canonical event with code
+   * `APPROVAL_UNIMPLEMENTED` so the UI surfaces the limitation
+   * honestly instead of pretending the response went through.
+   */
+  approvalResponder: ApprovalResponder;
+  /**
+   * Phase 13 — persist-and-broadcast pipeline. Used to append
+   * canonical `approval.resolved` / `approval.failed` events through
+   * the same persist-before-broadcast path that SDK events take, so
+   * replay sees the same outcome.
+   */
+  pipeline: {
+    /**
+     * Append a synthetic canonical event whose origin is NOT an SDK
+     * message. The harness owns the (sdkType, kind, payload) tuple;
+     * the pipeline handles the seq allocation + bus publish.
+     */
+    appendCanonicalEvent: (args: {
+      runId: string;
+      agentId: string;
+      sdkType: "request";
+      kind: "approval.resolved" | "approval.failed";
+      requestId: string;
+      payload: unknown;
+      occurredAt: string;
+    }) => void;
+  };
 }
 
 /**
@@ -365,7 +395,7 @@ function handleClientFrame(
       void handleCancelRun(state, frame, opts);
       return;
     case "approval_response":
-      handleApprovalResponse(state, frame);
+      void handleApprovalResponse(state, frame, opts);
       return;
     case "submit_user_input":
     case "delete_run":
@@ -628,32 +658,114 @@ async function handleCancelRun(
   }
 }
 
-function handleApprovalResponse(
+async function handleApprovalResponse(
   state: ConnectionState,
   frame: Extract<ClientFrame, { type: "approval_response" }>,
-): void {
-  // Per OQ-10 there's no SDK method to resolve approval in
-  // @cursor/sdk@1.0.13. Log the user's intent at info level so a
-  // future audit can see they tried, then reply APPROVAL_NOT_PENDING.
-  // No callback hook here — Phase 13 will introduce the responder
-  // cleanly once the SDK exposes a resolution method.
-  state.log.info(
-    {
+  opts: WsPluginOptions,
+): Promise<void> {
+  // Phase 13 wiring. Approval is resolved through the configured
+  // `ApprovalResponder`; OQ-10 unverified means the default responder
+  // throws `UnimplementedApprovalError`, and the harness emits
+  // `approval.failed` with code `APPROVAL_UNIMPLEMENTED` so the UI is
+  // honest. Persist-before-broadcast: the synthetic canonical event
+  // lands in `events` BEFORE the WS ack/error goes out.
+  const pending = findPendingRequest(opts, frame.run_id, frame.request_id);
+  if (!pending) {
+    sendFrame(
+      state,
+      errorFrame(
+        "APPROVAL_NOT_PENDING",
+        `No pending request_id=${frame.request_id} on run_id=${frame.run_id}`,
+        { ack_for: frame.id },
+      ),
+    );
+    return;
+  }
+  const agentId = pending.agentId;
+  const input: ApprovalResolveInput = {
+    runId: frame.run_id,
+    requestId: frame.request_id,
+    decision: frame.decision,
+    ...(frame.reason !== undefined ? { reason: frame.reason } : {}),
+  };
+  try {
+    await opts.approvalResponder.resolve(input);
+    opts.pipeline.appendCanonicalEvent({
       runId: frame.run_id,
+      agentId,
+      sdkType: "request",
+      kind: "approval.resolved",
       requestId: frame.request_id,
-      decision: frame.decision,
-      ...(frame.reason !== undefined ? { reason: frame.reason } : {}),
-    },
-    "approval_response received; no SDK resolver wired — replying APPROVAL_NOT_PENDING",
-  );
-  sendFrame(
-    state,
-    errorFrame(
-      "APPROVAL_NOT_PENDING",
-      "Approval responder is not yet wired (Phase 13)",
-      { ack_for: frame.id },
-    ),
-  );
+      payload: {
+        request_id: frame.request_id,
+        decision: frame.decision,
+        ...(frame.reason !== undefined ? { reason: frame.reason } : {}),
+        resolved_at: new Date().toISOString(),
+      },
+      occurredAt: new Date().toISOString(),
+    });
+    sendFrame(state, ackFrame(frame.id, { message: "approval.resolved" }));
+  } catch (err) {
+    const isUnimplemented = err instanceof UnimplementedApprovalError;
+    const code = isUnimplemented ? "APPROVAL_UNIMPLEMENTED" : "SDK_ERROR";
+    const message =
+      err instanceof Error
+        ? err.message
+        : "Approval responder rejected without a message";
+    opts.pipeline.appendCanonicalEvent({
+      runId: frame.run_id,
+      agentId,
+      sdkType: "request",
+      kind: "approval.failed",
+      requestId: frame.request_id,
+      payload: {
+        request_id: frame.request_id,
+        decision: frame.decision,
+        ...(frame.reason !== undefined ? { reason: frame.reason } : {}),
+        failed_at: new Date().toISOString(),
+        code,
+        message,
+      },
+      occurredAt: new Date().toISOString(),
+    });
+    sendFrame(
+      state,
+      errorFrame(code, message, { ack_for: frame.id }),
+    );
+  }
+}
+
+/**
+ * Find the pending `request.created` event for a (runId, requestId).
+ * Returns the agentId so the synthetic outcome event can be appended
+ * with the correct foreign key. A `null` result means no matching
+ * request exists, which the WS plugin maps to `APPROVAL_NOT_PENDING`.
+ */
+function findPendingRequest(
+  opts: WsPluginOptions,
+  runId: string,
+  requestId: string,
+): { agentId: string } | null {
+  const run = opts.runs.getById(runId);
+  if (!run) return null;
+  // Walk the run's events for a matching `request.created`. This is a
+  // small scan in practice — runs have at most a handful of pending
+  // requests at once — and avoids adding a dedicated query path. If a
+  // later phase grows pending requests, switch to an indexed lookup.
+  const rows = opts.events.getAllByRunId(runId);
+  for (const row of rows) {
+    if (row.kind === "request.created" && row.requestId === requestId) {
+      // Confirm this request hasn't already been resolved / failed.
+      const alreadyDone = rows.some(
+        (r) =>
+          r.requestId === requestId &&
+          (r.kind === "approval.resolved" || r.kind === "approval.failed"),
+      );
+      if (alreadyDone) return null;
+      return { agentId: row.agentId };
+    }
+  }
+  return null;
 }
 
 function ackFrame(

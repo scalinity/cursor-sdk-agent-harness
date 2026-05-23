@@ -3,6 +3,12 @@ import { cn } from "../../lib/cn.js";
 
 export interface TitlebarProps {
   onNewAgent?: () => void;
+  /**
+   * Phase 13 — when set, the titlebar shows a "Cancel run" button that
+   * forwards the user's intent to `useAgentStream.cancelRun`. Hidden
+   * when null/undefined (no active run).
+   */
+  onCancelRun?: () => void;
 }
 
 /**
@@ -10,7 +16,7 @@ export interface TitlebarProps {
  * timer pill. Matches the mockup's `.titlebar` row using shell CSS for
  * layout and Tailwind utilities for token-driven colours/sizes.
  */
-export function Titlebar({ onNewAgent }: TitlebarProps = {}) {
+export function Titlebar({ onNewAgent, onCancelRun }: TitlebarProps = {}) {
   const codeHidden = useUiStore((s) => s.codeHidden);
   const toggleCodeHidden = useUiStore((s) => s.toggleCodeHidden);
   return (
@@ -42,6 +48,17 @@ export function Titlebar({ onNewAgent }: TitlebarProps = {}) {
 
       {/* Right group */}
       <div className="flex items-center gap-1.5 pl-2">
+        {onCancelRun ? (
+          <button
+            type="button"
+            onClick={onCancelRun}
+            title="Cancel run (⌘.)"
+            className="inline-flex h-control-md items-center gap-1.5 rounded-md border border-danger bg-surface-1 px-2 text-md font-medium text-danger hover:bg-surface-2"
+          >
+            <span>Cancel run</span>
+            <span className="mono text-2xs text-text-tertiary">⌘.</span>
+          </button>
+        ) : null}
         {onNewAgent ? (
           <button
             type="button"

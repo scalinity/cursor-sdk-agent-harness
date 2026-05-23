@@ -35,6 +35,7 @@ export function useStreamingQaFixture(input: StreamingQaFixtureInput): void {
           assistantText: input.assistantText,
           thinkingText: input.thinkingText,
           toolCallCount: input.toolCallCount,
+          approvalsByRequestId: {},
         },
       },
     });

@@ -36,10 +36,23 @@ export function AppShell() {
   const activeRunId = useRunStore((s) => s.activeRunId);
   const setActiveRunId = useRunStore((s) => s.setActiveRunId);
 
-  const { connectionState, submitUserInput, cancelRun } = useAgentStream({
+  const {
+    connectionState,
+    submitUserInput,
+    cancelRun,
+    sendApproval,
+    cancelUnavailable,
+  } = useAgentStream({
     agentId: activeAgent?.id ?? null,
     runId: activeRunId,
   });
+  const onApprovalResolve = useCallback(
+    (requestId: string, decision: "approve" | "deny", reason?: string) => {
+      if (!activeRunId) return;
+      sendApproval(activeRunId, requestId, decision, reason);
+    },
+    [sendApproval, activeRunId],
+  );
 
   const codeHidden = useUiStore((s) => s.codeHidden);
   const toggleCodeHidden = useUiStore((s) => s.toggleCodeHidden);
@@ -113,7 +126,12 @@ export function AppShell() {
           onRetry={() => void csrf.refresh()}
         />
       ) : null}
-      <Titlebar onNewAgent={() => setNewAgentOpen(true)} />
+      <Titlebar
+        onNewAgent={() => setNewAgentOpen(true)}
+        {...(activeRunId
+          ? { onCancelRun: () => cancelRun(activeRunId) }
+          : {})}
+      />
       <SessionsRail runs={runs} activeRunId={activeRunId} onSelectRun={setActiveRunId} />
       <CenterPane
         activeAgent={activeAgent}
@@ -121,6 +139,8 @@ export function AppShell() {
         activeRunId={activeRunId}
         connectionState={connectionState}
         onSubmit={onSubmit}
+        onApprovalResolve={onApprovalResolve}
+        cancelUnavailable={cancelUnavailable}
       />
       <RightPane activeRunId={activeRunId} />
       <Statusbar

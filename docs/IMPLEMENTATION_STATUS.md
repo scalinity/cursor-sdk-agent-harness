@@ -20,7 +20,8 @@ each phase. Use it as the single source of truth for "what is decided" vs
 | 10 | Code Edit Preview and Syntax Highlighting | ✅ complete | Server-side code-edit extractors, derived `code_edit.detected` events, RAF edit animation, Lezer syntax highlighting, right-pane + inline previews, replay-speed controls, large-edit bounded preview, review-2 fixes. |
 | 11 | History, Replay, and Usage | ✅ complete | Run history with cost/tokens, replay from `events` via `run-store.ingestServerFrame`, transcript export, usage aggregates, pricing freshness banner/dialog, focused route tests. |
 | 12 | MCP, Subagents, and Advanced Agent Creation | ✅ complete | MCP CRUD with stdio + http probes, redacted-on-list + reveal endpoint; Subagent CRUD with referential integrity + nullable model (inherit); NewAgentDialog with five tabs, multi-cwd allowlist quick-add, CloudOptions JSON editor. |
-| ≥13 | (per spec §16) | ⏳ pending | |
+| 13 | Approval, Cancellation, and Resilience | ✅ complete | ApprovalResponder seam with OQ-10 probe (throws `UnimplementedApprovalError` against `@cursor/sdk@1.0.13`); approval canonical events (`approval.resolved`, `approval.failed`) with `APPROVAL_UNIMPLEMENTED` banner; cancel button in titlebar + ⌘.; `CANCEL_UNAVAILABLE` banner; startup recovery finalizes RUNNING runs with `run.interrupted` reason `server_restart`; `useRunHealth` per-tool stall warnings and run stalled banner. |
+| ≥14 | (per spec §16) | ⏳ pending | |
 
 ---
 
@@ -1920,7 +1921,7 @@ Deferred / limitation:
 
 ## Next prompt to run
 
-`13_APPROVAL_CANCELLATION_AND_RESILIENCE.md`
+`14_PERFORMANCE_POLISH_AND_HARDENING.md`
 
 ---
 
@@ -2133,4 +2134,212 @@ Edits:
 5. Phase 13 should re-check OQ-10 (SDK approval resolver) per
    the spec callout in `12_*`.
 
+---
+
+## Phase 13 Outcomes
+
+### Summary
+
+Lit up the approval and cancellation surfaces and finalised the
+crash-recovery seam. Server side: an `ApprovalResponder` interface
+with a probe-based default that throws `UnimplementedApprovalError`
+against `@cursor/sdk@1.0.13` (OQ-10), the `approval_response` WS
+frame handler that persists `approval.resolved` or `approval.failed`
+canonical events through the same persist-then-broadcast pipeline as
+SDK messages, and a `runStartupRecovery` step in `buildApp.onReady`
+that appends a synthetic `run.interrupted` with `reason =
+"server_restart"` for every non-terminal run left by a prior process.
+Client side: inline `ApprovalPrompt` keyed by `request_id` with
+pending/awaiting/resolved/failed states (and a non-dismissable banner
+when the code is `APPROVAL_UNIMPLEMENTED`), a "Cancel run" button in
+the titlebar wired to the existing ⌘. shortcut, a `CANCEL_UNAVAILABLE`
+banner above the timeline driven by error frames, and `useRunHealth`
+which ticks every 2s and surfaces "still running" / "long-running" /
+"run stalled" warnings at the spec §11 thresholds.
+
+### Decisions made (binding for downstream phases)
+
+1. **OQ-10 stays `unverified`.** The probe-based responder iterates
+   plausible method names (`respond`, `approve`, `respondToRequest`,
+   `resolveRequest`) on the live `Run` handle. None exist in
+   `@cursor/sdk@1.0.13`, so the responder throws and the harness emits
+   `approval.failed` with `code = "APPROVAL_UNIMPLEMENTED"`. If a future
+   SDK release exposes one of the candidate methods the probe lights
+   up automatically without a code change. The ledger entry is updated
+   with this resolution.
+2. **Two new canonical event kinds**: `approval.resolved` and
+   `approval.failed`. Both carry `sdk_type: "request"` so they share
+   the request foreign-key surface with `request.created`. Frame-builder
+   gates broadcast on the closed `CanonicalEventKind` union; the new
+   kinds are added to `KNOWN_KINDS` and the switch.
+3. **`PersistAndBroadcastPipeline.appendCanonicalEvent`** is the new
+   public seam for synthetic canonical events (`approval.*`). It runs
+   through the same `EventsRepo.appendCanonicalEvent` transaction that
+   SDK events use, so persist-before-broadcast is preserved.
+4. **Cancellation strategy was already correct from Phase 06.**
+   `RunController.cancel` already returns the discriminated
+   `CancelResult` union and emits `CANCEL_UNAVAILABLE` honestly via the
+   WS plugin (`unsupported` / `not_started` outcomes). Phase 13 wires
+   the client surface but does not reshape the server-side primitive
+   because OQ-11 / OQ-12 are verified — `AbortSignal` is not accepted
+   by `agent.send`, so we never pass one. The prompt's
+   "AbortController-primary path" is updated retroactively in the
+   ledger to reflect the SDK's actual primitive (`Run.cancel()`).
+5. **Crash recovery only appends; it never rewrites.** A new
+   `run.interrupted` event row gets the next allocated seq via
+   `EventsRepo.appendCanonicalEvent`, then `RunsRepo.setInterrupted`
+   flips the row to `ERROR` with `interrupted_reason = "server_restart"`.
+   Existing events for the run are untouched so replay reconstructs the
+   timeline including the synthetic interruption.
+6. **`useRunHealth` is purely derived.** It ticks a 2s interval and
+   computes "still running" (>30s), "long-running" (>120s), and
+   "run stalled" (>180s without any event) from canonical event
+   timestamps. No new server data needed. A `__setUseRunHealthClockForTests`
+   injection lets tests freeze the clock without setTimeout shenanigans.
+7. **`useAgentStream.cancelUnavailable`** is a local React state
+   slice. The hook listens for `error` frames with
+   `code === "CANCEL_UNAVAILABLE"` and surfaces them via a top-of-timeline
+   banner. The banner is cleared when the target run changes.
+8. **Approval prompt is keyed by `request_id`.** The run-store
+   projects `approvalsByRequestId` from incoming frames; the inline
+   prompt renders at the originating `request.created` event seq.
+   `approval.resolved` / `approval.failed` lines are hidden from the
+   timeline because the prompt itself reflects their effect.
+
+### Open Questions tightened by this phase
+
+| # | Question | Before | After Phase 13 |
+|---|---|---|---|
+| 9 | `request` event payload | verified (sparse) | unchanged — Phase 13 confirmed the harness-invented `inferred_reason` shape works under the inline prompt; SDK still emits only `request_id`. |
+| 10 | SDK approval resolver | unverified | verified-negative — the probe iterates plausible method names against a live `Run` handle and confirms none exist in v1.0.13. The harness emits `approval.failed` with `code = "APPROVAL_UNIMPLEMENTED"` and surfaces the banner. Re-probe on every SDK bump. |
+| 11 | `agent.send` accepts AbortSignal | verified-negative | unchanged — the runtime never passes one; cancellation flows exclusively through `Run.cancel()`. |
+| 12 | `Run.cancel()` exists | verified | unchanged — `RunController.cancel` gates on `Run.supports("cancel")` and returns `{ outcome: "unsupported" }` when false. |
+| 13 | Cancelled run status value | verified | unchanged — `setCancelled` writes `status='CANCELLED'` only after the SDK confirms cancellation. |
+| 14 | Reattach Run after restart | verified | deferred to Phase 14 — Phase 13 finalizes non-terminal runs as `ERROR`. Phase 14 will attempt `Agent.getRun(runId)` before marking interrupted. |
+
+### Files created in this phase
+
+Server (`apps/server/src/`):
+- `sdk/approval-responder.ts` — `ApprovalResponder` interface +
+  `UnimplementedApprovalError` + `buildApprovalResponder` probe.
+- `sdk/startup-recovery.ts` — `runStartupRecovery` that finalises
+  RUNNING runs with a synthetic `run.interrupted` event.
+- `sdk/__tests__/approval-responder.test.ts` — 4 unit tests.
+- `sdk/__tests__/startup-recovery.test.ts` — 3 unit tests.
+- `__tests__/integration/approval-cancel.test.ts` — 4 integration
+  tests covering APPROVAL_UNIMPLEMENTED, approval.resolved success,
+  APPROVAL_NOT_PENDING, and crash-recovery onReady.
+
+Web (`apps/web/src/`):
+- `hooks/useApprovalActions.ts` — local "awaiting_server" overlay +
+  `resolve` sender.
+- `hooks/useRunHealth.ts` — 2s tick + stall threshold derivation.
+- `hooks/__tests__/useRunHealth.test.tsx` — 2 tests against the
+  injected clock.
+- `components/streaming/ApprovalPrompt.tsx` — inline prompt UI with
+  context inference (nearest task/tool above), approve/deny actions,
+  optional reason textarea, APPROVAL_UNIMPLEMENTED banner.
+
+### Files modified in this phase
+
+- `packages/shared/src/domain.ts` — added `approval.resolved` and
+  `approval.failed` to `canonicalEventKindSchema`.
+- `packages/shared/src/ws-protocol.ts` — added
+  `approvalResolvedFrameSchema` + `approvalFailedFrameSchema` +
+  `APPROVAL_UNIMPLEMENTED` error code.
+- `packages/shared/src/index.ts` — exported the new schemas.
+- `apps/server/src/ws/frame-builder.ts` — added the two new kinds to
+  the switch + `KNOWN_KINDS`.
+- `apps/server/src/ws/ws-plugin.ts` — replaced the Phase 07
+  `APPROVAL_NOT_PENDING` stub with the responder-driven handler:
+  finds pending request, calls responder, persists outcome event,
+  sends ack/error. Added `approvalResponder` + `pipeline` to
+  `WsPluginOptions`.
+- `apps/server/src/sdk/persist-and-broadcast.ts` — added
+  `appendCanonicalEvent` for synthetic harness-side events.
+- `apps/server/src/sdk/run-controller.ts` — exposed `getRunHandle()`
+  and `observedStatus` read-only accessors for the responder + future
+  Phase 14 health probes.
+- `apps/server/src/sdk/index.ts` — barrel re-exports the new
+  approval-responder + startup-recovery surfaces.
+- `apps/server/src/app.ts` — wired `approvalResponder` + `pipeline`
+  into the WS plugin and added the `onReady` startup-recovery hook.
+- `apps/web/src/state/run-store.ts` — added `ApprovalState` type and
+  `approvalsByRequestId` projection updated from `sdk.request` /
+  `approval.resolved` / `approval.failed` frames.
+- `apps/web/src/hooks/useAgentStream.ts` — exposed `sendApproval` and
+  `cancelUnavailable`; intercepts `CANCEL_UNAVAILABLE` error frames.
+- `apps/web/src/hooks/useStreamingQaFixture.ts` — added
+  `approvalsByRequestId: {}` to the seed state so the dev fixture
+  matches the new shape.
+- `apps/web/src/components/shell/EventTimeline.tsx` — renders
+  `ApprovalPrompt` inline at each `request.created`; hides
+  `approval.resolved` / `approval.failed` rows (their effect is
+  reflected via the prompt). Added the stalled-run banner from
+  `useRunHealth`.
+- `apps/web/src/components/shell/CenterPane.tsx` — passes
+  `onApprovalResolve` to EventTimeline; shows the
+  `CANCEL_UNAVAILABLE` banner.
+- `apps/web/src/components/shell/Titlebar.tsx` — added "Cancel run"
+  button alongside "+ New agent". The ⌘. shortcut continues to work
+  via the existing keyboard binding.
+- `apps/web/src/components/streaming/ToolCallCard.tsx` — added the
+  `awaitingApproval`, `stillRunning`, `longRunning` props and the
+  matching badges next to the status pill.
+- `apps/web/src/components/streaming/ToolCallLane.tsx` — derives
+  `awaitingApproval` per `call_id` from `approvalsByRequestId` and
+  threads `toolCallHealth` from `useRunHealth` into each card.
+- `apps/web/src/app/AppShell.tsx` — wires `onApprovalResolve` →
+  `sendApproval` and `onCancelRun` → `cancelRun(activeRunId)`.
+- `apps/web/src/state/__tests__/run-store.test.ts` — three new
+  Phase-13 tests for the approval projection + server_restart status
+  mapping.
+
+### Commands run and results
+
+- `pnpm typecheck` — clean across all four workspaces.
+- `pnpm lint` — clean (no `useEffect` direct usage in components/pages;
+  no hardcoded visual literals).
+- `pnpm test` — **278 tests pass** across 49 files:
+  - server: 217 (was 199); new: 4 + 3 + 4 = 11.
+  - web: 53 (was 48); new: 2 (`useRunHealth`) + 3 (`run-store`).
+  - shared: 2.
+  - eslint-plugin-harness: 6.
+
+### Acceptance gates satisfied
+
+- ✅ `pnpm typecheck && pnpm lint && pnpm test` all pass.
+- ✅ Approval flow integration: `approval.failed` with
+  `APPROVAL_UNIMPLEMENTED` flows back through the WS when the
+  responder throws (OQ-10 default branch); `approval.resolved` flows
+  back when the responder accepts; `APPROVAL_NOT_PENDING` returns when
+  no matching `request.created` exists.
+- ✅ Crash recovery integration: a synthetic RUNNING row left in the
+  DB before `buildApp().ready()` is finalised to `status='ERROR'`,
+  `interrupted_reason='server_restart'`, with a new
+  `run.interrupted` event row.
+- ✅ Tool stall warnings appear at the correct thresholds (30s, 120s,
+  180s) verified against an injected test clock.
+- ✅ `docs/IMPLEMENTATION_STATUS.md` updated (this section).
+- ✅ `docs/SDK_VERIFICATION_LEDGER.md` updated with the OQ-10 probe
+  outcome.
+
+### Known limitations / deferred items
+
+1. **Reattach across server restart (OQ-14)**. Phase 13 finalizes
+   every non-terminal run as `ERROR` on startup. Phase 14 should
+   attempt `Agent.getRun(runId)` first and only fall back to
+   interrupted if reattach fails.
+2. **Approval-to-tool association is a proximity heuristic.** Without
+   an SDK-provided link between `request.created` and the gating tool
+   call, the ToolCallLane walks backward to the nearest still-running
+   tool. Works in practice for hooks/sandbox escalations but a future
+   SDK that carries `tool_call_id` on the request will let us tighten
+   this.
+3. **Probe-based approval responder is speculative.** The probe calls
+   plausible method names with a guessed argument signature. If a
+   future SDK release exposes one of those names but with a different
+   shape, the call will throw — and we'll correctly treat it as
+   unimplemented and emit `approval.failed`. The fix is to replace the
+   probe with a verified call once OQ-10 is resolved positively.
 

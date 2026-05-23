@@ -7,9 +7,21 @@ import { SystemBanner } from "../streaming/SystemBanner.js";
 import { RunStatusPill } from "../streaming/RunStatusPill.js";
 import { StreamingSurfaceBoundary } from "../streaming/StreamingSurfaceBoundary.js";
 import { CodeEditPreviewPanel } from "../streaming/CodeEditPreviewPanel.js";
+import { ApprovalPrompt } from "../streaming/ApprovalPrompt.js";
+import { useRunHealth } from "../../hooks/useRunHealth.js";
 
 export interface EventTimelineProps {
   runId: string | null;
+  /**
+   * Phase 13 — invoked when the user clicks Approve/Deny on an
+   * ApprovalPrompt. The hook owning the WS sender (AppShell ->
+   * useApprovalActions) wires this through.
+   */
+  onApprovalResolve?: (
+    requestId: string,
+    decision: "approve" | "deny",
+    reason?: string,
+  ) => void;
 }
 
 /**
@@ -20,10 +32,14 @@ export interface EventTimelineProps {
  * same run-store projections, so surfaces avoid per-token React commits while
  * preserving event order for surrounding markers.
  */
-export function EventTimeline({ runId }: EventTimelineProps) {
+export function EventTimeline({ runId, onApprovalResolve }: EventTimelineProps) {
   const events = useRunStore((s) =>
     runId ? (s.eventsByRunId[runId]?.events ?? null) : null,
   );
+  const approvalsMap = useRunStore((s) =>
+    runId ? (s.eventsByRunId[runId]?.approvalsByRequestId ?? null) : null,
+  );
+  const { runStalled } = useRunHealth(runId);
 
   if (!runId) {
     return (
@@ -45,6 +61,17 @@ export function EventTimeline({ runId }: EventTimelineProps) {
 
   return (
     <>
+      {runStalled ? (
+        <div
+          role="alert"
+          className="run-stalled-banner my-2 flex items-center gap-2 rounded-md border border-warning bg-surface-2 px-3 py-1.5 text-xs text-warning"
+        >
+          <span>
+            Run stalled: no event received in the last 3 minutes. The agent
+            may be stuck on a long-running tool.
+          </span>
+        </div>
+      ) : null}
       {events.map((evt) => {
         if (evt.sdk_type === "system") {
           return (
@@ -108,6 +135,49 @@ export function EventTimeline({ runId }: EventTimelineProps) {
               <RunStatusPill runId={runId} />
             </div>
           );
+        }
+        if (evt.sdk_type === "request" && evt.kind === "request.created") {
+          // Phase 13 — render the inline ApprovalPrompt for each
+          // `request.created` event. `approval.resolved`/`.failed`
+          // outcomes update `approvalsByRequestId` via the run-store;
+          // we look up the state by request_id rather than scanning
+          // the event list per render.
+          const payload = evt.payload as { request_id?: unknown } | null;
+          const reqId =
+            payload && typeof payload === "object" && typeof payload.request_id === "string"
+              ? payload.request_id
+              : null;
+          if (!reqId) return null;
+          const approval = approvalsMap?.[reqId] ?? {
+            requestId: reqId,
+            requestSeq: evt.seq,
+            status: "pending" as const,
+            decision: null,
+            reason: null,
+            resolvedAt: null,
+            code: null,
+            message: null,
+          };
+          return (
+            <StreamingSurfaceBoundary key={evt.event_id} surface="approval-prompt">
+              <ApprovalPrompt
+                runId={runId}
+                approval={approval}
+                onResolve={(rid, decision, reason) => {
+                  if (onApprovalResolve) onApprovalResolve(rid, decision, reason);
+                }}
+              />
+            </StreamingSurfaceBoundary>
+          );
+        }
+        // Hide approval.resolved / approval.failed lines — the inline
+        // ApprovalPrompt above already reflects their effect via the
+        // store projection.
+        if (
+          evt.sdk_type === "request" &&
+          (evt.kind === "approval.resolved" || evt.kind === "approval.failed")
+        ) {
+          return null;
         }
         return (
           <div key={evt.event_id} className="my-1 text-xs text-text-tertiary">

@@ -124,6 +124,7 @@ export const wsErrorCodeSchema = z.enum([
   "WORKSPACE_NOT_ALLOWED",
   "INVALID_RESUME_CURSOR",
   "APPROVAL_NOT_PENDING",
+  "APPROVAL_UNIMPLEMENTED",
   "CANCEL_UNAVAILABLE",
   "USAGE_PARSE_FAILED",
   "PRICING_NOT_CONFIGURED",
@@ -339,6 +340,42 @@ export const runInterruptedFrameSchema = frameBaseSchema.extend({
   }),
 });
 
+// Phase 13 — approval outcome frames. The payload mirrors the original
+// `approval_response` client frame so the timeline can render exactly
+// what the user clicked, plus a `resolved_at` ISO stamp and an optional
+// failure `code`. `code = "APPROVAL_UNIMPLEMENTED"` is the OQ-10 branch:
+// the SDK in v1.0.13 exposes no resolution method and the harness must
+// be honest about that rather than fake a resolved request.
+export const approvalResolvedFrameSchema = frameBaseSchema.extend({
+  type: z.literal("approval.resolved"),
+  event: canonicalEventBaseSchema.extend({
+    sdk_type: z.literal("request"),
+    kind: z.literal("approval.resolved"),
+    payload: z.object({
+      request_id: requestIdSchema,
+      decision: z.enum(["approve", "deny"]),
+      reason: z.string().optional(),
+      resolved_at: isoDateTimeSchema,
+    }),
+  }),
+});
+
+export const approvalFailedFrameSchema = frameBaseSchema.extend({
+  type: z.literal("approval.failed"),
+  event: canonicalEventBaseSchema.extend({
+    sdk_type: z.literal("request"),
+    kind: z.literal("approval.failed"),
+    payload: z.object({
+      request_id: requestIdSchema,
+      decision: z.enum(["approve", "deny"]),
+      reason: z.string().optional(),
+      failed_at: isoDateTimeSchema,
+      code: z.enum(["APPROVAL_UNIMPLEMENTED", "NO_PENDING_REQUEST", "SDK_ERROR"]),
+      message: z.string(),
+    }),
+  }),
+});
+
 export const serverFrameSchema = z.discriminatedUnion("type", [
   ackFrameSchema,
   errorFrameSchema,
@@ -354,5 +391,7 @@ export const serverFrameSchema = z.discriminatedUnion("type", [
   codeEditDetectedFrameSchema,
   runFinalResultFrameSchema,
   runInterruptedFrameSchema,
+  approvalResolvedFrameSchema,
+  approvalFailedFrameSchema,
 ]);
 export type ServerFrame = z.infer<typeof serverFrameSchema>;

@@ -168,4 +168,114 @@ describe("run-store", () => {
     // No projection frame fired, so byId reference should be unchanged.
     expect(useRunStore.getState().byId).toBe(before);
   });
+
+  it("projects approval state as pending → resolved through ingest (Phase 13)", () => {
+    const request: ServerFrame = {
+      id: "f-1",
+      type: "sdk.request",
+      sent_at: BASE_EVENT.occurred_at,
+      event: {
+        ...BASE_EVENT,
+        event_id: "00000000-0000-0000-0000-000000000001",
+        sdk_type: "request",
+        seq: 1,
+        kind: "request.created",
+        payload: {
+          request_id: "req-1",
+          context_event_ids: [],
+          inferred_reason: null,
+        },
+      },
+    };
+    useRunStore.getState().ingestServerFrame(request);
+    let state = useRunStore.getState().eventsByRunId["run-1"]!;
+    expect(state.approvalsByRequestId["req-1"]?.status).toBe("pending");
+    expect(state.approvalsByRequestId["req-1"]?.requestSeq).toBe(1);
+
+    const resolved: ServerFrame = {
+      id: "f-2",
+      type: "approval.resolved",
+      sent_at: BASE_EVENT.occurred_at,
+      event: {
+        ...BASE_EVENT,
+        event_id: "00000000-0000-0000-0000-000000000002",
+        sdk_type: "request",
+        seq: 2,
+        kind: "approval.resolved",
+        payload: {
+          request_id: "req-1",
+          decision: "approve",
+          resolved_at: "2026-05-23T01:00:00.000Z",
+        },
+      },
+    };
+    useRunStore.getState().ingestServerFrame(resolved);
+    state = useRunStore.getState().eventsByRunId["run-1"]!;
+    expect(state.approvalsByRequestId["req-1"]?.status).toBe("resolved");
+    expect(state.approvalsByRequestId["req-1"]?.decision).toBe("approve");
+  });
+
+  it("projects approval.failed with APPROVAL_UNIMPLEMENTED code (Phase 13)", () => {
+    const request: ServerFrame = {
+      id: "f-3",
+      type: "sdk.request",
+      sent_at: BASE_EVENT.occurred_at,
+      event: {
+        ...BASE_EVENT,
+        event_id: "00000000-0000-0000-0000-000000000003",
+        sdk_type: "request",
+        seq: 1,
+        kind: "request.created",
+        payload: {
+          request_id: "req-2",
+          context_event_ids: [],
+          inferred_reason: null,
+        },
+      },
+    };
+    const failed: ServerFrame = {
+      id: "f-4",
+      type: "approval.failed",
+      sent_at: BASE_EVENT.occurred_at,
+      event: {
+        ...BASE_EVENT,
+        event_id: "00000000-0000-0000-0000-000000000004",
+        sdk_type: "request",
+        seq: 2,
+        kind: "approval.failed",
+        payload: {
+          request_id: "req-2",
+          decision: "approve",
+          failed_at: "2026-05-23T01:00:00.000Z",
+          code: "APPROVAL_UNIMPLEMENTED",
+          message: "OQ-10 not resolved",
+        },
+      },
+    };
+    useRunStore.getState().ingestServerFrame(request);
+    useRunStore.getState().ingestServerFrame(failed);
+    const state = useRunStore.getState().eventsByRunId["run-1"]!;
+    expect(state.approvalsByRequestId["req-2"]?.status).toBe("failed");
+    expect(state.approvalsByRequestId["req-2"]?.code).toBe("APPROVAL_UNIMPLEMENTED");
+  });
+
+  it("projects server_restart interrupted as ERROR (Phase 13 crash recovery)", () => {
+    const interrupted: ServerFrame = {
+      id: "f-5",
+      type: "run.interrupted",
+      sent_at: BASE_EVENT.occurred_at,
+      event: {
+        ...BASE_EVENT,
+        event_id: "00000000-0000-0000-0000-000000000005",
+        sdk_type: "status",
+        seq: 1,
+        kind: "run.interrupted",
+        payload: { reason: "server_restart" },
+      },
+    };
+    useRunStore.getState().ingestServerFrame(interrupted);
+    const run = useRunStore.getState().byId["run-1"]!;
+    expect(run.status).toBe("ERROR");
+    expect(run.interruptedReason).toBe("server_restart");
+  });
 });

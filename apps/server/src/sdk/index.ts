@@ -46,3 +46,15 @@ export {
   type PipelineDeps,
   type PipelineOptions,
 } from "./persist-and-broadcast.js";
+export {
+  buildApprovalResponder,
+  UnimplementedApprovalError,
+  type ApprovalResolveInput,
+  type ApprovalResponder,
+  type ApprovalResponderDeps,
+} from "./approval-responder.js";
+export {
+  runStartupRecovery,
+  type StartupRecoveryDeps,
+  type StartupRecoveryResult,
+} from "./startup-recovery.js";

@@ -13,6 +13,19 @@ export interface CenterPaneProps {
   activeRunId: string | null;
   connectionState: ConnectionState;
   onSubmit: (input: { prompt: string; agentId: string }) => Promise<string>;
+  /**
+   * Phase 13 — resolve an approval prompt by sending the
+   * `approval_response` WS frame. Wired down to ApprovalPrompt via
+   * EventTimeline. Owned by the parent (AppShell) so the hook lives
+   * next to the WS sender.
+   */
+  onApprovalResolve?: (
+    requestId: string,
+    decision: "approve" | "deny",
+    reason?: string,
+  ) => void;
+  /** Phase 13 — non-null when a CANCEL_UNAVAILABLE error frame arrived. */
+  cancelUnavailable?: { message: string } | null;
 }
 
 export function CenterPane({
@@ -21,6 +34,8 @@ export function CenterPane({
   activeRunId,
   connectionState,
   onSubmit,
+  onApprovalResolve,
+  cancelUnavailable,
 }: CenterPaneProps) {
   // Counts are maintained incrementally in the store (RV2-S4) so we read
   // them directly instead of scanning the seqList per render.
@@ -41,8 +56,20 @@ export function CenterPane({
       />
       <div className="center-scroll">
         <ConnectionBanner connectionState={connectionState} />
+        {cancelUnavailable ? (
+          <div
+            role="alert"
+            className="cancel-unavailable-banner my-2 flex items-center gap-2 rounded-md border border-warning bg-surface-2 px-3 py-1.5 text-xs text-warning"
+          >
+            <span className="mono">CANCEL_UNAVAILABLE</span>
+            <span>{cancelUnavailable.message}</span>
+          </div>
+        ) : null}
         <StreamingSurfaceBoundary surface="chat-timeline">
-          <EventTimeline runId={activeRunId} />
+          <EventTimeline
+            runId={activeRunId}
+            {...(onApprovalResolve ? { onApprovalResolve } : {})}
+          />
         </StreamingSurfaceBoundary>
       </div>
       <Composer activeAgent={activeAgent} onSubmit={onSubmit} />

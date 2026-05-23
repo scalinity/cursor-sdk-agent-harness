@@ -69,6 +69,21 @@ export interface RunRecord {
   durationMs: number | null;
 }
 
+export interface ApprovalState {
+  requestId: string;
+  /** seq of the originating `request.created` event. */
+  requestSeq: number;
+  status: "pending" | "resolved" | "failed";
+  decision: "approve" | "deny" | null;
+  reason: string | null;
+  /** ISO timestamp the resolved/failed outcome landed (server-stamped). */
+  resolvedAt: string | null;
+  /** Error code when status === "failed". */
+  code: string | null;
+  /** Error message when status === "failed". */
+  message: string | null;
+}
+
 export interface RunEventState {
   seqList: number[];
   bySeq: Map<number, CanonicalRunEvent>;
@@ -85,6 +100,14 @@ export interface RunEventState {
   thinkingText: string;
   /** Maintained incrementally as `sdk.tool_call` frames arrive. */
   toolCallCount: number;
+  /**
+   * Phase 13 — keyed by `request_id`. Tracks the latest known state of
+   * each approval prompt the timeline has seen. Updated as
+   * `request.created` / `approval.resolved` / `approval.failed`
+   * frames arrive. Renderers query this for the ApprovalPrompt's
+   * pending vs resolved vs failed-unimplemented branch.
+   */
+  approvalsByRequestId: Record<string, ApprovalState>;
 }
 
 export interface RunState {
@@ -108,6 +131,7 @@ function emptyEventState(): RunEventState {
     assistantText: "",
     thinkingText: "",
     toolCallCount: 0,
+    approvalsByRequestId: {},
   };
 }
 
@@ -222,6 +246,7 @@ export const useRunStore = create<RunState>((set) => ({
             assistantText: prevEvents.assistantText,
             thinkingText: prevEvents.thinkingText,
             toolCallCount: prevEvents.toolCallCount,
+            approvalsByRequestId: prevEvents.approvalsByRequestId,
           }
         : emptyEventState();
 
@@ -273,6 +298,57 @@ export const useRunStore = create<RunState>((set) => ({
       } else if (frame.type === "sdk.tool_call") {
         // Maintain incrementally so renderers don't rescan the seqList.
         nextEvents.toolCallCount += 1;
+      } else if (frame.type === "sdk.request") {
+        // Phase 13 — record a pending approval prompt keyed by
+        // request_id. The originating seq lets the renderer scroll
+        // back to the inline location when the user clicks the
+        // banner.
+        const reqId = frame.event.payload.request_id;
+        nextEvents.approvalsByRequestId = {
+          ...nextEvents.approvalsByRequestId,
+          [reqId]: {
+            requestId: reqId,
+            requestSeq: evt.seq,
+            status: "pending",
+            decision: null,
+            reason: null,
+            resolvedAt: null,
+            code: null,
+            message: null,
+          },
+        };
+      } else if (frame.type === "approval.resolved") {
+        const reqId = frame.event.payload.request_id;
+        const prev = nextEvents.approvalsByRequestId[reqId];
+        nextEvents.approvalsByRequestId = {
+          ...nextEvents.approvalsByRequestId,
+          [reqId]: {
+            requestId: reqId,
+            requestSeq: prev?.requestSeq ?? evt.seq,
+            status: "resolved",
+            decision: frame.event.payload.decision,
+            reason: frame.event.payload.reason ?? null,
+            resolvedAt: frame.event.payload.resolved_at,
+            code: null,
+            message: null,
+          },
+        };
+      } else if (frame.type === "approval.failed") {
+        const reqId = frame.event.payload.request_id;
+        const prev = nextEvents.approvalsByRequestId[reqId];
+        nextEvents.approvalsByRequestId = {
+          ...nextEvents.approvalsByRequestId,
+          [reqId]: {
+            requestId: reqId,
+            requestSeq: prev?.requestSeq ?? evt.seq,
+            status: "failed",
+            decision: frame.event.payload.decision,
+            reason: frame.event.payload.reason ?? null,
+            resolvedAt: frame.event.payload.failed_at,
+            code: frame.event.payload.code,
+            message: frame.event.payload.message,
+          },
+        };
       }
 
       // Run-level projections — only rebuild byId when the frame type

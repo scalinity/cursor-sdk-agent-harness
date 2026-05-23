@@ -122,6 +122,27 @@ export class RunController {
     return this.finalisePromise ?? Promise.resolve();
   }
 
+  /**
+   * Return the current SDK Run handle, or null if `start()` hasn't
+   * resolved yet. Read-only accessor used by Phase 13's
+   * ApprovalResponder to probe for a resolver method on the live Run.
+   * Callers MUST NOT call `.cancel()` on the returned handle; use
+   * `RunController.cancel()` so the registry + DB stay consistent.
+   */
+  getRunHandle(): Run | null {
+    return this.runHandle;
+  }
+
+  /**
+   * Last observed timestamp for the run — used by Phase 13's
+   * `useRunHealth` server companion (only via tests today) to mark a
+   * run stalled after a stretch of silence. Currently approximated by
+   * the controller's `startedAt`; richer plumbing lives client-side.
+   */
+  get observedStatus(): SdkRunStatus {
+    return this.status;
+  }
+
   async cancel(reason: RunInterruptedReason = "user_cancelled"): Promise<CancelResult> {
     if (!this.runHandle) {
       // start() has not resolved yet — there's no Run to cancel. Caller

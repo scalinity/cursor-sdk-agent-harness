@@ -122,6 +122,13 @@ export const canonicalEventKindSchema = z.enum([
   "code_edit.detected",
   "run.final_result",
   "run.interrupted",
+  // Phase 13 — approval outcomes. `approval.resolved` is the success
+  // path (SDK accepted the decision); `approval.failed` is everything
+  // else, including the OQ-10 "no SDK method exists" branch where the
+  // harness must surface APPROVAL_UNIMPLEMENTED without faking
+  // resolution.
+  "approval.resolved",
+  "approval.failed",
 ]);
 export type CanonicalEventKind = z.infer<typeof canonicalEventKindSchema>;
 

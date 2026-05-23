@@ -227,6 +227,32 @@ export function buildServerFrame(
           payload: row.payload as never,
         },
       };
+    case "approval.resolved":
+      return {
+        id: frameId,
+        type: "approval.resolved",
+        sent_at: sentAt,
+        ...replayedFlag,
+        event: {
+          ...base,
+          sdk_type: "request",
+          kind: "approval.resolved",
+          payload: row.payload as never,
+        },
+      };
+    case "approval.failed":
+      return {
+        id: frameId,
+        type: "approval.failed",
+        sent_at: sentAt,
+        ...replayedFlag,
+        event: {
+          ...base,
+          sdk_type: "request",
+          kind: "approval.failed",
+          payload: row.payload as never,
+        },
+      };
     default:
       // Unknown kind — drop on the floor (the DB still has the row
       // for inspection) but call out the drift. If you see this log
@@ -267,6 +293,8 @@ const KNOWN_KINDS: Record<CanonicalEventKind, true> = {
   "code_edit.detected": true,
   "run.final_result": true,
   "run.interrupted": true,
+  "approval.resolved": true,
+  "approval.failed": true,
 };
 
 function assertKindIsKnown(kind: string): void {

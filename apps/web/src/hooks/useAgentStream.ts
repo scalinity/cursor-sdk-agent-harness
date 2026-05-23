@@ -18,7 +18,7 @@
  * because the server needs to mint the runId and persist the row before any
  * stream begins.
  */
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createRunResponseSchema,
   type ClientFrame,
@@ -44,6 +44,26 @@ export interface UseAgentStreamResult {
   cancelRun: (runId: string) => void;
   subscribeRun: (runId: string) => void;
   unsubscribeRun: (runId: string) => void;
+  /**
+   * Phase 13 — send an `approval_response` WS frame. The server resolves
+   * the approval through `ApprovalResponder.resolve`; the resulting
+   * `approval.resolved` or `approval.failed` event flows back through
+   * `ingestServerFrame` so the inline ApprovalPrompt updates without
+   * any extra plumbing.
+   */
+  sendApproval: (
+    runId: string,
+    requestId: string,
+    decision: "approve" | "deny",
+    reason?: string,
+  ) => void;
+  /**
+   * Phase 13 — the last `CANCEL_UNAVAILABLE` error frame seen for the
+   * active run, or null when no such error is current. Set by the WS
+   * onFrame handler when the server replies that cancel cannot resolve;
+   * cleared when the run terminates or a new run becomes active.
+   */
+  cancelUnavailable: { message: string } | null;
 }
 
 function makeFrameId(prefix: string): string {
@@ -75,11 +95,19 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
   // hook lifetime; cleared on unmount.
   const subscribedRef = useRef<Set<string>>(new Set());
 
+  const [cancelUnavailable, setCancelUnavailable] = useState<
+    { message: string } | null
+  >(null);
+
   const onFrame = useCallback(
     (frame: ServerFrame) => {
       // The wire-level frame doesn't carry a `replayed` flag yet (Phase 09
       // adds it server-side). For Phase 08 every ingest is treated as
       // live; the run-store dedupes by seq so replay-overlap is harmless.
+      if (frame.type === "error" && frame.code === "CANCEL_UNAVAILABLE") {
+        setCancelUnavailable({ message: frame.message });
+        return;
+      }
       ingestServerFrame(frame);
     },
     [ingestServerFrame],
@@ -192,6 +220,32 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
     [send],
   );
 
+  const sendApproval = useCallback(
+    (
+      runId: string,
+      requestId: string,
+      decision: "approve" | "deny",
+      reason?: string,
+    ) => {
+      send({
+        id: makeFrameId("approval"),
+        type: "approval_response",
+        sent_at: new Date().toISOString(),
+        run_id: runId,
+        request_id: requestId,
+        decision,
+        ...(reason !== undefined ? { reason } : {}),
+      });
+    },
+    [send],
+  );
+
+  // Clear the CANCEL_UNAVAILABLE banner when the active run changes so
+  // a banner from a prior run doesn't follow the user into a new one.
+  useEffect(() => {
+    setCancelUnavailable(null);
+  }, [targetRunId]);
+
   // Mark agentId as referenced even though we don't use it directly — the
   // caller passes it for future filtering (Phase 09 may scope to agent).
   void input.agentId;
@@ -203,5 +257,7 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
     cancelRun,
     subscribeRun,
     unsubscribeRun,
+    sendApproval,
+    cancelUnavailable,
   };
 }
