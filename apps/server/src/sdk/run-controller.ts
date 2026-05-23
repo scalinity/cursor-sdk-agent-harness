@@ -190,15 +190,31 @@ export class RunController {
       }
     }
 
+    // Extract usage regardless of whether we got a final result; the
+    // extractor falls back to `unavailable` when the SDK never delivered a
+    // turn-ended event.
+    const usage = extractUsage({
+      rawUsage: this.accumulatedUsage,
+      modelId: this.modelId,
+      pricing: this.init.pricing,
+    });
+
     if (finalResult) {
       const upper = finalResult.status.toUpperCase() as SdkRunStatus;
-      this.setStatus(upper);
-      this.init.runsRepo.setFinalResult(this.runId, {
+      // Single transactional finalize: status + final-result columns +
+      // usage all in one UPDATE. The status guard inside `finalize` keeps
+      // a CANCELLED/EXPIRED row from being clobbered by a late wait().
+      this.init.runsRepo.finalize(this.runId, {
+        status: upper,
         finalText: finalResult.result ?? null,
         finalResult,
         gitMetadata: finalResult.git ?? null,
         durationMs: finalResult.durationMs ?? null,
+        usage,
       });
+      // Mirror the row status into the controller's view so subsequent
+      // status frames don't fight the terminal-state guard.
+      this.status = upper;
     } else {
       // No final result available — if the consume loop never observed a
       // terminal status, treat the run as interrupted because we can't
@@ -206,17 +222,9 @@ export class RunController {
       if (!isTerminalStatus(this.status)) {
         this.init.runsRepo.setInterrupted(this.runId, "stream_error", null);
       }
+      // Usage still gets persisted; setUsage's guard exempts EXPIRED only.
+      this.init.runsRepo.setUsage(this.runId, usage);
     }
-
-    // Apply usage to the row whether we got a final result or not. The
-    // extractor is responsible for falling back to `unavailable` when the
-    // SDK never delivered a turn-ended event.
-    const usage = extractUsage({
-      rawUsage: this.accumulatedUsage,
-      modelId: this.modelId,
-      pricing: this.init.pricing,
-    });
-    this.init.runsRepo.setUsage(this.runId, usage);
 
     this.onTerminate(this);
   }

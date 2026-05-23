@@ -151,6 +151,10 @@ export class RunsRepo {
 
   setFinalResult(id: string, input: SetFinalResultInput): void {
     const now = isoNow();
+    // Guard against late-arriving wait() resolutions overwriting a row that
+    // was already finalised by a cancel or crash-recovery interrupt. The
+    // consume loop calls this unconditionally after `run.wait()`; we refuse
+    // to clobber a CANCELLED/EXPIRED/ERROR status's diagnostic columns.
     this.raw
       .prepare(
         `UPDATE runs
@@ -160,7 +164,8 @@ export class RunsRepo {
                 duration_ms = ?,
                 finished_at = ?,
                 updated_at = ?
-          WHERE id = ?`,
+          WHERE id = ?
+            AND status NOT IN ('CANCELLED', 'ERROR', 'EXPIRED')`,
       )
       .run(
         input.finalText,
@@ -174,6 +179,10 @@ export class RunsRepo {
   }
 
   setUsage(id: string, usage: TokenUsage): void {
+    // Usage may legitimately arrive for a CANCELLED or ERROR run (the SDK
+    // emits turn-ended usage even when the user aborted mid-turn), so we
+    // allow CANCELLED/ERROR here but refuse to overwrite EXPIRED rows that
+    // pre-date this process (crash-recovery write).
     this.raw
       .prepare(
         `UPDATE runs
@@ -184,7 +193,8 @@ export class RunsRepo {
                 cost_usd_micros = ?,
                 usage_source = ?,
                 updated_at = ?
-          WHERE id = ?`,
+          WHERE id = ?
+            AND status NOT IN ('EXPIRED')`,
       )
       .run(
         usage.input_tokens,
@@ -196,6 +206,66 @@ export class RunsRepo {
         isoNow(),
         id,
       );
+  }
+
+  /**
+   * Single transactional finalize: writes status + final-result columns +
+   * usage in one UPDATE wrapped in `db.transaction(...)`. Replaces the
+   * previous three-call sequence in RunController.consumeAndFinalise so a
+   * crash between any two writes can't leave the row half-finished.
+   *
+   * Status guard matches setFinalResult (don't clobber CANCELLED/ERROR/
+   * EXPIRED), since the same race is possible.
+   */
+  finalize(
+    id: string,
+    input: {
+      status: SdkRunStatus;
+      finalText: string | null;
+      finalResult: unknown;
+      gitMetadata: unknown;
+      durationMs: number | null;
+      usage: TokenUsage;
+    },
+  ): void {
+    const now = isoNow();
+    this.raw.transaction(() => {
+      this.raw
+        .prepare(
+          `UPDATE runs
+              SET status = ?,
+                  final_text = ?,
+                  final_result_json = ?,
+                  git_metadata_json = ?,
+                  duration_ms = ?,
+                  input_tokens = ?,
+                  output_tokens = ?,
+                  cached_input_tokens = ?,
+                  reasoning_tokens = ?,
+                  cost_usd_micros = ?,
+                  usage_source = ?,
+                  finished_at = COALESCE(finished_at, ?),
+                  updated_at = ?
+            WHERE id = ?
+              AND status NOT IN ('CANCELLED', 'ERROR', 'EXPIRED')`,
+        )
+        .run(
+          input.status,
+          input.finalText,
+          stringifyOrNull(input.finalResult),
+          stringifyOrNull(input.gitMetadata),
+          input.durationMs,
+          input.usage.input_tokens,
+          input.usage.output_tokens,
+          input.usage.cached_input_tokens,
+          input.usage.reasoning_tokens,
+          input.usage.cost_usd_micros,
+          input.usage.usage_source,
+          now,
+          now,
+          id,
+        );
+    })();
   }
 
   /**
