@@ -15,6 +15,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "pnpm -r run test",
+    "test:perf": "pnpm -r run --if-present test:perf",
     "migrate": "node scripts/migrate.mjs",
     "reset-local-db": "node scripts/reset-local-db.mjs",
     "format": "prettier --write ."
