@@ -79,7 +79,6 @@ describe("EventTimeline render perf", () => {
     const mountStart = performance.now();
     render(createElement(EventTimeline, { runId: BASE_EVENT.run_id }));
     const mountElapsed = performance.now() - mountStart;
-    // eslint-disable-next-line no-console -- intentional readable benchmark output.
     console.info(`[bench] EventTimeline cold mount with 10k events = ${mountElapsed.toFixed(1)}ms`);
 
     // Loose budget: jsdom mount of 10k events under non-virtualized
