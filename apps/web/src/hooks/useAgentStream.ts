@@ -98,6 +98,11 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
   const [cancelUnavailable, setCancelUnavailable] = useState<
     { message: string } | null
   >(null);
+  // RV2-W9: track the last cancel frame id we sent for the active
+  // run so we can correlate CANCEL_UNAVAILABLE error frames back to
+  // it. Without this, a late-arriving error for a superseded run
+  // would still raise the banner.
+  const lastCancelFrameIdRef = useRef<string | null>(null);
 
   const onFrame = useCallback(
     (frame: ServerFrame) => {
@@ -105,7 +110,16 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
       // adds it server-side). For Phase 08 every ingest is treated as
       // live; the run-store dedupes by seq so replay-overlap is harmless.
       if (frame.type === "error" && frame.code === "CANCEL_UNAVAILABLE") {
-        setCancelUnavailable({ message: frame.message });
+        // RV2-W9: only set the banner when the error correlates to
+        // the cancel frame we just issued. The server stamps
+        // `ack_for` on every error frame for client cancel; if the
+        // error is for a stale or unrelated cancel, ignore it.
+        if (
+          frame.ack_for &&
+          lastCancelFrameIdRef.current === frame.ack_for
+        ) {
+          setCancelUnavailable({ message: frame.message });
+        }
         return;
       }
       ingestServerFrame(frame);
@@ -189,8 +203,17 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
 
   const cancelRun = useCallback(
     (runId: string) => {
+      const frameId = makeFrameId("cancel");
+      // RV2-W9: remember the most recent cancel frame id so the
+      // onFrame handler can correlate the CANCEL_UNAVAILABLE error
+      // against THIS cancel (and ignore late-arriving errors for
+      // superseded cancels).
+      lastCancelFrameIdRef.current = frameId;
+      // Clear any banner from a previous cancel so the new attempt
+      // starts with a clean slate.
+      setCancelUnavailable(null);
       send({
-        id: makeFrameId("cancel"),
+        id: frameId,
         type: "cancel_run",
         sent_at: new Date().toISOString(),
         run_id: runId,
@@ -244,7 +267,26 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
   // a banner from a prior run doesn't follow the user into a new one.
   useEffect(() => {
     setCancelUnavailable(null);
+    lastCancelFrameIdRef.current = null;
   }, [targetRunId]);
+
+  // RV2-W9: also clear the banner when the active run transitions
+  // to a terminal status. A stale banner for a finished run is
+  // visually confusing — if the run is done, "cancel unavailable"
+  // is no longer actionable.
+  const activeRunStatus = useRunStore((s) =>
+    targetRunId ? (s.byId[targetRunId]?.status ?? null) : null,
+  );
+  useEffect(() => {
+    if (
+      activeRunStatus === "FINISHED" ||
+      activeRunStatus === "ERROR" ||
+      activeRunStatus === "CANCELLED" ||
+      activeRunStatus === "EXPIRED"
+    ) {
+      setCancelUnavailable(null);
+    }
+  }, [activeRunStatus]);
 
   // Mark agentId as referenced even though we don't use it directly — the
   // caller passes it for future filtering (Phase 09 may scope to agent).
