@@ -14,11 +14,14 @@ import { originPolicyPlugin } from "./security/origin-policy.js";
 import { WorkspacePolicy } from "./security/workspace-policy.js";
 import type { Repositories } from "./db/repositories/index.js";
 import {
+  ActiveRuns,
   createAgentRuntime,
   createCursorSdkAdapter,
+  createPersistAndBroadcast,
   type AgentRuntime,
   type SdkAdapter,
 } from "./sdk/index.js";
+import { createRunBus, wsPlugin, type RunBus } from "./ws/index.js";
 
 export interface AppDeps {
   env: Env;
@@ -38,6 +41,13 @@ export interface AppDeps {
    * synthesises SDK events without touching the network or the real API key.
    */
   sdk?: SdkAdapter;
+  /**
+   * Optional WS heartbeat overrides. Integration tests pass a small value
+   * (e.g. 50ms) so they don't need to wait the production 15s cadence to
+   * observe a heartbeat.
+   */
+  wsHeartbeatIntervalMs?: number;
+  wsMissedPongTimeoutMs?: number;
 }
 
 export interface BuiltApp {
@@ -46,6 +56,18 @@ export interface BuiltApp {
   csrfTokenizer: CsrfTokenizer;
   workspacePolicy: WorkspacePolicy;
   agentRuntime: AgentRuntime;
+  /**
+   * Phase 07: in-memory pub/sub for committed canonical events. Exposed so
+   * tests can subscribe directly to verify persist-before-broadcast
+   * semantics without going through a WS socket.
+   */
+  runBus: RunBus;
+  /**
+   * Phase 07: registry of currently-active run controllers. Exposed for the
+   * same testing reason as runBus and so future REST routes can implement
+   * cancellation through a single source of truth.
+   */
+  activeRuns: ActiveRuns;
 }
 
 export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
@@ -103,6 +125,17 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   });
   await app.register(websocket);
 
+  // Phase 07 pipeline. Build the run bus + persist-and-broadcast first so
+  // the agent runtime gets the real sink — the stub Phase 06 sink is now
+  // dead code outside tests.
+  const runBus = createRunBus();
+  const activeRuns = new ActiveRuns();
+  const pipeline = createPersistAndBroadcast({
+    events: repos.events,
+    bus: runBus,
+    logger: app.log,
+  });
+
   const sdk = deps.sdk ?? createCursorSdkAdapter();
   const agentRuntime = createAgentRuntime({
     agentsRepo: repos.agents,
@@ -114,10 +147,29 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     apiKeyStore,
     sdk,
     logger: app.log,
+    activeRuns,
+    pipeline,
+  });
+
+  await app.register(wsPlugin, {
+    csrf: csrfTokenizer,
+    allowedOrigin: env.WEB_ORIGIN,
+    events: repos.events,
+    runs: repos.runs,
+    bus: runBus,
+    activeRuns,
+    ...(deps.wsHeartbeatIntervalMs !== undefined
+      ? { heartbeatIntervalMs: deps.wsHeartbeatIntervalMs }
+      : {}),
+    ...(deps.wsMissedPongTimeoutMs !== undefined
+      ? { missedPongTimeoutMs: deps.wsMissedPongTimeoutMs }
+      : {}),
   });
 
   app.addHook("onClose", async () => {
     await agentRuntime.shutdown();
+    runBus.clear();
+    pipeline.clear();
   });
 
   await registerRoutes(app, {
@@ -131,5 +183,13 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     runs: { runtime: agentRuntime, runsRepo: repos.runs },
   });
 
-  return { app, apiKeyStore, csrfTokenizer, workspacePolicy, agentRuntime };
+  return {
+    app,
+    apiKeyStore,
+    csrfTokenizer,
+    workspacePolicy,
+    agentRuntime,
+    runBus,
+    activeRuns,
+  };
 }

@@ -5,7 +5,9 @@ import type {
   AgentSummary,
   CreateAgentRequest,
   CreateRunResponse,
+  SDKMessage,
 } from "@harness/shared";
+import { sdkMessageSchema } from "@harness/shared";
 import type { AgentsRepo, CreateAgentInput } from "../db/repositories/agents.repo.js";
 import type { McpServersRepo } from "../db/repositories/mcp-servers.repo.js";
 import type { RunsRepo } from "../db/repositories/runs.repo.js";
@@ -14,14 +16,12 @@ import type { CursorApiKeyStore } from "../keychain/cursor-api-key.js";
 import type { WorkspacePolicy } from "../security/workspace-policy.js";
 import { getSettingsSnapshot } from "../services/settings.service.js";
 import type { SettingsRepo } from "../db/repositories/settings.repo.js";
-import {
-  buildAgentOptions,
-  WorkspaceRejectedError,
-} from "./agent-options-builder.js";
-import { ActiveRuns } from "./active-runs.js";
+import { buildAgentOptions } from "./agent-options-builder.js";
+import type { ActiveRuns } from "./active-runs.js";
 import { LiveAgents } from "./live-agents.js";
+import type { PersistAndBroadcastPipeline } from "./persist-and-broadcast.js";
 import { RunController, newRunId } from "./run-controller.js";
-import { createStubSink } from "./stream-stub.js";
+import type { StreamSink } from "./stream-stub.js";
 import type { SDKAgent, SdkAdapter } from "./sdk-adapter.js";
 
 /**
@@ -57,6 +57,21 @@ export interface AgentRuntimeDeps {
   apiKeyStore: CursorApiKeyStore;
   sdk: SdkAdapter;
   logger: FastifyBaseLogger;
+  /**
+   * Phase 07: in-memory pub/sub-backed registry of running controllers. Owned
+   * by `buildApp` because the WS plugin also needs to look up controllers by
+   * runId (for `cancel_run` frames). Sharing one registry keeps the WS and
+   * REST cancel paths in sync.
+   */
+  activeRuns: ActiveRuns;
+  /**
+   * Phase 07: persist-then-broadcast pipeline. Replaces Phase 06's stub
+   * sink. Sees every SDK event, persists a canonical event row, and emits
+   * to the run bus AFTER the commit. AgentRuntime hands it to RunController
+   * as the stream sink and calls `dropRun(runId)` on termination so the
+   * per-run text buffer doesn't leak.
+   */
+  pipeline: PersistAndBroadcastPipeline;
 }
 
 export interface AgentRuntime {
@@ -75,7 +90,7 @@ export interface AgentRuntime {
 }
 
 export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
-  const activeRuns = new ActiveRuns();
+  const activeRuns = deps.activeRuns;
   // Bounded LRU cache of live SDK handles. We reuse a single SDKAgent
   // across `startRun` calls (spec §4: "Subsequent prompts to the same
   // agent reuse the same durable agent handle"). Bound prevents a
@@ -325,11 +340,19 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
           sdk: deps.sdk,
           runsRepo: deps.runsRepo,
           pricing: snapshot.pricing,
-          sink: createStubSink(deps.logger),
+          sink: createPipelineSink({
+            runId: runRow.id,
+            agentId: row.id,
+            pipeline: deps.pipeline,
+            logger: deps.logger,
+          }),
           logger: deps.logger,
         },
         (c) => {
           activeRuns.unregister(c.runId);
+          // Drop the per-run text accumulator so a long-lived process doesn't
+          // keep ghost buffers around after every run.
+          deps.pipeline.dropRun(c.runId);
         },
       );
       activeRuns.register(controller);
@@ -372,6 +395,42 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
   };
 }
 
+/**
+ * Build the per-run stream sink that hands every SDK event to the
+ * persist-then-broadcast pipeline. Events that fail Zod validation against
+ * `sdkMessageSchema` are logged and dropped — the SDK shouldn't produce
+ * unknown discriminants, but if it does we'd rather skip than crash the
+ * consume loop. Validation failures DO NOT advance the per-run sequence.
+ */
+function createPipelineSink(args: {
+  runId: string;
+  agentId: string;
+  pipeline: PersistAndBroadcastPipeline;
+  logger: FastifyBaseLogger;
+}): StreamSink {
+  return (event: unknown) => {
+    const parsed = sdkMessageSchema.safeParse(event);
+    if (!parsed.success) {
+      args.logger.warn(
+        {
+          runId: args.runId,
+          agentId: args.agentId,
+          sdkType: (event as { type?: unknown })?.type,
+          errors: parsed.error.flatten(),
+        },
+        "pipeline-sink: SDK event failed sdkMessageSchema; skipping persist+broadcast",
+      );
+      return;
+    }
+    const raw: SDKMessage = parsed.data;
+    args.pipeline.ingestSDKMessage({
+      raw,
+      runId: args.runId,
+      agentId: args.agentId,
+    });
+  };
+}
+
 function buildSummary(
   row: AgentRow,
   aggregates:
@@ -401,4 +460,3 @@ function buildSummary(
   };
 }
 
-export { WorkspaceRejectedError };

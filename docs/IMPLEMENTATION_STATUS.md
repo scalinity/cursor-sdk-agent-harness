@@ -14,7 +14,8 @@ each phase. Use it as the single source of truth for "what is decided" vs
 | 04 | Shared Contracts & DB Foundation | ✅ complete | Zod schemas, SQLite/Drizzle schema mirroring spec §8, seven repositories, default settings seed, retention job. |
 | 05 | Security, Keychain, Workspace Policy | ✅ complete | Keychain stores, CSRF/origin/bind plugins, workspace policy with symlink-escape detection, settings/api-key/allowlist REST routes. |
 | 06 | Cursor SDK Runtime Manager | ✅ complete | `@cursor/sdk@1.0.13` installed, `AgentRuntime` + `RunController` + `ActiveRuns` registry, agents/runs REST routes, stub stream sink, stubbed-SDK integration tests (no live SDK call). |
-| ≥7 | (per spec §16) | ⏳ pending | |
+| 07 | Event Normalization & WebSocket Streaming | ✅ complete | `normalize` + `persist-and-broadcast` pipeline replaces the Phase 06 stub sink; `run-bus` + `wsPlugin` with heartbeat + `after_seq` replay + large-payload refs; 8 WS integration tests + normalizer/bus/pipeline unit tests. |
+| ≥8 | (per spec §16) | ⏳ pending | |
 
 ---
 
@@ -1042,6 +1043,233 @@ Root `package.json`:
   secret) — carried forward from the Phase 05 "Carried into Phase 07"
   section.
 
+---
+
+## Phase 07 Outcomes
+
+### Summary
+
+Replaced the Phase 06 stub sink with the real event pipeline. Every
+`SDKMessage` now flows through `normalize` (pure) → `persist-and-broadcast`
+(transactional insert + post-commit publish) → `run-bus` (in-memory pub/sub)
+→ `wsPlugin` (`@fastify/websocket` route on `GET /ws`). The plugin owns
+heartbeat (15s ping / 45s pong timeout, configurable for tests), `after_seq`
+replay paginated through SQLite, large-payload references for tool_call
+events over 256 KiB, and a single-frame validation gate against
+`serverFrameSchema` before any frame leaves the server.
+
+### Decisions made (binding for downstream phases)
+
+1. **Persist-before-broadcast is enforced at one chokepoint**.
+   `PersistAndBroadcastPipeline.ingestSDKMessage` is the only call site
+   that writes to `events` AND the only call site that fans out to
+   `RunBus`. The bus's `publish` defers via `setImmediate` so the post-
+   commit caller is never blocked on listener work, but the queue is
+   primed only AFTER the commit succeeds. A mid-batch insert failure
+   aborts the batch and emits nothing — no partial broadcast.
+2. **In-memory per-run text accumulators**. The normalizer's delta-vs-
+   snapshot detection needs the previous assistant/thinking text. The
+   pipeline owns a `Map<runId, { assistantText, thinkingText }>` and
+   updates it ONLY after a successful insert. `dropRun(runId)` clears
+   the entry when the controller terminates so a long-lived process
+   doesn't leak buffers.
+3. **Delta/snapshot detection is the spec's prefix-match strategy**.
+   The normalizer compares new text against the previous accumulated
+   text. Prefix match → emit suffix-only `assistant.delta` /
+   `thinking.delta`. Otherwise → emit `assistant.snapshot` /
+   `thinking.snapshot` with `is_replacement: true`. First text observed
+   for a run is emitted as a delta of the whole string so the wire never
+   carries a useless empty event.
+4. **Derived `code_edit.detected` is a placeholder seam in Phase 07**.
+   A `tool_call.completed` event for `edit`, `write`, or `delete` emits
+   a second canonical event with `confidence: "low"` and `edits: []`.
+   Phase 10 fills the extraction; the seam ships now so Phase 08 UI
+   work can render the card structure without rework.
+5. **Large-payload threshold is checked at frame-build time, not
+   persist time**. `EventsRepo` stores the full JSON regardless of
+   size (per spec §8 "stored fully and broadcast as references"). The
+   `frame-builder` reads `row.payloadBytes` and, for `tool_call`
+   payloads >256 KiB, replaces inline `args` / `result` with
+   `large_payload_refs.{args,result,raw}_event_url` pointing at the
+   `/api/events/:eventId/large-payload/:field` REST endpoint. Phase 10
+   wires the actual route; the URLs are correct now.
+6. **Heartbeat is parameterised for tests**.
+   `WsPluginOptions.heartbeatIntervalMs` / `missedPongTimeoutMs`
+   override the 15s/45s defaults. Tests use 50ms/1s; production keeps
+   the spec values. The first heartbeat is `setImmediate`-deferred so a
+   freshly-connected client always has time to attach `on('message')`
+   before the frame arrives.
+7. **`CancelResult` upgrade — Phase 06 surfaced this and Phase 07
+   honours it.** The discriminated union `{ outcome: "cancelled" |
+   "not_started" | "unsupported" | "failed", ... }` lets the WS plugin
+   map each case to a distinct error code (`CANCEL_UNAVAILABLE` for
+   unsupported / not_started, `SDK_ERROR` for failed) instead of
+   collapsing to a generic "cancelled / unavailable" pair.
+8. **No `submit_user_input` over WS in Phase 07**. Per phase prompt
+   "out of scope" — the WS plugin replies with `INTERNAL_ERROR` if a
+   client sends `submit_user_input` / `delete_run` / `update_settings`.
+   Phase 08 wires these as REST already exists for run creation.
+9. **`ws@8.18.0` direct dep**. `@fastify/websocket` re-exports the
+   `WebSocket` type but the cleanest typing for our plugin code is to
+   depend on `ws` directly. Added `ws@8.18.0` runtime and
+   `@types/ws@8.5.13` dev deps to `apps/server/package.json`. No
+   `pnpm.onlyBuiltDependencies` change needed — `ws` is pure JS.
+
+### Open Questions tightened by this phase
+
+| # | Question | Before | After Phase 07 |
+|---|---|---|---|
+| 6 | Assistant/thinking delta vs snapshot | partial | normalizer ships the defensive prefix-match strategy from the spec; ongoing smoke runs in Phase 09 will confirm whether the SDK actually emits snapshots. Code path is symmetric for both. |
+| 7 | Built-in tool names | partial | `code_edit.detected` seam keys on the verified `edit` / `write` / `delete` names from OQ-08; Phase 10 may extend the set as smoke runs surface other code-edit-shaped tools. |
+| 9 | `request` event payload | verified (sparse) | normalizer emits `request.created` with the spec-defined `{ request_id, context_event_ids: [], inferred_reason: null }` shape; harness invention populated at render time. |
+
+### Files created in this phase
+
+`apps/server/src/sdk/`:
+- `normalizer.ts` — pure SDKMessage → CanonicalRunEventDraft[]; delta/
+  snapshot detection; derived `code_edit.detected` seam.
+- `persist-and-broadcast.ts` — single chokepoint pipeline; in-memory
+  text-buffer state; `dropRun` for terminate cleanup; `clear` for tests.
+- `__tests__/normalizer.test.ts` — 15 unit tests (every discriminant,
+  delta/snapshot rules, code-edit seam gating, invariants).
+- `__tests__/persist-and-broadcast.test.ts` — 6 unit tests (persist
+  before broadcast, monotonic seq, buffer advancement on commit,
+  rollback on DB failure, derived event ordering, dropRun semantics).
+
+`apps/server/src/ws/`:
+- `run-bus.ts` — `Map<runId, Set<Listener>>`; snapshot-safe iteration;
+  setImmediate fanout; swallowed listener errors.
+- `frame-builder.ts` — `EventRow → ServerFrame`; switch over `kind`;
+  large-payload ref substitution for tool_call payloads above the
+  256 KiB threshold; returns `null` for unknown kinds.
+- `ws-plugin.ts` — `GET /ws` route; origin + csrf upgrade gate;
+  per-connection state with heartbeat + frame dedupe; subscribe/
+  unsubscribe/cancel/approval routing; replay paginated through SQLite;
+  live-queue draining during replay; backpressure close at 1k events.
+- `index.ts` — barrel.
+- `__tests__/run-bus.test.ts` — 6 unit tests (isolation, multi-subscriber,
+  unsubscribe, self-unsubscribe-safe, error-swallow, hasSubscribers/size).
+
+`apps/server/src/__tests__/integration/`:
+- `ws-stream.test.ts` — 8 integration tests:
+  - Upgrade rejection on bad Origin (origin-policy hook).
+  - Upgrade rejection on missing CSRF (WS plugin gate).
+  - 50-event replay in order with `replay_complete` ack.
+  - Disconnect-mid-stream + reconnect with `after_seq=10` reconstructs
+    seqs 11-20 with `replayed: true`.
+  - Server heartbeat frames arrive on a fresh connection (50ms cadence).
+  - Large tool_call payload (>256 KiB) is persisted with full JSON but
+    broadcast as `large_payload_refs.result_event_url`.
+  - Parallel runs are isolated — a subscriber to run-A sees zero events
+    from run-B.
+  - Unknown run_id returns `RUN_NOT_FOUND`.
+
+Modified:
+- `apps/server/src/sdk/agent-runtime.ts` — accepts new `activeRuns` +
+  `pipeline` deps from `buildApp`; replaces `createStubSink(logger)`
+  with `createPipelineSink({...})` that Zod-parses every SDK event
+  against `sdkMessageSchema` before forwarding to the pipeline; drops
+  the per-run text buffer on terminate.
+- `apps/server/src/sdk/index.ts` — adds normalizer + pipeline +
+  `CancelResult` exports.
+- `apps/server/src/app.ts` — wires `createRunBus`, `ActiveRuns`,
+  `createPersistAndBroadcast`, and registers `wsPlugin`; exposes
+  `runBus` + `activeRuns` on `BuiltApp` for tests; threads optional
+  `wsHeartbeatIntervalMs` / `wsMissedPongTimeoutMs` through to the plugin.
+- `apps/server/src/ws/index.ts` — barrel replaces the Phase 02 empty stub.
+- `apps/server/package.json` — adds `ws@8.18.0` (runtime) and
+  `@types/ws@8.5.13` (dev).
+
+### Commands run and results
+
+- `pnpm --filter @harness/server add ws@8.18.0` — installed.
+- `pnpm --filter @harness/server add -D @types/ws@8.5.13` — installed.
+- `pnpm typecheck` — clean across all four workspaces.
+- `pnpm lint` — clean, 0 warnings, 0 errors.
+- `pnpm test` — **137 tests pass** across 22 files (was 100/18
+  pre-phase). New tests: 15 normalizer + 6 persist-and-broadcast + 6
+  run-bus + 8 ws-stream integration + 2 from run-controller updates
+  (now 5 vs 3 pre-phase).
+
+### Acceptance gates satisfied
+
+- ✅ `pnpm typecheck && pnpm lint && pnpm test` all pass.
+- ✅ Integration test: 50-event stream arrives in order on a connected
+  client (`ws-stream.test.ts` → "subscribes to a finished run, replays
+  50 events in order, then ack replay_complete").
+- ✅ Integration test: client reconnect with `after_seq=10` reconstructs
+  events 11-20 with `replayed: true` and no gaps/duplicates.
+- ✅ Persist-before-broadcast verified: `persist-and-broadcast.test.ts`
+  → "emits ZERO frames when the underlying insert fails" injects an
+  unknown runId into the pipeline; the txn throws inside
+  `appendCanonicalEvent`, the publish is skipped, and the subscriber sees
+  zero frames.
+- ✅ Heartbeat: covered by `ws-stream.test.ts` → "emits server heartbeat
+  frames at startup" (50ms cadence under test config). Production timing
+  (15s/45s) is the default when `heartbeatIntervalMs` is omitted.
+- ✅ Large-payload reference: `ws-stream.test.ts` → "inlines tool_call
+  payloads under the 256 KiB threshold and references them via URL when
+  above" persists a 260 KiB diffString, sees the live frame's `result`
+  stripped, and asserts `large_payload_refs.result_event_url` matches
+  the spec URL pattern.
+- ✅ Parallel runs isolated: `ws-stream.test.ts` → "isolates parallel
+  runs" subscribes to run-A, verifies the seen set contains only A's
+  runId (never B's).
+- ✅ `docs/IMPLEMENTATION_STATUS.md` updated (this section).
+
+### Out of scope / deferred (per phase prompt)
+
+1. **Frontend WS consumption** — Phase 08. The browser doesn't yet
+   speak `subscribe_run` or render `sdk.*` frames.
+2. **Code-edit extraction (Phase 10)**. The seam is wired; the
+   extractor that fills `edits[]` from `result.value.diffString` /
+   `args.fileText` is Phase 10's job.
+3. **Approval responder body** — OQ-10 remains unverified. WS
+   `approval_response` frames return `APPROVAL_NOT_PENDING` so no
+   silent fake resolution can land.
+4. **Cancellation UI** — Phase 13. The WS `cancel_run` frame is wired
+   to `RunController.cancel`, but the UI that surfaces the four
+   `CancelResult` outcomes is Phase 13's surface.
+5. **Replay UI / speed controls** — Phase 11. Server-side replay
+   pagination is in place; the timed-replay client logic ships later.
+6. **`GET /api/events/:eventId/large-payload/:field` REST route** —
+   Phase 10. The WS frame surfaces the URLs but the route handler
+   doesn't yet exist. A client that hits the URL today would 404.
+
+### Known limitations
+
+1. **Backpressure threshold is 1,000 buffered events** per spec §13.
+   When exceeded, the subscription closes with `retryable: true` and
+   the client must resync from SQLite. Not currently exercised by
+   tests — would require synthesising a slow socket under heavy
+   ingest. Acceptable for a single-user local app; revisit if the
+   harness gains multi-tab support.
+2. **`onApprovalResponse` is a no-op hook**. The WS plugin accepts
+   the frame, logs receipt (if a callback is supplied), and replies
+   with `APPROVAL_NOT_PENDING`. Wiring to a real responder is gated
+   on the SDK exposing one (OQ-10).
+3. **`recentFrameIds` dedupe is per-connection, not per-run**. The
+   spec says "10 minutes per connection"; we cap the set at 1024
+   entries with FIFO eviction. A client that issues more than 1024
+   distinct frame ids inside one socket lifetime could theoretically
+   replay an evicted id — single-user local workload makes this a
+   non-concern, but worth a note if the harness gains a more chatty
+   command surface.
+4. **Frame validation is also performed on outbound frames**. If
+   `serverFrameSchema.safeParse` ever fails for a built frame (it
+   shouldn't given the builder mirrors the schema), the connection
+   sees an `INTERNAL_ERROR` frame instead of a malformed payload. The
+   row stays in the DB so an inspector can still diagnose.
+
+### Carried into Phase 08
+
+- **Frontend `useWebSocket` + `useAgentStream` hooks** — must speak
+  `subscribe_run` (with `after_seq` resume), handle `replayed`-marked
+  frames, drive `run-store.ingestServerFrame`, respond to `heartbeat`
+  with `heartbeat_ack`.
+- **`ConnectionBanner`** — Phase 08 surface for the reconnect /
+  replay / offline states the server-side contract already supports.
+
 ## Next prompt to run
 
-`07_EVENT_NORMALIZATION_AND_WEBSOCKET.md`
+`08_FRONTEND_STATE_HOOKS_AND_CHAT_SHELL.md`

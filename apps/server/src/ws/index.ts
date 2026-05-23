@@ -1,3 +1,9 @@
-// Phase 07 lands the WebSocket plugin, connection registry, run-event bus,
-// frame validators, and replay sender here. Intentionally empty for Phase 02.
-export {};
+// Phase 07 — WebSocket layer barrel.
+//
+// `run-bus` carries committed canonical events to subscribed sockets;
+// `ws-plugin` is the Fastify route + frame router + heartbeat owner;
+// `frame-builder` maps EventRow → ServerFrame with large-payload handling.
+
+export { createRunBus, type RunBus, type RunBusListener } from "./run-bus.js";
+export { wsPlugin, type WsPluginOptions } from "./ws-plugin.js";
+export { buildServerFrame } from "./frame-builder.js";
