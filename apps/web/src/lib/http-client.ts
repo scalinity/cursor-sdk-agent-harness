@@ -16,13 +16,35 @@ export class HttpError<TBody = unknown> extends Error {
   readonly status: number;
   readonly code: string | null;
   readonly body: TBody | null;
-  constructor(message: string, status: number, code: string | null, body: TBody | null) {
+  readonly requestId: string | null;
+  constructor(
+    message: string,
+    status: number,
+    code: string | null,
+    body: TBody | null,
+    requestId: string | null = null,
+  ) {
     super(message);
     this.name = "HttpError";
     this.status = status;
     this.code = code;
     this.body = body;
+    this.requestId = requestId;
   }
+}
+
+/**
+ * Generate an X-Request-Id for server-log correlation. Uses crypto.randomUUID
+ * where available (every modern browser), falling back to a Math.random hex
+ * for non-secure contexts where crypto.randomUUID is undefined.
+ */
+function newRequestId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return Array.from({ length: 32 }, () =>
+    Math.floor(Math.random() * 16).toString(16),
+  ).join("");
 }
 
 export interface HttpRequestOptions<TResp extends ZodTypeAny | undefined = undefined> {
@@ -58,7 +80,11 @@ export async function httpRequest<TResp extends ZodTypeAny | undefined = undefin
   options: HttpRequestOptions<TResp> = {},
 ): Promise<TResp extends ZodTypeAny ? z.infer<TResp> : unknown> {
   const method: HttpMethod = options.method ?? "GET";
-  const headers: Record<string, string> = { Accept: "application/json" };
+  const requestId = newRequestId();
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "X-Request-Id": requestId,
+  };
   if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
@@ -69,6 +95,7 @@ export async function httpRequest<TResp extends ZodTypeAny | undefined = undefin
         0,
         "CSRF_TOKEN_MISSING",
         null,
+        requestId,
       );
     }
     headers["X-CSRF-Token"] = options.csrfToken;
@@ -95,6 +122,7 @@ export async function httpRequest<TResp extends ZodTypeAny | undefined = undefin
       0,
       "NETWORK_ERROR",
       null,
+      requestId,
     );
   }
 
@@ -115,6 +143,7 @@ export async function httpRequest<TResp extends ZodTypeAny | undefined = undefin
       resp.status,
       errBody?.code ?? null,
       parsedBody,
+      requestId,
     );
   }
 
@@ -126,6 +155,7 @@ export async function httpRequest<TResp extends ZodTypeAny | undefined = undefin
         resp.status,
         "SCHEMA_VALIDATION_FAILED",
         result.error.flatten(),
+        requestId,
       );
     }
     return result.data as TResp extends ZodTypeAny ? z.infer<TResp> : unknown;
