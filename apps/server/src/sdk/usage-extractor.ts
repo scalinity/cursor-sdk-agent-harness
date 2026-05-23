@@ -55,17 +55,29 @@ export function extractUsage(input: ExtractedUsageInput): ExtractedUsage {
   if (input.rawUsage === null || input.rawUsage === undefined) {
     return unavailable();
   }
-  const parsed = turnEndedUsageShape.safeParse(input.rawUsage);
-  if (!parsed.success) {
+  // Fast path: `rawUsage` is already a `ParsedTurnEndedUsage` produced by
+  // `accumulateTurnEndedUsage` (which validated each turn at accumulation
+  // time). Re-parsing here would just allocate Zod issue arrays for no
+  // gain. We do a defensive shape check: if it doesn't look parsed,
+  // fall back to the safeParse path so callers handing us raw SDK shapes
+  // still work.
+  const usage: ParsedTurnEndedUsage | null = looksParsed(input.rawUsage)
+    ? (input.rawUsage as ParsedTurnEndedUsage)
+    : (() => {
+        const parsed = turnEndedUsageShape.safeParse(input.rawUsage);
+        return parsed.success ? parsed.data : null;
+      })();
+  if (usage === null) {
+    // Shape didn't match either pre-parsed accumulator OR raw turn-ended
+    // payload — capture a redacted shape so ops can diagnose SDK drift.
     return {
       ...unavailable(),
       parseError: {
-        message: parsed.error.issues[0]?.message ?? "Unknown parse failure",
+        message: "Usage payload did not match TurnEndedUpdate.usage shape",
         rawShape: shapeOf(input.rawUsage),
       },
     };
   }
-  const usage = parsed.data;
   const inputTokens = usage.inputTokens ?? null;
   const outputTokens = usage.outputTokens ?? null;
   const cachedInputTokens = usage.cacheReadTokens ?? null;
@@ -74,7 +86,16 @@ export function extractUsage(input: ExtractedUsageInput): ExtractedUsage {
   const reasoningTokens = usage.reasoningTokens ?? usage.reasoning_tokens ?? null;
 
   if (inputTokens === null && outputTokens === null && cachedInputTokens === null) {
-    return unavailable();
+    // Shape parsed but every token field was missing — distinct from "no
+    // usage observed." Preserve a hint so ops can tell the difference
+    // (e.g. SDK emitted `{}` vs SDK never emitted turn-ended).
+    return {
+      ...unavailable(),
+      parseError: {
+        message: "TurnEndedUpdate.usage was parseable but every token field was missing",
+        rawShape: shapeOf(input.rawUsage),
+      },
+    };
   }
 
   const costUsdMicros = computeCostMicros({
@@ -93,6 +114,31 @@ export function extractUsage(input: ExtractedUsageInput): ExtractedUsage {
     cost_usd_micros: costUsdMicros,
     usage_source: "sdk_final_result",
   };
+}
+
+/**
+ * Cheap structural test: does `value` already look like a
+ * `ParsedTurnEndedUsage` snapshot? If yes we skip the Zod re-parse on the
+ * happy path (see `extractUsage`). False negatives are safe — we fall
+ * back to safeParse — but a true positive saves the issue-array
+ * allocation per call.
+ */
+function looksParsed(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  // Require every present field to be a number; reject objects with
+  // unexpected keys to keep the fast-path conservative.
+  for (const k of [
+    "inputTokens",
+    "outputTokens",
+    "cacheReadTokens",
+    "cacheWriteTokens",
+    "reasoningTokens",
+    "reasoning_tokens",
+  ]) {
+    if (k in v && typeof v[k] !== "number") return false;
+  }
+  return true;
 }
 
 function unavailable(): TokenUsage {
@@ -164,8 +210,14 @@ function computeCostMicros(input: CostInputs): number | null {
   const rates = pricingForModel(input.modelId, input.pricing);
   if (rates === null) return null;
   const inputTokens = input.inputTokens ?? 0;
-  const cachedInputTokens = input.cachedInputTokens ?? 0;
   const outputTokens = input.outputTokens ?? 0;
+  // Clamp cachedInputTokens to inputTokens. The SDK occasionally reports
+  // cumulative cache reads larger than the prompt's input tokens (e.g.
+  // when the cached prefix is larger than the just-sent message). Before
+  // clamping, `Math.max(inputTokens - cachedInputTokens, 0)` zeroed
+  // fresh-input but still charged for the full reported cached count —
+  // asymmetric. Clamp first so cached ≤ input always holds.
+  const cachedInputTokens = Math.min(input.cachedInputTokens ?? 0, inputTokens);
   // Pricing for the chosen model must be configured; per spec, missing rates
   // (all-zero) leave cost null because we have no idea what the price is.
   if (

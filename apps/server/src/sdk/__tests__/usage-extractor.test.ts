@@ -41,13 +41,33 @@ describe("extractUsage", () => {
     expect(out.parseError?.rawShape).toBeDefined();
   });
 
-  it("returns unavailable when usage object has every token field missing", () => {
+  it("returns unavailable WITH parseError hint when every token field is missing", () => {
     const out = extractUsage({
       rawUsage: {},
       modelId: "composer-2-5-fast",
       pricing,
     });
     expect(out.usage_source).toBe("unavailable");
+    expect(out.parseError?.message).toMatch(/every token field was missing/);
+  });
+
+  it("clamps cachedInputTokens to inputTokens when SDK reports cached > input", () => {
+    const out = extractUsage({
+      rawUsage: {
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheReadTokens: 300, // > inputTokens; clamp to 100
+      },
+      modelId: "composer-2-5-fast",
+      pricing,
+    });
+    // After clamp: cached=100, fresh=0
+    // Per the formula (rate per M tokens) / 1_000_000:
+    //   fresh:  0   * 2_000_000  / 1_000_000 = 0
+    //   cached: 100 *   200_000  / 1_000_000 = 20
+    //   output: 50  * 8_000_000  / 1_000_000 = 400
+    //   total micros = 420
+    expect(out.cost_usd_micros).toBe(420);
   });
 
   it("computes cost from input/output/cache tokens with the harness formula", () => {
