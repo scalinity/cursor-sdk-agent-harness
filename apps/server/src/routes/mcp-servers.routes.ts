@@ -69,6 +69,26 @@ interface ProbeOutcome {
   lastStatus: string | null;
 }
 
+/**
+ * REVIEW-C1 guard: the list response masks token-bearing fields with the
+ * literal string `[REDACTED]`. If a user edits an MCP server without
+ * first clicking "Reveal secrets", the editor textarea contains those
+ * placeholders. Persisting them would destroy the real stored secrets
+ * (zod accepts arbitrary strings for env values and headers).
+ *
+ * We refuse the request server-side so a buggy or malicious client
+ * can't bypass the editor's client-side guard.
+ */
+function containsRedactedSentinel(value: unknown): boolean {
+  if (value === "[REDACTED]") return true;
+  if (value && typeof value === "object") {
+    for (const child of Object.values(value as Record<string, unknown>)) {
+      if (containsRedactedSentinel(child)) return true;
+    }
+  }
+  return false;
+}
+
 function probeOutcomeFromResult(result: McpValidationResult): ProbeOutcome {
   switch (result.status) {
     case "valid":
@@ -116,6 +136,13 @@ export async function registerMcpServersRoutes(
   app.post("/api/mcp-servers", async (req, reply) => {
     const parsed = createMcpServerRequestSchema.safeParse(req.body);
     if (!parsed.success) return send422(reply, parsed.error);
+    if (containsRedactedSentinel(parsed.data.config)) {
+      return reply.code(422).send({
+        code: "REDACTED_SENTINEL_PRESENT",
+        message:
+          "Config contains the [REDACTED] placeholder. Click 'Reveal secrets' in the editor before saving, then re-submit.",
+      });
+    }
     if (deps.mcpServers.getByName(parsed.data.name)) {
       return reply.code(409).send({
         code: "NAME_CONFLICT",
@@ -145,6 +172,13 @@ export async function registerMcpServersRoutes(
       // config-change (re-probe) vs metadata-only (skip probe).
       const parsed = createMcpServerRequestSchema.safeParse(req.body);
       if (!parsed.success) return send422(reply, parsed.error);
+      if (containsRedactedSentinel(parsed.data.config)) {
+        return reply.code(422).send({
+          code: "REDACTED_SENTINEL_PRESENT",
+          message:
+            "Config contains the [REDACTED] placeholder. Click 'Reveal secrets' in the editor before saving, then re-submit.",
+        });
+      }
       const existing = deps.mcpServers.getById(req.params.id);
       if (!existing) return reply.code(404).send({ code: "NOT_FOUND" });
       if (

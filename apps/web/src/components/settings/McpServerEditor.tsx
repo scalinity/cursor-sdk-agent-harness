@@ -41,6 +41,21 @@ function blankState(): EditorState {
   };
 }
 
+/**
+ * Mirrors the server-side `containsRedactedSentinel` in mcp-servers.routes.ts.
+ * REVIEW-C1: refuse to save a config containing the `[REDACTED]` placeholder
+ * because that would persist the placeholder as the real secret.
+ */
+function containsRedactedSentinel(value: unknown): boolean {
+  if (value === "[REDACTED]") return true;
+  if (value && typeof value === "object") {
+    for (const child of Object.values(value as Record<string, unknown>)) {
+      if (containsRedactedSentinel(child)) return true;
+    }
+  }
+  return false;
+}
+
 function tryParse(text: string): { value: McpServerConfig | null; error: string | null } {
   try {
     const json = JSON.parse(text) as unknown;
@@ -123,6 +138,19 @@ export function McpServerEditor({ existing, open, onClose, onSaved }: McpServerE
     }
     if (!state.name.trim()) {
       setState((prev) => ({ ...prev, formError: "Name is required." }));
+      return;
+    }
+    // REVIEW-C1 guard: a list-view config carries `[REDACTED]` placeholders
+    // for token-bearing fields. Saving from the editor without first
+    // clicking "Reveal secrets" would persist those placeholders, destroying
+    // the real stored secrets. Refuse the save and prompt the user. (The
+    // server enforces the same rule via `REDACTED_SENTINEL_PRESENT`.)
+    if (existing && !state.revealedRaw && containsRedactedSentinel(value)) {
+      setState((prev) => ({
+        ...prev,
+        formError:
+          "Click 'Reveal secrets' before saving — otherwise the redacted placeholders would overwrite the stored tokens.",
+      }));
       return;
     }
     setState((prev) => ({ ...prev, saving: true, formError: null }));

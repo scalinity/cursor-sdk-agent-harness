@@ -201,6 +201,53 @@ describe("/api/mcp-servers", () => {
     expect(second.json().code).toBe("NAME_CONFLICT");
   });
 
+  it("REVIEW-C1: 422s when config contains the [REDACTED] sentinel (POST + PUT)", async () => {
+    const { db, repos, app } = setup();
+    cleanup.push(() => app.close(), () => db.close());
+    await registerMcpServersRoutes(app, {
+      mcpServers: repos.mcpServers,
+      validatorOverride: async () => ({ status: "valid" as const, transport: "stdio" as const }),
+    });
+
+    // POST guard
+    const post = await app.inject({
+      method: "POST",
+      url: "/api/mcp-servers",
+      payload: {
+        name: "leaky",
+        enabled: true,
+        config: { command: "/usr/bin/echo", env: { GITHUB_TOKEN: "[REDACTED]" } },
+      },
+    });
+    expect(post.statusCode).toBe(422);
+    expect(post.json().code).toBe("REDACTED_SENTINEL_PRESENT");
+
+    // Now create a clean row to exercise PUT.
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/mcp-servers",
+      payload: {
+        name: "clean",
+        enabled: true,
+        config: { command: "/usr/bin/echo", env: { GITHUB_TOKEN: "ghp_real" } },
+      },
+    });
+    const id = created.json().id;
+
+    // PUT guard — the redacted Authorization header would otherwise persist as the real secret.
+    const put = await app.inject({
+      method: "PUT",
+      url: `/api/mcp-servers/${id}`,
+      payload: {
+        name: "clean",
+        enabled: true,
+        config: { url: "https://example.test", headers: { Authorization: "[REDACTED]" } },
+      },
+    });
+    expect(put.statusCode).toBe(422);
+    expect(put.json().code).toBe("REDACTED_SENTINEL_PRESENT");
+  });
+
   it("422s a malformed config", async () => {
     const { db, repos, app } = setup();
     cleanup.push(() => app.close(), () => db.close());
