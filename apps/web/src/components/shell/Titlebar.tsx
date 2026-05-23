@@ -1,3 +1,4 @@
+import type { WorkspaceAllowlistRow } from "@harness/shared";
 import { useUiStore } from "../../state/ui-store.js";
 import { cn } from "../../lib/cn.js";
 
@@ -9,14 +10,32 @@ export interface TitlebarProps {
    * when null/undefined (no active run).
    */
   onCancelRun?: () => void;
+  /**
+   * Phase 16 — the currently active workspace. Null until the user picks one;
+   * the WorkspaceRequiredModal will then block the shell until they do.
+   */
+  workspace?: WorkspaceAllowlistRow | null;
+  /**
+   * Phase 16 — re-open the workspace picker. The titlebar crumb is the
+   * primary affordance for switching workspaces.
+   */
+  onPickWorkspace?: () => void;
 }
 
-/**
- * Titlebar — traffic lights, repo crumb, branch/diff stats, code-toggle,
- * timer pill. Matches the mockup's `.titlebar` row using shell CSS for
- * layout and Tailwind utilities for token-driven colours/sizes.
- */
-export function Titlebar({ onNewAgent, onCancelRun }: TitlebarProps = {}) {
+function workspaceLabel(ws: WorkspaceAllowlistRow): string {
+  if (ws.label && ws.label.length > 0) return ws.label;
+  // Show the basename of the path so the titlebar isn't dominated by
+  // /Users/danny/Documents/.../actual-folder.
+  const segments = ws.path.split("/").filter((s) => s.length > 0);
+  return segments[segments.length - 1] ?? ws.path;
+}
+
+export function Titlebar({
+  onNewAgent,
+  onCancelRun,
+  workspace,
+  onPickWorkspace,
+}: TitlebarProps = {}) {
   const codeHidden = useUiStore((s) => s.codeHidden);
   const toggleCodeHidden = useUiStore((s) => s.toggleCodeHidden);
   return (
@@ -28,21 +47,35 @@ export function Titlebar({ onNewAgent, onCancelRun }: TitlebarProps = {}) {
         <span className="block size-3 rounded-full bg-success" aria-hidden="true" />
       </div>
 
-      {/* Repo crumb — TODO(phase-12): wire to active agent's cwd/git remote. */}
-      <div className="flex h-full items-center gap-1.5 border-r border-border-subtle px-3 font-medium text-text-secondary">
-        <span>cinder</span>
-        <span className="text-text-tertiary">/</span>
-        <span className="text-accent-primary">api-gateway</span>
-      </div>
+      {/* Workspace crumb — Phase 16. Real workspace name, clickable to
+          re-open the picker. Before a workspace is selected the
+          WorkspaceRequiredModal blocks the shell, so this slot is the
+          authoritative "current workspace" label. */}
+      {workspace ? (
+        <button
+          type="button"
+          onClick={onPickWorkspace}
+          title={`Workspace: ${workspace.path} (click to switch)`}
+          className="flex h-full items-center gap-1.5 border-r border-border-subtle bg-transparent px-3 font-medium text-text-secondary hover:text-text-primary"
+        >
+          <span className="mono text-xs text-text-tertiary">workspace</span>
+          <span className="text-text-tertiary">/</span>
+          <span className="text-accent-primary">{workspaceLabel(workspace)}</span>
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={onPickWorkspace}
+          className="flex h-full items-center gap-1.5 border-r border-border-subtle bg-transparent px-3 font-medium text-text-tertiary hover:text-text-primary"
+        >
+          <span>Pick workspace…</span>
+        </button>
+      )}
 
-      {/* Branch / diff stats — TODO(phase-14): pull from server-side git
-          metadata (run.final_result.git_metadata) once the panel is wired. */}
-      <div className="flex h-full items-center gap-1.5 border-r border-border-subtle px-3 text-md text-text-secondary">
-        <span className="mono text-sm">feat/pagination-cursor-fix</span>
-        <span className="mono text-xs text-text-tertiary">·</span>
-        <span className="mono text-xs text-success">+184</span>
-        <span className="mono text-xs text-danger">−72</span>
-      </div>
+      {/* Branch / diff stats — intentionally hidden until a future phase
+          ships real git integration. The mockup showed `feat/foo +n -m`
+          here, but until we read git state from `workspace.path` any
+          rendered string would be fiction. */}
 
       <div className="flex-1" />
 
@@ -84,10 +117,9 @@ export function Titlebar({ onNewAgent, onCancelRun }: TitlebarProps = {}) {
           <span>{codeHidden ? "Show code" : "Hide code"}</span>
           <span className="mono text-2xs text-text-tertiary">⌘J</span>
         </button>
-        {/* TODO(phase-09): live run-duration timer (from activeRun.startedAt). */}
-        <span className="inline-flex h-control-md items-center gap-1.5 rounded-md border border-border-subtle bg-surface-1 px-2 text-md font-medium text-text-secondary">
-          12m 04s
-        </span>
+        {/* Run-duration timer pill removed — the mockup showed "12m 04s"
+            but no run-duration ticker has shipped yet. A future phase
+            can re-add this once `useRunDuration(activeRunId)` exists. */}
       </div>
     </div>
   );
