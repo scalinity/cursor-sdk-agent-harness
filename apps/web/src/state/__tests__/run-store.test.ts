@@ -92,4 +92,80 @@ describe("run-store", () => {
     useRunStore.getState().resetRun("run-1");
     expect(useRunStore.getState().eventsByRunId["run-1"]).toBeUndefined();
   });
+
+  it("maintains a parallel events array in seq order (RV2-S5)", () => {
+    useRunStore.getState().ingestServerFrame(assistantFrame(1, "A"));
+    useRunStore.getState().ingestServerFrame(assistantFrame(2, "B"));
+    const state = useRunStore.getState().eventsByRunId["run-1"]!;
+    expect(state.events.map((e) => e.seq)).toEqual([1, 2]);
+    expect(state.events[0]!.payload).toEqual({
+      role: "assistant",
+      text_delta: "A",
+      is_replacement: false,
+      tool_uses: [],
+    });
+  });
+
+  it("binary-inserts out-of-order seqs into events + seqList (RV2-S2)", () => {
+    useRunStore.getState().ingestServerFrame(assistantFrame(1, "a"));
+    useRunStore.getState().ingestServerFrame(assistantFrame(3, "c"));
+    // Out-of-order: seq 2 arrives after seq 3.
+    useRunStore.getState().ingestServerFrame(assistantFrame(2, "b"));
+    const state = useRunStore.getState().eventsByRunId["run-1"]!;
+    expect(state.seqList).toEqual([1, 2, 3]);
+    expect(state.events.map((e) => e.seq)).toEqual([1, 2, 3]);
+  });
+
+  it("increments toolCallCount per sdk.tool_call frame (RV2-S4)", () => {
+    const toolFrame = (seq: number): ServerFrame => ({
+      id: `frame-${seq}`,
+      type: "sdk.tool_call",
+      sent_at: BASE_EVENT.occurred_at,
+      event: {
+        ...BASE_EVENT,
+        event_id: `00000000-0000-0000-0000-${seq.toString().padStart(12, "0")}`,
+        sdk_type: "tool_call",
+        seq,
+        kind: "tool_call.completed",
+        payload: {
+          call_id: `call-${seq}`,
+          name: "read",
+          status: "completed",
+          args: { path: "x" },
+        },
+      },
+    });
+    useRunStore.getState().ingestServerFrame(assistantFrame(1, "hi"));
+    useRunStore.getState().ingestServerFrame(toolFrame(2));
+    useRunStore.getState().ingestServerFrame(toolFrame(3));
+    const state = useRunStore.getState().eventsByRunId["run-1"]!;
+    expect(state.toolCallCount).toBe(2);
+  });
+
+  it("projects CANCELLED status from run.interrupted with user_cancelled (RV2-W4)", () => {
+    const interrupted: ServerFrame = {
+      id: "frame-1",
+      type: "run.interrupted",
+      sent_at: BASE_EVENT.occurred_at,
+      event: {
+        ...BASE_EVENT,
+        event_id: "00000000-0000-0000-0000-000000000001",
+        sdk_type: "status",
+        seq: 1,
+        kind: "run.interrupted",
+        payload: { reason: "user_cancelled" },
+      },
+    };
+    useRunStore.getState().ingestServerFrame(interrupted);
+    const run = useRunStore.getState().byId["run-1"]!;
+    expect(run.status).toBe("CANCELLED");
+    expect(run.interruptedReason).toBe("user_cancelled");
+  });
+
+  it("does not spread byId for streaming text deltas (RV2-S1)", () => {
+    const before = useRunStore.getState().byId;
+    useRunStore.getState().ingestServerFrame(assistantFrame(1, "stream"));
+    // No projection frame fired, so byId reference should be unchanged.
+    expect(useRunStore.getState().byId).toBe(before);
+  });
 });

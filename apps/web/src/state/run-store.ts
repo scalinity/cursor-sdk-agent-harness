@@ -9,9 +9,15 @@
  *
  * `bySeq` is a plain Map (not a Record) because seq numbers are sparse
  * during gap recovery and the lookup is hot during replay drainage.
+ *
+ * `events` is a parallel CanonicalRunEvent[] kept in seq order — this
+ * lets renderers iterate without rebuilding the array per render
+ * (RV2-S5). `toolCallCount` is maintained incrementally to avoid the
+ * per-render O(n) scan in CenterPane (RV2-S4).
  */
 import type {
   CanonicalEventBase,
+  RunInterruptedReason,
   RunSummary,
   ServerFrame,
   SdkRunStatus,
@@ -39,7 +45,13 @@ export interface CanonicalRunEvent extends CanonicalEventBase {
     | "request";
   kind: string;
   payload: unknown;
-  /** True if this frame was sent during after_seq replay. */
+  /**
+   * True if this frame was emitted during after_seq replay. The wire-level
+   * frame schema does not yet carry this field (Phase 09 adds it server-side
+   * along with the streaming surfaces that need it); for Phase 08 the flag is
+   * advisory and set by callers (none currently set it). Documented here as
+   * a seam so Phase 09 can wire it without rewriting the store.
+   */
   replayed?: boolean;
 }
 
@@ -60,11 +72,19 @@ export interface RunRecord {
 export interface RunEventState {
   seqList: number[];
   bySeq: Map<number, CanonicalRunEvent>;
+  /**
+   * Parallel array kept in seq order. Renderers iterate this directly so
+   * the timeline component doesn't rebuild a `seqList.map(seq => bySeq.get(seq))`
+   * array per render.
+   */
+  events: CanonicalRunEvent[];
   lastSeq: number;
   /** Concatenated assistant text from delta/snapshot events. */
   assistantText: string;
   /** Concatenated thinking text from delta/snapshot events. */
   thinkingText: string;
+  /** Maintained incrementally as `sdk.tool_call` frames arrive. */
+  toolCallCount: number;
 }
 
 export interface RunState {
@@ -83,9 +103,11 @@ function emptyEventState(): RunEventState {
   return {
     seqList: [],
     bySeq: new Map(),
+    events: [],
     lastSeq: 0,
     assistantText: "",
     thinkingText: "",
+    toolCallCount: 0,
   };
 }
 
@@ -107,26 +129,69 @@ function ensureRunRecord(byId: Record<string, RunRecord>, runId: string, agentId
 }
 
 /**
- * Apply a delta or snapshot to a running text accumulator. We mirror the
- * server-side prefix-match strategy:
- *   - Snapshot with `is_replacement: true` → replace.
- *   - Delta → append `text_delta`.
- *   - Snapshot with `is_replacement: false` → keep the new text (treated as the
- *     authoritative value, matches server-side semantics).
+ * Apply a delta or snapshot to a running text accumulator. The server-side
+ * normalizer emits `<role>.snapshot` events only when it has detected a
+ * non-prefix rewrite (with `is_replacement: true`) — there is currently no
+ * code path that produces `is_replacement: false` on a snapshot. The store
+ * therefore treats every snapshot as a replacement and every delta as an
+ * append; if the contract widens, this is the place to grow the branch.
  */
 function applyTextEvent(
   prev: string,
   kind: string,
-  payload: { text_delta?: string | undefined; is_replacement?: boolean | undefined } | null,
+  payload: { text_delta?: string | undefined } | null,
 ): string {
   if (!payload) return prev;
   const isSnapshot = kind.endsWith(".snapshot");
-  const isReplacement = payload.is_replacement === true;
   const delta = payload.text_delta ?? "";
-  if (isSnapshot && isReplacement) return delta;
   if (isSnapshot) return delta;
-  // delta
   return prev + delta;
+}
+
+/**
+ * Binary-insert `seq` into the sorted `seqList` (and `events` array,
+ * positioned to match the seq order). The hot path is the append case
+ * where seq is greater than the last element; that short-circuits to a
+ * single push. Out-of-order arrivals (rare, gap recovery) fall back to
+ * binary insertion at the correct position, keeping the slot lookup
+ * O(log n) instead of the previous O(n log n) Array.sort.
+ */
+function insertSeqInOrder(
+  list: number[],
+  events: CanonicalRunEvent[],
+  seq: number,
+  canonical: CanonicalRunEvent,
+): { list: number[]; events: CanonicalRunEvent[] } {
+  if (list.length === 0 || list[list.length - 1]! < seq) {
+    return { list: [...list, seq], events: [...events, canonical] };
+  }
+  let lo = 0;
+  let hi = list.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (list[mid]! < seq) lo = mid + 1;
+    else hi = mid;
+  }
+  const nextList = list.slice();
+  const nextEvents = events.slice();
+  nextList.splice(lo, 0, seq);
+  nextEvents.splice(lo, 0, canonical);
+  return { list: nextList, events: nextEvents };
+}
+
+/**
+ * Map a Phase-07 RunInterruptedReason to the matching SdkRunStatus
+ * projection. `user_cancelled` → CANCELLED; everything else → ERROR.
+ * Returning a null leaves the existing status alone — used when the
+ * interrupted reason doesn't map cleanly to one of the SDK terminal
+ * statuses.
+ */
+function statusFromInterruptedReason(reason: string): SdkRunStatus | null {
+  if ((reason as RunInterruptedReason) === "user_cancelled") return "CANCELLED";
+  if (reason === "stream_error") return "ERROR";
+  if (reason === "agent_terminated") return "CANCELLED";
+  if (reason === "server_restart" || reason === "server_close") return "ERROR";
+  return null;
 }
 
 export const useRunStore = create<RunState>((set) => ({
@@ -152,9 +217,11 @@ export const useRunStore = create<RunState>((set) => ({
         ? {
             seqList: prevEvents.seqList,
             bySeq: prevEvents.bySeq,
+            events: prevEvents.events,
             lastSeq: prevEvents.lastSeq,
             assistantText: prevEvents.assistantText,
             thinkingText: prevEvents.thinkingText,
+            toolCallCount: prevEvents.toolCallCount,
           }
         : emptyEventState();
 
@@ -177,17 +244,16 @@ export const useRunStore = create<RunState>((set) => ({
         replayed,
       };
 
-      // Append to seqList preserving order. In practice frames arrive in
-      // order (per-run bus) and we only handle the rare out-of-order case
-      // by binary-inserting; keep it simple by sorting on the rare case.
-      const newSeqList = [...nextEvents.seqList, evt.seq];
-      if (newSeqList.length > 1 && newSeqList[newSeqList.length - 2]! > evt.seq) {
-        newSeqList.sort((a, b) => a - b);
-      }
+      const inserted = insertSeqInOrder(
+        nextEvents.seqList,
+        nextEvents.events,
+        evt.seq,
+        canonical,
+      );
+      nextEvents.seqList = inserted.list;
+      nextEvents.events = inserted.events;
       const newBySeq = new Map(nextEvents.bySeq);
       newBySeq.set(evt.seq, canonical);
-
-      nextEvents.seqList = newSeqList;
       nextEvents.bySeq = newBySeq;
       nextEvents.lastSeq = Math.max(nextEvents.lastSeq, evt.seq);
 
@@ -204,25 +270,43 @@ export const useRunStore = create<RunState>((set) => ({
           frame.event.kind,
           frame.event.payload,
         );
+      } else if (frame.type === "sdk.tool_call") {
+        // Maintain incrementally so renderers don't rescan the seqList.
+        nextEvents.toolCallCount += 1;
       }
 
-      // Run-level projections.
-      const nextById = { ...state.byId };
-      const run = { ...ensureRunRecord(nextById, runId, agentId) };
-      if (frame.type === "sdk.status") {
-        run.status = frame.event.payload.status;
-      } else if (frame.type === "run.final_result") {
-        run.status = "FINISHED";
-        run.finalText = frame.event.payload.text ?? run.finalText;
-        run.durationMs = frame.event.payload.duration_ms ?? run.durationMs;
-        run.finishedAt = evt.occurred_at;
-        run.usage = frame.event.payload.usage ?? null;
-        run.usageSource = frame.event.payload.usage?.usage_source ?? null;
-      } else if (frame.type === "run.interrupted") {
-        run.interruptedReason = frame.event.payload.reason;
-        run.finishedAt = evt.occurred_at;
+      // Run-level projections — only rebuild byId when the frame type
+      // can affect a RunRecord field, so streaming text deltas don't pay
+      // the cost of an unnecessary object spread per event.
+      const projectsRunRecord =
+        frame.type === "sdk.status" ||
+        frame.type === "run.final_result" ||
+        frame.type === "run.interrupted";
+      let nextById = state.byId;
+      if (projectsRunRecord) {
+        nextById = { ...state.byId };
+        const run = { ...ensureRunRecord(nextById, runId, agentId) };
+        if (frame.type === "sdk.status") {
+          run.status = frame.event.payload.status;
+        } else if (frame.type === "run.final_result") {
+          run.status = "FINISHED";
+          run.finalText = frame.event.payload.text ?? run.finalText;
+          run.durationMs = frame.event.payload.duration_ms ?? run.durationMs;
+          run.finishedAt = evt.occurred_at;
+          run.usage = frame.event.payload.usage ?? null;
+          run.usageSource = frame.event.payload.usage?.usage_source ?? null;
+        } else if (frame.type === "run.interrupted") {
+          run.interruptedReason = frame.event.payload.reason;
+          run.finishedAt = evt.occurred_at;
+          // Project a terminal status so consumers don't have to special-case
+          // 'interrupted' in their status filters. If the reason doesn't map
+          // to one of the SDK statuses, keep the existing status (which is
+          // usually the matching `sdk.status` frame that runs adjacent).
+          const projected = statusFromInterruptedReason(frame.event.payload.reason);
+          if (projected) run.status = projected;
+        }
+        nextById[runId] = run;
       }
-      nextById[runId] = run;
 
       return {
         ...state,

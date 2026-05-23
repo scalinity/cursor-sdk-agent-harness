@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import type { AgentSummary, RunSummary } from "@harness/shared";
 import { useRunStore } from "../../state/run-store.js";
 import { CenterHeader } from "./CenterHeader.js";
@@ -22,22 +21,14 @@ export function CenterPane({
   connectionState,
   onSubmit,
 }: CenterPaneProps) {
-  // Read event counts via selector — recomputed only when seqList grows.
-  const seqList = useRunStore((s) =>
-    activeRunId ? s.eventsByRunId[activeRunId]?.seqList ?? null : null,
+  // Counts are maintained incrementally in the store (RV2-S4) so we read
+  // them directly instead of scanning the seqList per render.
+  const eventCount = useRunStore((s) =>
+    activeRunId ? (s.eventsByRunId[activeRunId]?.seqList.length ?? 0) : 0,
   );
-  const eventState = useRunStore((s) =>
-    activeRunId ? s.eventsByRunId[activeRunId] ?? null : null,
+  const toolCallCount = useRunStore((s) =>
+    activeRunId ? (s.eventsByRunId[activeRunId]?.toolCallCount ?? 0) : 0,
   );
-  const { eventCount, toolCallCount } = useMemo(() => {
-    if (!seqList || !eventState) return { eventCount: 0, toolCallCount: 0 };
-    let toolCalls = 0;
-    for (const seq of seqList) {
-      const e = eventState.bySeq.get(seq);
-      if (e && e.sdk_type === "tool_call") toolCalls += 1;
-    }
-    return { eventCount: seqList.length, toolCallCount: toolCalls };
-  }, [seqList, eventState]);
 
   return (
     <main className="center-pane">
