@@ -108,6 +108,16 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   // app.listen unchecked. Hard fail here too.
   assertBindAllowed(env.HOST, env.ALLOW_REMOTE_BIND);
 
+  // Phase 16 — when the server is launched by the Electron main process,
+  // HARNESS_DESKTOP=1 tells us to accept `app://harness` as a second origin
+  // (the prod renderer loads from a custom protocol). Browser-only dev
+  // continues to ship with the single env.WEB_ORIGIN entry.
+  const HARNESS_APP_ORIGIN = "app://harness";
+  const desktopMode = process.env.HARNESS_DESKTOP === "1";
+  const allowedOrigins: string[] = desktopMode
+    ? [env.WEB_ORIGIN, HARNESS_APP_ORIGIN]
+    : [env.WEB_ORIGIN];
+
   const apiKeyStore =
     deps.apiKeyStore ?? new CursorApiKeyStore({ service: env.KEYCHAIN_SERVICE });
   const csrfSecretStore =
@@ -149,9 +159,9 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     );
   });
 
-  await app.register(originPolicyPlugin, { allowedOrigin: env.WEB_ORIGIN });
+  await app.register(originPolicyPlugin, { allowedOrigins });
   await app.register(cors, {
-    origin: [env.WEB_ORIGIN],
+    origin: allowedOrigins,
     credentials: true,
   });
   await app.register(csrfPlugin, {
@@ -197,7 +207,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
 
   await app.register(wsPlugin, {
     csrf: csrfTokenizer,
-    allowedOrigin: env.WEB_ORIGIN,
+    allowedOrigins,
     events: repos.events,
     runs: repos.runs,
     bus: runBus,
@@ -234,6 +244,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     workspaceAllowlist: {
       allowlist: repos.workspaceAllowlist,
       policy: workspacePolicy,
+      settings: repos.settings,
     },
     agents: { runtime: agentRuntime },
     runs: {

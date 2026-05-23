@@ -1,0 +1,27 @@
+{
+  "appId": "com.danny.harness",
+  "productName": "Cursor SDK Agent Harness",
+  "directories": {
+    "buildResources": "build",
+    "output": "dist-electron"
+  },
+  "files": [
+    "dist/**/*",
+    "node_modules/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "../web/dist",
+      "to": "renderer"
+    }
+  ],
+  "mac": {
+    "category": "public.app-category.developer-tools",
+    "target": "dmg",
+    "hardenedRuntime": true,
+    "icon": "build/icon.icns",
+    "entitlements": "build/entitlements.mac.plist",
+    "entitlementsInherit": "build/entitlements.mac.plist"
+  }
+}

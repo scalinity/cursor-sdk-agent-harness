@@ -1,0 +1,130 @@
+import { app, BrowserWindow, type BrowserWindowConstructorOptions } from "electron";
+import { join } from "node:path";
+import { registerDialogHandlers } from "./dialogs";
+import { buildAppMenu } from "./menu";
+import { registerAppProtocol } from "./app-protocol";
+import { loadWindowState, saveWindowState } from "./window-state";
+
+let mainWindow: BrowserWindow | null = null;
+let serverClose: (() => Promise<void>) | null = null;
+
+const isDev = process.env.HARNESS_DEV === "1";
+const DEV_URL = process.env.HARNESS_DEV_URL ?? "http://127.0.0.1:5173";
+
+async function startEmbeddedServer(): Promise<void> {
+  // Resolved at runtime so the desktop tsconfig doesn't need to typecheck
+  // the entire server tree. `@harness/server` is a workspace dep; in dev
+  // we point at the TS source through tsx, in prod we ship the compiled JS.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const mod = require("@harness/server/dist/programmatic.js") as {
+    startServer: (
+      opts?: { envOverrides?: NodeJS.ProcessEnv },
+    ) => Promise<{ close: () => Promise<void> }>;
+  };
+  const started = await mod.startServer({
+    envOverrides: { HARNESS_DESKTOP: "1" },
+  });
+  serverClose = started.close;
+}
+
+async function startEmbeddedServerSafe(): Promise<void> {
+  try {
+    await startEmbeddedServer();
+  } catch (err: unknown) {
+    console.error("[harness-desktop] failed to start embedded server:", err);
+  }
+}
+
+function createWindow(): void {
+  const state = loadWindowState();
+  const opts: BrowserWindowConstructorOptions = {
+    width: state.width,
+    height: state.height,
+    minWidth: 1280,
+    minHeight: 800,
+    titleBarStyle: "hiddenInset",
+    backgroundColor: "#1a1612",
+    show: false,
+    webPreferences: {
+      preload: join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  };
+  if (state.x !== undefined) opts.x = state.x;
+  if (state.y !== undefined) opts.y = state.y;
+  mainWindow = new BrowserWindow(opts);
+
+  mainWindow.once("ready-to-show", () => {
+    mainWindow?.show();
+    if (state.maximized) mainWindow?.maximize();
+  });
+
+  const persistState = (): void => {
+    if (!mainWindow) return;
+    const b = mainWindow.getBounds();
+    saveWindowState({
+      x: b.x,
+      y: b.y,
+      width: b.width,
+      height: b.height,
+      maximized: mainWindow.isMaximized(),
+    });
+  };
+  mainWindow.on("resize", persistState);
+  mainWindow.on("move", persistState);
+  mainWindow.on("maximize", persistState);
+  mainWindow.on("unmaximize", persistState);
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+
+  if (isDev) {
+    void mainWindow.loadURL(DEV_URL);
+  } else {
+    void mainWindow.loadURL("app://harness/index.html");
+  }
+}
+
+async function onReady(): Promise<void> {
+  const rendererRoot = isDev
+    ? join(__dirname, "..", "..", "web", "dist")
+    : join((process as NodeJS.Process & { resourcesPath: string }).resourcesPath, "renderer");
+  registerAppProtocol(rendererRoot);
+  registerDialogHandlers();
+
+  await startEmbeddedServerSafe();
+
+  createWindow();
+  buildAppMenu(() => mainWindow);
+}
+
+app.whenReady().then(onReady).catch((err: unknown) => {
+  console.error("[harness-desktop] app.whenReady failed:", err);
+});
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
+});
+
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+});
+
+app.on("before-quit", (event: Electron.Event) => {
+  if (serverClose) {
+    event.preventDefault();
+    const close = serverClose;
+    serverClose = null;
+    void (async () => {
+      try {
+        await close();
+      } catch (err: unknown) {
+        console.error("[harness-desktop] server close failed:", err);
+      }
+      app.quit();
+    })();
+  }
+});

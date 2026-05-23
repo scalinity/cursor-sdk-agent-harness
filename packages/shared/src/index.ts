@@ -208,6 +208,8 @@ export {
   validateWorkspacePathResponseSchema,
   transcriptResponseSchema,
   pricingFreshnessSchema,
+  activeWorkspaceResponseSchema,
+  setActiveWorkspaceRequestSchema,
 } from "./rest-contracts.js";
 export type {
   AgentDetailResponse,
@@ -244,6 +246,8 @@ export type {
   UsageBreakdownRow,
   UsageDailyPoint,
   UsageSummary,
+  ActiveWorkspaceResponse,
+  SetActiveWorkspaceRequest,
 } from "./rest-contracts.js";
 
 export {

@@ -1,0 +1,25 @@
+{
+  "name": "@harness/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "electron dist/main.js",
+    "dev": "node ./scripts/start-electron.mjs",
+    "package:mac": "electron-builder --mac",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@harness/server": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.5",
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8",
+    "typescript": "5.7.3",
+    "vitest": "3.2.4"
+  }
+}

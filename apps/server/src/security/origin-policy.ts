@@ -11,10 +11,15 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 export interface OriginPolicyOptions {
   /**
-   * The single allowed origin (e.g. `http://127.0.0.1:5173`). Wildcards are
-   * never permitted. Additional origins should be added explicitly via env.
+   * Allowed origins. Phase 05 ships exactly one (the dev Vite origin); Phase 16
+   * adds a second when running inside Electron so the renderer can load via
+   * `app://harness/...`. Wildcards are never permitted.
+   *
+   * Back-compat: `allowedOrigin` accepts a single string. New callers should
+   * use `allowedOrigins`.
    */
-  allowedOrigin: string;
+  allowedOrigin?: string;
+  allowedOrigins?: ReadonlyArray<string>;
 }
 
 function isLoopbackIp(ip: string | undefined | null): boolean {
@@ -28,7 +33,12 @@ const originPluginImpl: FastifyPluginAsync<OriginPolicyOptions> = async (
   app: FastifyInstance,
   opts: OriginPolicyOptions,
 ) => {
-  const { allowedOrigin } = opts;
+  const list = new Set<string>();
+  if (opts.allowedOrigin) list.add(opts.allowedOrigin);
+  for (const o of opts.allowedOrigins ?? []) list.add(o);
+  if (list.size === 0) {
+    throw new Error("origin policy requires at least one allowed origin");
+  }
 
   app.addHook(
     "onRequest",
@@ -42,7 +52,7 @@ const originPluginImpl: FastifyPluginAsync<OriginPolicyOptions> = async (
         }
         return;
       }
-      if (origin !== allowedOrigin) {
+      if (!list.has(origin)) {
         reply.code(403).send({ code: "ORIGIN_FORBIDDEN" });
       }
     },

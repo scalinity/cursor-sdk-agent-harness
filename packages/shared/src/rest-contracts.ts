@@ -18,6 +18,7 @@ import {
   subagentModelOverrideSchema,
   tokenUsageSchema,
 } from "./sdk-surface.js";
+import { workspaceAllowlistRowSchema } from "./domain.js";
 
 // REST request/response contracts. Each route block below is paired with the
 // spec §4 REST endpoint list. Routes that have not yet been implemented are
@@ -556,6 +557,23 @@ export const validateWorkspacePathResponseSchema = z.discriminatedUnion("allowed
     reason: z.enum(["not_allowlisted", "missing", "symlink_escape"]),
   }),
 ]);
+
+// Phase 16 — active workspace.
+// The active workspace id is persisted in `settings` under
+// the key `app.activeWorkspaceId` so it survives across launches.
+// It must reference an existing `workspace_allowlist.id` (verified
+// at write time; FK is best-effort because the settings table
+// stores arbitrary JSON values).
+export const activeWorkspaceResponseSchema = z.object({
+  activeWorkspaceId: z.string().nullable(),
+  workspace: workspaceAllowlistRowSchema.nullable(),
+});
+export type ActiveWorkspaceResponse = z.infer<typeof activeWorkspaceResponseSchema>;
+
+export const setActiveWorkspaceRequestSchema = z.object({
+  id: z.string().nullable(),
+});
+export type SetActiveWorkspaceRequest = z.infer<typeof setActiveWorkspaceRequestSchema>;
 
 // CSRF bootstrap — Phase 05.
 export const csrfTokenResponseSchema = z.object({

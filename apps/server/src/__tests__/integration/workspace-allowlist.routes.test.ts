@@ -164,4 +164,88 @@ describe("workspace-allowlist routes", () => {
     expect(res.statusCode).toBe(422);
     expect(res.json()).toMatchObject({ code: "PATH_MISSING" });
   });
+
+  it("active workspace: GET defaults to null, PUT sets, PUT null clears", async () => {
+    h = await build();
+
+    // Initially unset.
+    const empty = await h.app.inject({
+      method: "GET",
+      url: "/api/workspace-allowlist/active",
+      headers: { origin: "http://127.0.0.1:5173" },
+    });
+    expect(empty.statusCode).toBe(200);
+    expect(empty.json()).toMatchObject({
+      activeWorkspaceId: null,
+      workspace: null,
+    });
+
+    // Create an allowlist entry, then promote it to active.
+    const dir = path.join(h.tmpRoot, "active-proj");
+    await fs.mkdir(dir);
+    const created = await h.app.inject({
+      method: "POST",
+      url: "/api/workspace-allowlist",
+      payload: { path: dir, recursive: true },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": h.csrfToken,
+        "content-type": "application/json",
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const { id } = created.json() as { id: string };
+
+    const setActive = await h.app.inject({
+      method: "PUT",
+      url: "/api/workspace-allowlist/active",
+      payload: { id },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": h.csrfToken,
+        "content-type": "application/json",
+      },
+    });
+    expect(setActive.statusCode).toBe(200);
+    const setBody = setActive.json() as { activeWorkspaceId: string };
+    expect(setBody.activeWorkspaceId).toBe(id);
+
+    const readBack = await h.app.inject({
+      method: "GET",
+      url: "/api/workspace-allowlist/active",
+      headers: { origin: "http://127.0.0.1:5173" },
+    });
+    expect(readBack.statusCode).toBe(200);
+    expect((readBack.json() as { activeWorkspaceId: string }).activeWorkspaceId).toBe(id);
+
+    // Clear by sending null.
+    const clear = await h.app.inject({
+      method: "PUT",
+      url: "/api/workspace-allowlist/active",
+      payload: { id: null },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": h.csrfToken,
+        "content-type": "application/json",
+      },
+    });
+    expect(clear.statusCode).toBe(200);
+    expect(clear.json()).toMatchObject({ activeWorkspaceId: null });
+  });
+
+  it("active workspace: PUT with unknown id returns 404", async () => {
+    h = await build();
+    const res = await h.app.inject({
+      method: "PUT",
+      url: "/api/workspace-allowlist/active",
+      payload: { id: "does-not-exist" },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": h.csrfToken,
+        "content-type": "application/json",
+      },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toMatchObject({ code: "NOT_FOUND" });
+  });
 });

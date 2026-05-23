@@ -84,7 +84,14 @@ const DEDUPE_MAX_ENTRIES = 4_096;
 
 export interface WsPluginOptions {
   csrf: CsrfTokenizer;
-  allowedOrigin: string;
+  /**
+   * Single allowed origin (Phase 05). Kept for back-compat; new callers
+   * should populate `allowedOrigins` to accept both the dev Vite origin
+   * and the Electron `app://harness` origin.
+   */
+  allowedOrigin?: string;
+  /** Multi-origin form (Phase 16). At least one must be provided. */
+  allowedOrigins?: ReadonlyArray<string>;
   events: EventsRepo;
   runs: RunsRepo;
   bus: RunBus;
@@ -250,7 +257,10 @@ function validateUpgrade(
   opts: WsPluginOptions,
 ): { code: WsErrorCode; message: string } | null {
   const origin = req.headers.origin;
-  if (!origin || origin !== opts.allowedOrigin) {
+  const allowed = new Set<string>();
+  if (opts.allowedOrigin) allowed.add(opts.allowedOrigin);
+  for (const o of opts.allowedOrigins ?? []) allowed.add(o);
+  if (!origin || !allowed.has(origin)) {
     return { code: "UNAUTHORIZED_ORIGIN", message: "Origin not allowed" };
   }
   const query = req.query as { csrf?: string } | undefined;

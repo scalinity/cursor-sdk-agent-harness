@@ -1,16 +1,22 @@
 import {
+  activeWorkspaceResponseSchema,
   createWorkspaceAllowlistRequestSchema,
+  setActiveWorkspaceRequestSchema,
   validateWorkspacePathRequestSchema,
   workspaceAllowlistRowSchema,
 } from "@harness/shared";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
+import type { SettingsRepo } from "../db/repositories/settings.repo.js";
 import type { WorkspaceAllowlistRepo } from "../db/repositories/workspace-allowlist.repo.js";
 import type { WorkspacePolicy } from "../security/workspace-policy.js";
+
+export const ACTIVE_WORKSPACE_SETTING_KEY = "app.activeWorkspaceId";
 
 export interface WorkspaceAllowlistRoutesDeps {
   allowlist: WorkspaceAllowlistRepo;
   policy: WorkspacePolicy;
+  settings: SettingsRepo;
 }
 
 const deleteQuerySchema = z.object({
@@ -30,6 +36,11 @@ function send422(reply: FastifyReply, error: z.ZodError) {
   });
 }
 
+function readActiveWorkspaceId(settings: SettingsRepo): string | null {
+  const raw = settings.get<string | null>(ACTIVE_WORKSPACE_SETTING_KEY);
+  return typeof raw === "string" && raw.length > 0 ? raw : null;
+}
+
 export async function registerWorkspaceAllowlistRoutes(
   app: FastifyInstance,
   deps: WorkspaceAllowlistRoutesDeps,
@@ -37,6 +48,55 @@ export async function registerWorkspaceAllowlistRoutes(
   app.get("/api/workspace-allowlist", async () => ({
     items: deps.allowlist.list().map((r) => workspaceAllowlistRowSchema.parse(r)),
   }));
+
+  // Phase 16 — active workspace endpoints. Placed BEFORE the dynamic
+  // `/:entryId` route so Fastify's matcher doesn't mistake `/active`
+  // for an entry id.
+  app.get("/api/workspace-allowlist/active", async () => {
+    const id = readActiveWorkspaceId(deps.settings);
+    if (!id) {
+      return activeWorkspaceResponseSchema.parse({
+        activeWorkspaceId: null,
+        workspace: null,
+      });
+    }
+    const entry = deps.allowlist.getById(id);
+    if (!entry) {
+      // Stale id (e.g. the allowlist row was deleted). Clear it and
+      // surface null so the renderer prompts the user to pick again.
+      deps.settings.set(ACTIVE_WORKSPACE_SETTING_KEY, null);
+      return activeWorkspaceResponseSchema.parse({
+        activeWorkspaceId: null,
+        workspace: null,
+      });
+    }
+    return activeWorkspaceResponseSchema.parse({
+      activeWorkspaceId: id,
+      workspace: workspaceAllowlistRowSchema.parse(entry),
+    });
+  });
+
+  app.put("/api/workspace-allowlist/active", async (req, reply) => {
+    const parsed = setActiveWorkspaceRequestSchema.safeParse(req.body);
+    if (!parsed.success) return send422(reply, parsed.error);
+    if (parsed.data.id === null) {
+      deps.settings.set(ACTIVE_WORKSPACE_SETTING_KEY, null);
+      return activeWorkspaceResponseSchema.parse({
+        activeWorkspaceId: null,
+        workspace: null,
+      });
+    }
+    const entry = deps.allowlist.getById(parsed.data.id);
+    if (!entry) {
+      return reply.code(404).send({ code: "NOT_FOUND" });
+    }
+    deps.settings.set(ACTIVE_WORKSPACE_SETTING_KEY, parsed.data.id);
+    deps.allowlist.markUsed(parsed.data.id);
+    return activeWorkspaceResponseSchema.parse({
+      activeWorkspaceId: parsed.data.id,
+      workspace: workspaceAllowlistRowSchema.parse(entry),
+    });
+  });
 
   app.post("/api/workspace-allowlist", async (req, reply) => {
     const parsed = createWorkspaceAllowlistRequestSchema.safeParse(req.body);
