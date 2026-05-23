@@ -137,27 +137,23 @@ export function EventTimeline({ runId, onApprovalResolve }: EventTimelineProps) 
           );
         }
         if (evt.sdk_type === "request" && evt.kind === "request.created") {
-          // Phase 13 — render the inline ApprovalPrompt for each
-          // `request.created` event. `approval.resolved`/`.failed`
-          // outcomes update `approvalsByRequestId` via the run-store;
-          // we look up the state by request_id rather than scanning
-          // the event list per render.
+          // RV2-W6: render the inline ApprovalPrompt directly from
+          // `approvalsByRequestId`. The store projects this map from
+          // both `request.created` and `approval.resolved`/`.failed`
+          // frames, so a request whose `request.created` row was
+          // pruned by retention still has its outcome visible here.
+          // The `request_seq` in the store always points to the
+          // earliest seq we observed (request if seen, outcome
+          // otherwise), so the prompt anchors at the right place
+          // even in the degraded case.
           const payload = evt.payload as { request_id?: unknown } | null;
           const reqId =
             payload && typeof payload === "object" && typeof payload.request_id === "string"
               ? payload.request_id
               : null;
           if (!reqId) return null;
-          const approval = approvalsMap?.[reqId] ?? {
-            requestId: reqId,
-            requestSeq: evt.seq,
-            status: "pending" as const,
-            decision: null,
-            reason: null,
-            resolvedAt: null,
-            code: null,
-            message: null,
-          };
+          const approval = approvalsMap?.[reqId];
+          if (!approval) return null;
           return (
             <StreamingSurfaceBoundary key={evt.event_id} surface="approval-prompt">
               <ApprovalPrompt
@@ -170,14 +166,44 @@ export function EventTimeline({ runId, onApprovalResolve }: EventTimelineProps) 
             </StreamingSurfaceBoundary>
           );
         }
-        // Hide approval.resolved / approval.failed lines — the inline
-        // ApprovalPrompt above already reflects their effect via the
-        // store projection.
+        // RV2-W6: an outcome whose `request.created` was pruned still
+        // gets rendered — anchor the prompt at the outcome's seq via
+        // requestSeq (which the store sets to the originating seq if
+        // seen, else the outcome's). Skip when the request row IS
+        // present (the branch above already rendered it).
         if (
           evt.sdk_type === "request" &&
           (evt.kind === "approval.resolved" || evt.kind === "approval.failed")
         ) {
-          return null;
+          const payload = evt.payload as { request_id?: unknown } | null;
+          const reqId =
+            payload && typeof payload === "object" && typeof payload.request_id === "string"
+              ? payload.request_id
+              : null;
+          if (!reqId) return null;
+          const approval = approvalsMap?.[reqId];
+          if (!approval) return null;
+          // If the originating request event is in the timeline, the
+          // branch above renders this approval; skip here to avoid a
+          // duplicate.
+          const hasRequestEvt = events.some(
+            (e) =>
+              e.sdk_type === "request" &&
+              e.kind === "request.created" &&
+              (e.payload as { request_id?: unknown } | null)?.request_id === reqId,
+          );
+          if (hasRequestEvt) return null;
+          return (
+            <StreamingSurfaceBoundary key={evt.event_id} surface="approval-prompt">
+              <ApprovalPrompt
+                runId={runId}
+                approval={approval}
+                onResolve={(rid, decision, reason) => {
+                  if (onApprovalResolve) onApprovalResolve(rid, decision, reason);
+                }}
+              />
+            </StreamingSurfaceBoundary>
+          );
         }
         return (
           <div key={evt.event_id} className="my-1 text-xs text-text-tertiary">
