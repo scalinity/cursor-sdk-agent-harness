@@ -9,6 +9,13 @@ import { useUiStore } from "../../state/ui-store.js";
 import { CodeEditPreview } from "./CodeEditPreview.js";
 import { JsonInspector } from "./JsonInspector.js";
 import { StreamingSurfaceBoundary } from "./StreamingSurfaceBoundary.js";
+import type { CanonicalRunEvent } from "../../state/run-store.js";
+
+// F-001: stable empty-array reference for the Zustand selector below.
+// `?? []` returns a new array every render and triggers an infinite
+// `useSyncExternalStore` snapshot-mismatch loop. Mirrors the pattern in
+// CodeEditPreviewPanel.tsx.
+const EMPTY_EVENTS: CanonicalRunEvent[] = [];
 
 export interface ToolCallCardProps {
   call: ToolCallProjection;
@@ -95,7 +102,7 @@ export function ToolCallCard({
   longRunning = false,
 }: ToolCallCardProps) {
   const [pinned, setPinned] = useState(false);
-  const events = useRunStore((s) => s.eventsByRunId[runId]?.events ?? []);
+  const events = useRunStore((s) => s.eventsByRunId[runId]?.events ?? EMPTY_EVENTS);
   const selectCodeEditEvent = useUiStore((s) => s.selectCodeEditEvent);
   const codeEditEvent = useMemo(() => findCodeEditEventForCall(events, call.callId), [events, call.callId]);
   const { collapsed, setCollapsed } = useAutoCollapse({ status: call.status, pinned });

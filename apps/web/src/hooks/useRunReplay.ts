@@ -7,6 +7,11 @@ import {
 import { httpRequest } from "../lib/http-client.js";
 import { useRunStore, type CanonicalRunEvent } from "../state/run-store.js";
 
+// F-001: stable empty-array reference for the Zustand selector below.
+// `?? []` returns a new array every render, which Zustand sees as a
+// snapshot change → infinite `useSyncExternalStore` re-render loop.
+const EMPTY_EVENTS: CanonicalRunEvent[] = [];
+
 export type RunReplayInput = {
   runId: string;
   speed: ReplaySpeed;
@@ -73,7 +78,7 @@ export function useRunReplay(input: RunReplayInput): RunReplayState {
   const [error, setError] = useState<string | null>(null);
   const resetRun = useRunStore((s) => s.resetRun);
   const ingestServerFrame = useRunStore((s) => s.ingestServerFrame);
-  const visibleEvents = useRunStore((s) => s.eventsByRunId[input.runId]?.events ?? []);
+  const visibleEvents = useRunStore((s) => s.eventsByRunId[input.runId]?.events ?? EMPTY_EVENTS);
 
   useEffect(() => {
     const controller = new AbortController();
