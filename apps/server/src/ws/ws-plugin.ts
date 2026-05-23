@@ -53,6 +53,16 @@ const REPLAY_PAGE_SIZE = 200;
  */
 const MAX_LIVE_BACKLOG = 1_000;
 
+/**
+ * Per-connection client frame dedupe window. Spec §4 ("Deduplicate
+ * client commands by `id` for 10 minutes per connection.") A
+ * size-only Set would roll the window in seconds under burst load
+ * (e.g. rapid subscribe/unsubscribe cycles during reconnect), so we
+ * track insertion timestamps and evict by both age and size.
+ */
+const DEDUPE_TTL_MS = 10 * 60 * 1_000;
+const DEDUPE_MAX_ENTRIES = 4_096;
+
 export interface WsPluginOptions {
   csrf: CsrfTokenizer;
   allowedOrigin: string;
@@ -92,8 +102,12 @@ interface ConnectionState {
   lastPongAt: number;
   /** Heartbeat interval timer; cleared on close. */
   heartbeatTimer: NodeJS.Timeout;
-  /** Dedupe queue for inbound client frame IDs (spec §4 "Backend rules"). */
-  recentFrameIds: Set<string>;
+  /**
+   * Dedupe map for inbound client frame IDs (spec §4 "Backend
+   * rules"). Map<id, insertedAtMs> — evicted by both age
+   * (DEDUPE_TTL_MS) and size (DEDUPE_MAX_ENTRIES).
+   */
+  recentFrameIds: Map<string, number>;
   closed: boolean;
 }
 
@@ -194,7 +208,7 @@ function createConnection(
     heartbeatTimer: setInterval(() => {
       runHeartbeatTick(state, missedMs);
     }, pingMs),
-    recentFrameIds: new Set(),
+    recentFrameIds: new Map(),
     closed: false,
   };
   // First heartbeat is deferred to the next tick so the client has time to
@@ -276,22 +290,19 @@ function handleClientFrame(
   }
   const frame = parsed.data;
   // Spec §4: "Deduplicate client commands by `id` for 10 minutes per
-  // connection." 10-minute pruning is approximated by a per-connection set
-  // that we cap; heartbeat_ack is exempt because the same id never repeats.
-  if (frame.type !== "heartbeat_ack" && state.recentFrameIds.has(frame.id)) {
-    sendFrame(
-      state,
-      ackFrame(frame.id, { message: "duplicate frame id; idempotent reply" }),
-    );
-    return;
-  }
+  // connection." Tracks insertion timestamps so we can evict by age
+  // AND size; a size-only Set would collapse the window under burst.
+  // heartbeat_ack is exempt because the same id never repeats.
   if (frame.type !== "heartbeat_ack") {
-    state.recentFrameIds.add(frame.id);
-    if (state.recentFrameIds.size > 1024) {
-      // Naive eviction — toss the oldest insertion to bound memory.
-      const first = state.recentFrameIds.values().next().value;
-      if (first !== undefined) state.recentFrameIds.delete(first);
+    pruneRecentFrameIds(state);
+    if (state.recentFrameIds.has(frame.id)) {
+      sendFrame(
+        state,
+        ackFrame(frame.id, { message: "duplicate frame id; idempotent reply" }),
+      );
+      return;
     }
+    state.recentFrameIds.set(frame.id, Date.now());
   }
 
   switch (frame.type) {
@@ -624,6 +635,26 @@ function sendOrSwallow(socket: WebSocket, frame: ServerFrame): void {
     socket.send(JSON.stringify(frame));
   } catch {
     // Best-effort — a failed send during shutdown is benign.
+  }
+}
+
+/**
+ * Amortized eviction for the dedupe map. Called once per inbound
+ * frame; drops entries older than DEDUPE_TTL_MS first, then trims to
+ * DEDUPE_MAX_ENTRIES if still over capacity. Map preserves insertion
+ * order, so the first key is always the oldest.
+ */
+function pruneRecentFrameIds(state: ConnectionState): void {
+  const now = Date.now();
+  const cutoff = now - DEDUPE_TTL_MS;
+  for (const [id, insertedAt] of state.recentFrameIds) {
+    if (insertedAt > cutoff) break; // ordered by insertion → first newer ⇒ all rest newer
+    state.recentFrameIds.delete(id);
+  }
+  while (state.recentFrameIds.size > DEDUPE_MAX_ENTRIES) {
+    const first = state.recentFrameIds.keys().next().value;
+    if (first === undefined) break;
+    state.recentFrameIds.delete(first);
   }
 }
 
