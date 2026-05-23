@@ -1,4 +1,5 @@
 import type { Database as BetterSqlite3Database } from "better-sqlite3";
+import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import type {
   AgentMode,
@@ -674,6 +675,103 @@ export class RunsRepo {
             AND status IN ('CREATING', 'RUNNING')`,
       )
       .run(reason, now, now, id);
+  }
+
+  /**
+   * RV2-C3: append a synthetic `run.interrupted` canonical event AND
+   * flip the run row to ERROR with `interrupted_reason` in a single
+   * better-sqlite3 transaction. Used by `startup-recovery` to close
+   * the prior atomicity gap where the event landed but the status
+   * flip could fail (or vice versa), producing duplicate
+   * `run.interrupted` events on the next boot.
+   *
+   * Returns the newly-allocated seq for the synthetic event so the
+   * caller can log it. The event_id is generated inside the
+   * underlying `appendCanonicalEvent` repository transaction; pass a
+   * specific id via `eventId` to make the operation idempotent under
+   * test reuse.
+   *
+   * Constructed inline (no recursion through `EventsRepo`) because we
+   * need to enclose two writes in the same `db.transaction(...)` and
+   * sharing the prepared statements through a helper would leak the
+   * raw DB handle out of `RunsRepo`.
+   */
+  markInterruptedWithEvent(input: {
+    runId: string;
+    agentId: string;
+    reason: string;
+    message?: string | null;
+    occurredAt: string;
+    receivedAt?: string;
+    eventId?: string;
+  }): { eventId: string; seq: number } {
+    const eventId = input.eventId ?? randomUUID();
+    const receivedAt = input.receivedAt ?? input.occurredAt;
+    const payload = {
+      reason: input.reason,
+      ...(input.message ? { message: input.message } : {}),
+    };
+    const payloadJson = JSON.stringify(payload);
+    const payloadBytes = Buffer.byteLength(payloadJson, "utf8");
+    const insertEvent = this.raw.prepare(
+      `INSERT INTO events (
+          id, run_id, agent_id, seq, sdk_type, kind,
+          call_id, request_id, status,
+          payload_json, raw_json,
+          payload_bytes, raw_bytes,
+          occurred_at, received_at
+        ) VALUES (
+          @id, @run_id, @agent_id, @seq, 'status', 'run.interrupted',
+          NULL, NULL, NULL,
+          @payload_json, NULL,
+          @payload_bytes, 0,
+          @occurred_at, @received_at
+        )`,
+    );
+    const incrementSeq = this.raw.prepare(
+      "UPDATE runs SET last_seq = last_seq + 1, updated_at = ? WHERE id = ? RETURNING last_seq",
+    );
+    const updateStatus = this.raw.prepare(
+      `UPDATE runs
+          SET status = 'ERROR',
+              interrupted_reason = ?,
+              error_json = ?,
+              updated_at = ?,
+              finished_at = COALESCE(finished_at, ?)
+        WHERE id = ?
+          AND status IN ('CREATING', 'RUNNING')`,
+    );
+    const now = isoNow();
+    let allocatedSeq = 0;
+    this.raw.transaction(() => {
+      const seqRow = incrementSeq.get(now, input.runId) as
+        | { last_seq: number }
+        | undefined;
+      if (!seqRow) {
+        throw new Error(
+          `RunsRepo.markInterruptedWithEvent: run not found id=${input.runId}`,
+        );
+      }
+      allocatedSeq = seqRow.last_seq;
+      insertEvent.run({
+        id: eventId,
+        run_id: input.runId,
+        agent_id: input.agentId,
+        seq: allocatedSeq,
+        payload_json: payloadJson,
+        payload_bytes: payloadBytes,
+        occurred_at: input.occurredAt,
+        received_at: receivedAt,
+      });
+      updateStatus.run(
+        input.reason,
+        input.message ? JSON.stringify({ message: input.message }) : null,
+        now,
+        now,
+        input.runId,
+      );
+    })();
+    return { eventId, seq: allocatedSeq };
   }
 
   /**

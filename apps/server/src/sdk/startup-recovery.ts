@@ -28,12 +28,10 @@
  * the SDK kept alive across process death.
  */
 import type { FastifyBaseLogger } from "fastify";
-import type { EventsRepo } from "../db/repositories/events.repo.js";
 import type { RunsRepo } from "../db/repositories/runs.repo.js";
 
 export interface StartupRecoveryDeps {
   runs: RunsRepo;
-  events: EventsRepo;
   logger: FastifyBaseLogger;
 }
 
@@ -52,27 +50,21 @@ export function runStartupRecovery(
   for (const row of nonTerminal) {
     const occurredAt = new Date().toISOString();
     try {
-      // Append the synthetic event FIRST so a concurrent reader that
-      // already saw `status='RUNNING'` doesn't get a status flip without
-      // an accompanying event row to explain it. EventsRepo allocates
-      // the next seq inside its own transaction.
-      deps.events.appendCanonicalEvent({
+      // RV2-C3: append the synthetic `run.interrupted` event AND flip
+      // the status row inside a single transaction. The previous
+      // two-call sequence opened a window where the event landed but
+      // the status flip could fail (SIGKILL, FK error, busy_timeout),
+      // and the next boot would append a *second* run.interrupted for
+      // the same restart because `runs.status` was still RUNNING.
+      // `markInterruptedWithEvent` commits both writes atomically; on
+      // failure neither lands and the next boot retries cleanly.
+      deps.runs.markInterruptedWithEvent({
         runId: row.id,
         agentId: row.agentId,
-        sdkType: "status",
-        kind: "run.interrupted",
-        callId: null,
-        requestId: null,
-        status: null,
-        payload: {
-          reason: "server_restart" as const,
-          message: "Server restarted while this run was in flight.",
-        },
-        raw: null,
+        reason: "server_restart",
+        message: "Server restarted while this run was in flight.",
         occurredAt,
-        receivedAt: occurredAt,
       });
-      deps.runs.setInterrupted(row.id, "server_restart", null);
       recoveredRunIds.push(row.id);
     } catch (err) {
       deps.logger.error(

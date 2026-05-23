@@ -29,7 +29,6 @@ describe("startup-recovery", () => {
 
     const result = runStartupRecovery({
       runs: repos.runs,
-      events: repos.events,
       logger: silentLogger,
     });
 
@@ -77,7 +76,6 @@ describe("startup-recovery", () => {
 
     const result = runStartupRecovery({
       runs: repos.runs,
-      events: repos.events,
       logger: silentLogger,
     });
 
@@ -109,10 +107,9 @@ describe("startup-recovery", () => {
       mode: "local",
     });
 
-    runStartupRecovery({ runs: repos.runs, events: repos.events, logger: silentLogger });
+    runStartupRecovery({ runs: repos.runs, logger: silentLogger });
     const second = runStartupRecovery({
       runs: repos.runs,
-      events: repos.events,
       logger: silentLogger,
     });
 

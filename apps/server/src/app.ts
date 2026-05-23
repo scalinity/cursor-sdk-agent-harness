@@ -198,7 +198,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   // connections so the first replay sees the truncated timeline.
   if (deps.skipStartupRecovery !== true) {
     app.addHook("onReady", async () => {
-      runStartupRecovery({ runs: repos.runs, events: repos.events, logger: app.log });
+      runStartupRecovery({ runs: repos.runs, logger: app.log });
     });
   }
 
