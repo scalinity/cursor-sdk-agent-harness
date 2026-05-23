@@ -1,16 +1,20 @@
+import { z } from "zod";
 import type { CanonicalRunEvent } from "../../state/run-store.js";
 import { cn } from "../../lib/cn.js";
+import { safePayload, safeJsonString } from "../../lib/safe-payload.js";
+
+const toolCallPayloadSchema = z
+  .object({
+    call_id: z.string().optional(),
+    name: z.string().optional(),
+    status: z.enum(["running", "completed", "error"]).optional(),
+    args: z.unknown().optional(),
+    result: z.unknown().optional(),
+  })
+  .nullable();
 
 export interface ToolCallCardProps {
   event: CanonicalRunEvent;
-}
-
-interface ToolCallPayload {
-  call_id?: string;
-  name?: string;
-  status?: "running" | "completed" | "error";
-  args?: unknown;
-  result?: unknown;
 }
 
 /**
@@ -19,7 +23,7 @@ interface ToolCallPayload {
  * groups concurrent calls and adds icons per tool kind.
  */
 export function ToolCallCard({ event }: ToolCallCardProps) {
-  const p = (event.payload as ToolCallPayload | null) ?? {};
+  const p = safePayload(event.payload, toolCallPayloadSchema) ?? {};
   const statusClass =
     p.status === "error"
       ? "text-danger"
@@ -56,12 +60,4 @@ export function ToolCallCard({ event }: ToolCallCardProps) {
       </div>
     </div>
   );
-}
-
-function safeJsonString(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 }

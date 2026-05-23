@@ -1,19 +1,23 @@
+import { z } from "zod";
 import type { CanonicalRunEvent } from "../../state/run-store.js";
+import { safePayload } from "../../lib/safe-payload.js";
+
+const systemPayloadSchema = z
+  .object({
+    model: z.object({ id: z.string().optional() }).optional(),
+    tools: z.array(z.string()).optional(),
+    mode: z.enum(["local", "cloud"]).optional(),
+    cwd: z.array(z.string()).optional(),
+    sandbox_enabled: z.boolean().optional(),
+  })
+  .nullable();
 
 export interface SystemBannerProps {
   event: CanonicalRunEvent;
 }
 
-interface SystemPayload {
-  model?: { id?: string };
-  tools?: string[];
-  mode?: "local" | "cloud";
-  cwd?: string[];
-  sandbox_enabled?: boolean;
-}
-
 export function SystemBanner({ event }: SystemBannerProps) {
-  const p = (event.payload as SystemPayload | null) ?? {};
+  const p = safePayload(event.payload, systemPayloadSchema) ?? {};
   const cwdLine = (p.cwd ?? []).join(", ");
   return (
     <div className="my-2 rounded-md border border-border-subtle bg-surface-1 px-2.5 py-2 text-sm text-text-secondary">

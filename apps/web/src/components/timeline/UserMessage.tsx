@@ -1,4 +1,15 @@
+import { z } from "zod";
 import type { CanonicalRunEvent } from "../../state/run-store.js";
+import { safePayload } from "../../lib/safe-payload.js";
+
+const userPayloadSchema = z
+  .object({
+    role: z.literal("user").optional(),
+    content: z
+      .array(z.object({ type: z.string(), text: z.string().optional() }))
+      .optional(),
+  })
+  .nullable();
 
 export interface UserMessageProps {
   event: CanonicalRunEvent;
@@ -6,9 +17,11 @@ export interface UserMessageProps {
 
 /**
  * Minimal user-message render — Phase 09 expands with avatar/timestamp polish.
+ * Payload is Zod-validated at the renderer boundary (RV2-W18) so a corrupt
+ * row or future SDK shape change degrades to "(empty)" instead of crashing.
  */
 export function UserMessage({ event }: UserMessageProps) {
-  const payload = event.payload as { content?: Array<{ type: string; text?: string }> } | null;
+  const payload = safePayload(event.payload, userPayloadSchema);
   const text =
     payload?.content
       ?.filter((c) => c.type === "text")
