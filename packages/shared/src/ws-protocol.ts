@@ -16,6 +16,16 @@ export const frameBaseSchema = z.object({
   id: frameIdSchema,
   type: z.string(),
   sent_at: isoDateTimeSchema,
+  /**
+   * Set to `true` for server-emitted event frames that represent
+   * historical replay (i.e. events fetched out of SQLite during
+   * `subscribe_run` with `after_seq > 0`). Live frames omit the field
+   * (Zod default keeps it optional). Spec §4 reconnection contract
+   * uses this for client-side autoscroll decisions: the UI should
+   * jump-without-animation through replayed frames and animate live
+   * ones.
+   */
+  replayed: z.boolean().optional(),
 });
 
 // -- Client → Server frames -------------------------------------------------

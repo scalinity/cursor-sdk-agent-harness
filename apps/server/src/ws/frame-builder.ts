@@ -41,13 +41,11 @@ export function buildServerFrame(
   };
   const frameId = randomUUID();
   const sentAt = new Date().toISOString();
-  // `replayed` rides on the envelope as a literal so clients can read it
-  // without inspecting payload internals. It's not part of the spec frame
-  // schema (which has no field for it), so we add it as a sibling of `event`
-  // — the Zod validator at the boundary uses `strip` semantics and will not
-  // reject the extra key.
-  // NOTE: Zod's z.object() is strip by default at this codebase. If a future
-  // refactor flips to `.strict()`, drop this key into the payload instead.
+  // `replayed` is a first-class envelope field on `frameBaseSchema` (so
+  // every server frame variant inherits it via `.extend()`). Clients can
+  // read it without inspecting payload internals to decide autoscroll
+  // behaviour. We only emit the key when true so live frames stay terse
+  // on the wire.
   const replayedFlag = opts.replayed === true ? { replayed: true } : {};
 
   switch (row.kind) {
