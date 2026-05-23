@@ -690,20 +690,42 @@ async function handleApprovalResponse(
   };
   try {
     await opts.approvalResponder.resolve(input);
-    opts.pipeline.appendCanonicalEvent({
-      runId: frame.run_id,
-      agentId,
-      sdkType: "request",
-      kind: "approval.resolved",
-      requestId: frame.request_id,
-      payload: {
-        request_id: frame.request_id,
-        decision: frame.decision,
-        ...(frame.reason !== undefined ? { reason: frame.reason } : {}),
-        resolved_at: new Date().toISOString(),
-      },
-      occurredAt: new Date().toISOString(),
-    });
+    // RV2-C1 + W5: one ISO timestamp per branch shared between
+    // occurredAt and resolved_at so the canonical event is self-
+    // consistent. Persist BEFORE ack — if the insert throws, the
+    // catch below converts it to an INTERNAL_ERROR frame so the
+    // client never sees ack-ok on a failed persist.
+    try {
+      const now = new Date().toISOString();
+      opts.pipeline.appendCanonicalEvent({
+        runId: frame.run_id,
+        agentId,
+        sdkType: "request",
+        kind: "approval.resolved",
+        requestId: frame.request_id,
+        payload: {
+          request_id: frame.request_id,
+          decision: frame.decision,
+          ...(frame.reason !== undefined ? { reason: frame.reason } : {}),
+          resolved_at: now,
+        },
+        occurredAt: now,
+      });
+    } catch (persistErr) {
+      state.log.error(
+        { err: persistErr, runId: frame.run_id, requestId: frame.request_id },
+        "approval.resolved persist failed; refusing to ack client",
+      );
+      sendFrame(
+        state,
+        errorFrame(
+          "INTERNAL_ERROR",
+          "Failed to persist approval outcome",
+          { ack_for: frame.id },
+        ),
+      );
+      return;
+    }
     sendFrame(state, ackFrame(frame.id, { message: "approval.resolved" }));
   } catch (err) {
     const isUnimplemented = err instanceof UnimplementedApprovalError;
@@ -712,26 +734,40 @@ async function handleApprovalResponse(
       err instanceof Error
         ? err.message
         : "Approval responder rejected without a message";
-    opts.pipeline.appendCanonicalEvent({
-      runId: frame.run_id,
-      agentId,
-      sdkType: "request",
-      kind: "approval.failed",
-      requestId: frame.request_id,
-      payload: {
-        request_id: frame.request_id,
-        decision: frame.decision,
-        ...(frame.reason !== undefined ? { reason: frame.reason } : {}),
-        failed_at: new Date().toISOString(),
-        code,
-        message,
-      },
-      occurredAt: new Date().toISOString(),
-    });
-    sendFrame(
-      state,
-      errorFrame(code, message, { ack_for: frame.id }),
-    );
+    try {
+      const now = new Date().toISOString();
+      opts.pipeline.appendCanonicalEvent({
+        runId: frame.run_id,
+        agentId,
+        sdkType: "request",
+        kind: "approval.failed",
+        requestId: frame.request_id,
+        payload: {
+          request_id: frame.request_id,
+          decision: frame.decision,
+          ...(frame.reason !== undefined ? { reason: frame.reason } : {}),
+          failed_at: now,
+          code,
+          message,
+        },
+        occurredAt: now,
+      });
+    } catch (persistErr) {
+      state.log.error(
+        { err: persistErr, runId: frame.run_id, requestId: frame.request_id },
+        "approval.failed persist failed; sending INTERNAL_ERROR instead",
+      );
+      sendFrame(
+        state,
+        errorFrame(
+          "INTERNAL_ERROR",
+          "Failed to persist approval outcome",
+          { ack_for: frame.id },
+        ),
+      );
+      return;
+    }
+    sendFrame(state, errorFrame(code, message, { ack_for: frame.id }));
   }
 }
 

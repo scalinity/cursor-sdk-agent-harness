@@ -290,32 +290,25 @@ export function createPersistAndBroadcast(
     },
 
     appendCanonicalEvent(args): void {
+      // RV2-C1: persist-before-broadcast is the law. Earlier this caught
+      // and logged DB errors silently, which let the WS approval handler
+      // ack-ok the client on a failed persist. The caller now sees
+      // failures and can convert them to an INTERNAL_ERROR frame.
       const occurredAt = args.occurredAt ?? new Date().toISOString();
-      try {
-        const row = deps.events.appendCanonicalEvent({
-          runId: args.runId,
-          agentId: args.agentId,
-          sdkType: args.sdkType,
-          kind: args.kind,
-          callId: args.callId ?? null,
-          requestId: args.requestId ?? null,
-          status: args.status ?? null,
-          payload: args.payload,
-          raw: null,
-          occurredAt,
-          receivedAt: occurredAt,
-        });
-        deps.bus.publish(args.runId, row);
-      } catch (err) {
-        deps.logger.error(
-          { err, runId: args.runId, kind: args.kind },
-          "persist-and-broadcast: synthetic canonical event insert failed",
-        );
-        // Don't throw — the caller (WS plugin's approval handler) has
-        // already validated the request and would have no clean way
-        // to recover from a DB write failure mid-frame. We log and
-        // drop; the client times out the in-flight resolve.
-      }
+      const row = deps.events.appendCanonicalEvent({
+        runId: args.runId,
+        agentId: args.agentId,
+        sdkType: args.sdkType,
+        kind: args.kind,
+        callId: args.callId ?? null,
+        requestId: args.requestId ?? null,
+        status: args.status ?? null,
+        payload: args.payload,
+        raw: null,
+        occurredAt,
+        receivedAt: occurredAt,
+      });
+      deps.bus.publish(args.runId, row);
     },
   };
 }
