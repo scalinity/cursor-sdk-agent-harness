@@ -73,7 +73,6 @@ export function useStreamingMarkdown(input: UseStreamingMarkdownInput): UseStrea
   const lastTextRef = useRef("");
   const fallbackModeRef = useRef(false);
   const generationRef = useRef(0);
-  const rafIdsRef = useRef<number[]>([]);
   const [blocks, setBlocks] = useState<MarkdownBlock[]>([]);
   const [fallbackText, setFallbackText] = useState<string | null>(null);
   const { report } = useErrorReporter(`streaming-markdown-${scope.source}`);
@@ -81,21 +80,23 @@ export function useStreamingMarkdown(input: UseStreamingMarkdownInput): UseStrea
   useEffect(() => {
     generationRef.current += 1;
     const generation = generationRef.current;
-    for (const rafId of rafIdsRef.current) window.cancelAnimationFrame(rafId);
-    rafIdsRef.current = [];
     fallbackModeRef.current = false;
     lastTextRef.current = "";
     projector.reset();
     setBlocks([]);
     setFallbackText(null);
 
-    const scheduleStructuralPublish = (nextBlocks: MarkdownBlock[]): void => {
-      const rafId = window.requestAnimationFrame(() => {
-        rafIdsRef.current = rafIdsRef.current.filter((id) => id !== rafId);
-        if (generationRef.current !== generation) return;
-        for (const block of nextBlocks) publishBlockText(scope, block);
-      });
-      rafIdsRef.current.push(rafId);
+    const publishStructural = (nextBlocks: MarkdownBlock[]): void => {
+      // F-006: was a RAF-deferred publish. The RAF callback closed over
+      // a stale `nextBlocks` snapshot; if a non-structural applyText ran
+      // before the RAF fired, the deferred publish would overwrite the
+      // channel buffer with the older text and the late StreamingText
+      // subscriber would see e.g. "STREAM" instead of "STREAMING WORKS".
+      // Publishing synchronously preserves write order without breaking
+      // the React commit (publishStreamingText is cheap — sets a Map
+      // entry and notifies any current listeners).
+      if (generationRef.current !== generation) return;
+      for (const block of nextBlocks) publishBlockText(scope, block);
     };
 
     const applyText = (nextText: string): void => {
@@ -133,7 +134,7 @@ export function useStreamingMarkdown(input: UseStreamingMarkdownInput): UseStrea
         const nextBlocks = projector.getBlocks();
         if (result.structural) {
           setBlocks(nextBlocks);
-          scheduleStructuralPublish(nextBlocks);
+          publishStructural(nextBlocks);
         } else {
           if (includesCodeBlock(nextBlocks, result.textBlockIds)) setBlocks(nextBlocks);
           publishTextByIds(scope, nextBlocks, result.textBlockIds);
@@ -158,8 +159,6 @@ export function useStreamingMarkdown(input: UseStreamingMarkdownInput): UseStrea
     return () => {
       unsubscribe();
       generationRef.current += 1;
-      for (const rafId of rafIdsRef.current) window.cancelAnimationFrame(rafId);
-      rafIdsRef.current = [];
     };
   }, [projector, report, scope]);
 
