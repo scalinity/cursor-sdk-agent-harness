@@ -22,6 +22,35 @@ each phase. Use it as the single source of truth for "what is decided" vs
 | 12 | MCP, Subagents, and Advanced Agent Creation | ✅ complete | MCP CRUD with stdio + http probes, redacted-on-list + reveal endpoint; Subagent CRUD with referential integrity + nullable model (inherit); NewAgentDialog with five tabs, multi-cwd allowlist quick-add, CloudOptions JSON editor. |
 | 13 | Approval, Cancellation, and Resilience | ✅ complete | ApprovalResponder seam with OQ-10 probe (throws `UnimplementedApprovalError` against `@cursor/sdk@1.0.13`); approval canonical events (`approval.resolved`, `approval.failed`) with `APPROVAL_UNIMPLEMENTED` banner; cancel button in titlebar + ⌘.; `CANCEL_UNAVAILABLE` banner; startup recovery finalizes RUNNING runs with `run.interrupted` reason `server_restart`; `useRunHealth` per-tool stall warnings and run stalled banner. |
 | 14 | Performance, Polish, and Hardening | ✅ complete | Ring-buffer perf counters (server + client) wired through persist-and-broadcast + ws-plugin deliverEvent + useWebSocket + run-store; `/api/observability/perf` route; 10k-event stress fixture (10k events in 364ms, commit p95 0.038ms); timeline render bench (10k events in ~15ms cold mount); usage parse fixtures across five named cases; pricing validation + 30-day staleness test; secret redaction audit (closed `config.*.password` / `config.*.key` gap); design QA pass with zero P0 deltas; README; v1.1 release-ready. |
+| 15 | Post-Build Remediation | ✅ complete | Six P0s found and fixed: F-001 Zustand `?? []` infinite render loop (blank screen), F-002 CSRF cold-start race tearing down WS, F-003 `.env` not loaded by dev orchestrator (API key never imported), F-004 harness model IDs (`composer-2-5-fast` / `composer-2-5`) not in `@cursor/sdk@1.0.13` enum, F-005 normalizer treating per-message deltas as snapshot replacements, F-006 streaming-text channel buffer wiped by StrictMode unsubscribe. Live smoke loop verified end-to-end through the UI: create agent → submit prompt → events stream → "SMOKE LOOP COMPLETE" rendered correctly → FINISHED status → run appears in `/runs` history with tokens → `/usage` totals roll up. Full ledger in `docs/POST_BUILD_REVIEW.md`. OQ-06 (assistant delta vs snapshot) now confirmed: per-message deltas. |
+
+---
+
+## Phase 15 Outcomes — Post-Build Remediation
+
+The 14 phases above were marked complete prematurely. A fresh live
+browser pass revealed six independent P0 bugs blocking the core flow.
+All fixed and verified; commits 4393bbd, bd7c131, 63dc82c, 8f6d473,
+3005eb4, b4d9ab4 + 455e9cb (regression tests + ledger).
+
+Key finding worth carrying forward: **OQ-06 is now verified** — the
+Cursor SDK sends assistant/thinking text as per-message deltas, NOT
+as cumulative snapshots. The normalizer's prefix-match path is
+retained as a defensive cumulative-snapshot fallback, but the actual
+SDK behavior is always-append. Future contract changes should update
+`SDK_VERIFICATION_LEDGER.md` OQ-06 status from "partial" to "verified".
+
+Two known limitations carry forward (logged in
+`docs/POST_BUILD_REVIEW.md` "Out of scope"):
+
+1. The harness's `composer-2-5-fast` / `composer-2-5` schema is a
+   pricing-only distinction that doesn't exist in the SDK. F-004
+   translates at the boundary; collapse the schema later when the
+   pricing model is reconsidered.
+2. `sandboxEnabledByDefault: true` in seeded settings makes a fresh
+   smoke run fail with the SDK's honest "Local SDK sandboxing was
+   requested but not supported" message unless `~/.cursor/sandbox.json`
+   exists. Document the requirement or change the default.
 
 ---
 

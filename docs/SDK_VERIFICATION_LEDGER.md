@@ -188,7 +188,16 @@ Phase 01 output — resolves every Open Question from `spec-v1.1.md` Section 14 
 
 ## OQ-06: Are `assistant` and `thinking` stream payloads deltas or snapshots?
 
-- **Status**: partial
+- **Status**: verified — per-message deltas
+- **Verified by**: Phase 15 live smoke against `@cursor/sdk@1.0.13`
+  (F-005). A two-character prompt "Reply HELLO" produced two raw
+  `assistant` messages: `{content: [{text: "HEL"}]}` then
+  `{content: [{text: "LO"}]}`. The harness's prefix-match path treated
+  the second as a snapshot replacement and rendered "LO" instead of
+  "HELLO". The normalizer now appends on the non-prefix branch
+  (`apps/server/src/sdk/normalizer.ts`, F-005 commit 3005eb4) and
+  matches the SDK's actual contract.
+- **Legacy partial answer (kept for historical context)**:
 - **Answer**: Two parallel streams exist, with different semantics:
   1. `run.stream()` yields `SDKMessage` events. `SDKAssistantMessage.message
      .content` is an array of `TextBlock | ToolUseBlock`. The presence of
