@@ -86,32 +86,25 @@ export function buildApprovalResponder(deps: ApprovalResponderDeps): ApprovalRes
           "Run handle not yet available (start() has not resolved).",
         );
       }
+      // RV2-W2: detect-only. We do NOT speculatively invoke probed
+      // methods. The SDK's argument signature is unknown — calling
+      // `respond("req-1", "deny", { reason: "x" })` against a future
+      // method whose signature is `respond(opts)` would silently
+      // pass `"req-1"` as the entire options bag and could approve a
+      // deny (or worse). Spec rule "never fake resolution" is better
+      // served by an explicit throw than a speculative call. When
+      // OQ-10 resolves positively, pin the verified signature in the
+      // ledger and call the method here behind a feature flag.
       for (const name of PROBE_METHODS) {
         const candidate = (run as unknown as Record<string, unknown>)[name];
         if (typeof candidate === "function") {
-          // Probe success — call with a plausible argument shape. We
-          // don't know the SDK's signature; cover the two most common
-          // shapes a future SDK release might use.
-          deps.logger.warn(
+          deps.logger.error(
             { method: name, runId: input.runId, requestId: input.requestId },
-            "approval-responder: probe hit an unverified method on Run; calling it speculatively",
+            "approval-responder: probe found candidate method but the SDK signature is unverified — refusing to invoke speculatively (OQ-10)",
           );
-          try {
-            const fn = candidate.bind(run) as (
-              ...args: unknown[]
-            ) => unknown;
-            const result = await Promise.resolve(
-              fn(input.requestId, input.decision, { reason: input.reason }),
-            );
-            void result;
-            return;
-          } catch (err) {
-            deps.logger.warn(
-              { err, method: name, runId: input.runId },
-              "approval-responder: probed method threw — treating as unimplemented",
-            );
-            // fall through to the unimplemented throw below
-          }
+          throw new UnimplementedApprovalError(
+            `Probe found candidate method '${name}' on Run, but its signature is unverified. Refusing to call speculatively until OQ-10 is resolved positively.`,
+          );
         }
       }
       throw new UnimplementedApprovalError();

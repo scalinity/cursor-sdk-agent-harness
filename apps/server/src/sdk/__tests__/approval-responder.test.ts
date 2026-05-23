@@ -66,8 +66,12 @@ describe("approval-responder", () => {
     ).rejects.toBeInstanceOf(UnimplementedApprovalError);
   });
 
-  it("calls the probed method when one is available (future SDK)", async () => {
-    let received: { id: string; decision: string; reason?: string } | null = null;
+  it("RV2-W2: refuses to speculatively invoke a probed method even when one is available", async () => {
+    // Future SDK that exposes `respond` — but with an unverified
+    // signature. The responder must NOT call it, only detect it and
+    // throw UnimplementedApprovalError. Verifying the signature is a
+    // separate ledger step (OQ-10 positive resolution).
+    let respondCalled = false;
     const fakeRun = {
       supports: () => true,
       stream: () => {
@@ -75,23 +79,49 @@ describe("approval-responder", () => {
       },
       wait: async () => ({ id: "x", status: "finished" as const }),
       cancel: async () => undefined,
-      respond: async (
-        requestId: string,
-        decision: "approve" | "deny",
-        opts: { reason?: string },
-      ) => {
-        received = { id: requestId, decision, ...(opts.reason !== undefined ? { reason: opts.reason } : {}) };
+      respond: async () => {
+        respondCalled = true;
       },
     } as unknown as Run;
     const active = new ActiveRuns();
     active.register(stubController({ runId: "run-1", run: fakeRun }));
     const responder = buildApprovalResponder({ activeRuns: active, logger: silentLogger });
-    await responder.resolve({
-      runId: "run-1",
-      requestId: "req-2",
-      decision: "deny",
-      reason: "no thanks",
-    });
-    expect(received).toEqual({ id: "req-2", decision: "deny", reason: "no thanks" });
+    await expect(
+      responder.resolve({
+        runId: "run-1",
+        requestId: "req-2",
+        decision: "deny",
+        reason: "no thanks",
+      }),
+    ).rejects.toBeInstanceOf(UnimplementedApprovalError);
+    expect(respondCalled).toBe(false);
+  });
+
+  it("RV2-W10: a probed method that would otherwise throw stays handled as unimplemented (locks current behaviour)", async () => {
+    // After RV2-W2 the probe never calls the method, so a throwing
+    // method is equivalent to a present-but-untrusted one. Lock the
+    // contract so a future regression doesn't silently start
+    // speculative invocation.
+    const fakeRun = {
+      supports: () => true,
+      stream: () => {
+        throw new Error("unused");
+      },
+      wait: async () => ({ id: "x", status: "finished" as const }),
+      cancel: async () => undefined,
+      respondToRequest: async () => {
+        throw new Error("network down");
+      },
+    } as unknown as Run;
+    const active = new ActiveRuns();
+    active.register(stubController({ runId: "run-1", run: fakeRun }));
+    const responder = buildApprovalResponder({ activeRuns: active, logger: silentLogger });
+    await expect(
+      responder.resolve({
+        runId: "run-1",
+        requestId: "req-3",
+        decision: "approve",
+      }),
+    ).rejects.toBeInstanceOf(UnimplementedApprovalError);
   });
 });
