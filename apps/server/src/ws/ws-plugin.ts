@@ -40,6 +40,15 @@ const DEFAULT_PING_INTERVAL_MS = 15_000;
 const DEFAULT_MISSED_PONG_TIMEOUT_MS = 45_000;
 
 /**
+ * Bound on the pending-heartbeat-id set. The missed-pong timeout
+ * fires well before we'd reach this cap under normal operation
+ * (interval 15s × 32 = 8 minutes), but the cap is here to defend
+ * against an attacker / buggy client that connects, never acks, and
+ * we never close the socket for some other reason.
+ */
+const MAX_PENDING_HEARTBEATS = 32;
+
+/**
  * Pagination cap on each replay batch read out of SQLite. Large runs replay
  * in multiple batches; the client never sees the boundary because we don't
  * announce ack until we've caught up to `runs.last_seq`.
@@ -95,6 +104,15 @@ interface ConnectionState {
   subscriptions: Map<string, RunSubscription>;
   /** Last pong observed; used by the heartbeat watcher to detect dead peers. */
   lastPongAt: number;
+  /**
+   * The set of heartbeat ids the server has sent but not yet seen
+   * acked. A heartbeat_ack from the client must reference one of
+   * these; un-recognised ids are ignored so a buggy client sending a
+   * stale or guessed id can't masquerade as a live pong. Bounded by
+   * MAX_PENDING_HEARTBEATS so a non-responsive peer doesn't grow the
+   * set indefinitely before the missed-pong timeout fires.
+   */
+  pendingHeartbeatIds: Set<string>;
   /** Heartbeat interval timer; cleared on close. */
   heartbeatTimer: NodeJS.Timeout;
   /**
@@ -200,6 +218,7 @@ function createConnection(
     log,
     subscriptions: new Map(),
     lastPongAt: Date.now(),
+    pendingHeartbeatIds: new Set(),
     heartbeatTimer: setInterval(() => {
       runHeartbeatTick(state, missedMs);
     }, pingMs),
@@ -248,6 +267,17 @@ function runHeartbeatTick(state: ConnectionState, missedPongTimeoutMs: number): 
 
 function sendHeartbeat(state: ConnectionState): void {
   const id = randomUUID();
+  // Record the heartbeat id so the inbound ack handler can verify the
+  // client is acking a heartbeat we actually sent (defensive against
+  // client bugs that fabricate ids). Bounded eviction: if we've
+  // already accumulated MAX_PENDING_HEARTBEATS without acks, evict the
+  // oldest (FIFO via Set insertion order) — the missed-pong timeout
+  // will close the socket regardless.
+  state.pendingHeartbeatIds.add(id);
+  if (state.pendingHeartbeatIds.size > MAX_PENDING_HEARTBEATS) {
+    const oldest = state.pendingHeartbeatIds.values().next().value;
+    if (oldest !== undefined) state.pendingHeartbeatIds.delete(oldest);
+  }
   const frame: ServerFrame = {
     id,
     type: "heartbeat",
@@ -302,7 +332,13 @@ function handleClientFrame(
 
   switch (frame.type) {
     case "heartbeat_ack":
-      state.lastPongAt = Date.now();
+      // Only reset the liveness clock if the ack references a
+      // heartbeat we actually sent. Drops fabricated/replayed ids on
+      // the floor — silently is fine, the heartbeat watcher will
+      // close the socket if the real beats stop arriving.
+      if (state.pendingHeartbeatIds.delete(frame.server_heartbeat_id)) {
+        state.lastPongAt = Date.now();
+      }
       return;
     case "subscribe_run":
       void handleSubscribeRun(state, frame, opts);
