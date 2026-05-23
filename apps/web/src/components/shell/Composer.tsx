@@ -35,6 +35,16 @@ export function Composer({ activeAgent, onSubmit }: ComposerProps) {
   }, [draft, activeAgent, busy, onSubmit, setDraft, report]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Guard against IME composition: during CJK/Korean candidate selection
+    // browsers dispatch a keydown with key="Enter" AND isComposing=true to
+    // commit the candidate; submitting here would burn API budget on the
+    // half-finished prompt. keyCode 229 is the legacy fallback some browsers
+    // still emit during composition.
+    // keyCode 229 is the legacy IME-composition signal on some browsers
+    // (older mobile WebViews) that don't surface isComposing on the React
+    // synthetic event. The TS deprecation hint is informational — the
+    // property still works for this exact compatibility case.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void submit();
