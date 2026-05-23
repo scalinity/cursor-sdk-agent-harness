@@ -21,10 +21,11 @@ import { SessionsRail } from "../components/shell/SessionsRail.js";
 import { CenterPane } from "../components/shell/CenterPane.js";
 import { RightPane } from "../components/shell/RightPane.js";
 import { Statusbar } from "../components/shell/Statusbar.js";
+import { BootstrapBanner } from "../components/shell/BootstrapBanner.js";
 import { cn } from "../lib/cn.js";
 
 export function AppShell() {
-  useCsrfToken(); // bootstrap CSRF into ui-store.
+  const csrf = useCsrfToken(); // bootstrap CSRF into ui-store.
   useSettings(); // hydrate settings on mount.
   const { activeAgent } = useAgents();
   const { runs } = useRunHistory();
@@ -93,8 +94,21 @@ export function AppShell() {
     [runs, activeRunId],
   );
 
+  // Bootstrap failure banner: shown when the CSRF fetch errored AND we have
+  // no token. Mutating REST calls and the WS upgrade both require a token,
+  // so the shell is functionally unusable in this state — surface a banner
+  // with a manual retry instead of leaving the user looking at an empty UI.
+  const showBootstrapBanner = csrf.error !== null && csrf.token === null;
+
   return (
     <div className={cn("app-grid", codeHidden && "app-grid--code-hidden")}>
+      {showBootstrapBanner ? (
+        <BootstrapBanner
+          error={csrf.error ?? "CSRF bootstrap failed"}
+          loading={csrf.loading}
+          onRetry={() => void csrf.refresh()}
+        />
+      ) : null}
       <Titlebar />
       <SessionsRail runs={runs} activeRunId={activeRunId} onSelectRun={setActiveRunId} />
       <CenterPane

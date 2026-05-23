@@ -19,10 +19,11 @@ import {
   type ClientFrame,
   type ServerFrame,
 } from "@harness/shared";
-import { httpRequest } from "../lib/http-client.js";
+import { mutatingRequest } from "../lib/http-client.js";
 import { useRunStore } from "../state/run-store.js";
 import { useUiStore, type ConnectionState } from "../state/ui-store.js";
 import { useWebSocket } from "./useWebSocket.js";
+import { useCsrfToken } from "./useCsrfToken.js";
 
 const WS_URL = "/ws";
 
@@ -45,6 +46,7 @@ function makeFrameId(prefix: string): string {
 }
 
 export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult {
+  const { refresh: refreshCsrfToken } = useCsrfToken();
   const csrfToken = useUiStore((s) => s.csrfToken);
   const setConnectionState = useUiStore((s) => s.setConnectionState);
   const ingestServerFrame = useRunStore((s) => s.ingestServerFrame);
@@ -109,16 +111,17 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
 
   const submitUserInput = useCallback(
     async ({ prompt, agentId }: { prompt: string; agentId: string }): Promise<string> => {
-      const res = await httpRequest("/api/runs", {
+      const res = await mutatingRequest("/api/runs", {
         method: "POST",
         body: { agentId, prompt },
-        csrfToken,
+        getCsrfToken: () => useUiStore.getState().csrfToken,
+        refreshCsrfToken,
         responseSchema: createRunResponseSchema,
       });
       setActiveRunId(res.runId);
       return res.runId;
     },
-    [csrfToken, setActiveRunId],
+    [refreshCsrfToken, setActiveRunId],
   );
 
   const cancelRun = useCallback(

@@ -9,9 +9,10 @@ import {
   type SettingsSnapshot,
   type UpdateSettingsRequest,
 } from "@harness/shared";
-import { httpRequest } from "../lib/http-client.js";
+import { httpRequest, mutatingRequest } from "../lib/http-client.js";
 import { useSettingsStore } from "../state/settings-store.js";
 import { useUiStore } from "../state/ui-store.js";
+import { useCsrfToken } from "./useCsrfToken.js";
 
 export interface UseSettingsResult {
   snapshot: SettingsSnapshot | null;
@@ -33,59 +34,79 @@ export function useSettings(): UseSettingsResult {
   const setApiKeyPresence = useSettingsStore((s) => s.setApiKeyPresence);
   const setLoading = useSettingsStore((s) => s.setLoading);
   const setLastError = useSettingsStore((s) => s.setLastError);
-  const csrfToken = useUiStore((s) => s.csrfToken);
+  const { refresh: refreshCsrfToken } = useCsrfToken();
 
   const reload = useCallback(async () => {
     setLoading(true);
     setLastError(null);
-    try {
-      const [snap, keyPresence] = await Promise.all([
-        httpRequest("/api/settings", { responseSchema: settingsSnapshotSchema }),
-        httpRequest("/api/settings/api-key", { responseSchema: apiKeyPresenceResponseSchema }),
-      ]);
-      setSnapshot(snap);
-      setApiKeyPresence(keyPresence.present, keyPresence.lastValidatedAt ?? null);
-    } catch (e) {
-      setLastError(e instanceof Error ? e.message : "settings load failed");
-    } finally {
-      setLoading(false);
+    // Use allSettled so a transient failure in one endpoint doesn't block
+    // the other from hydrating (RV2-W14). The two endpoints are independent
+    // — settings snapshot and api-key presence — and the UI degrades better
+    // when at least one half is populated.
+    const [snapResult, keyResult] = await Promise.allSettled([
+      httpRequest("/api/settings", { responseSchema: settingsSnapshotSchema }),
+      httpRequest("/api/settings/api-key", { responseSchema: apiKeyPresenceResponseSchema }),
+    ]);
+    const errors: string[] = [];
+    if (snapResult.status === "fulfilled") {
+      setSnapshot(snapResult.value);
+    } else {
+      errors.push(
+        snapResult.reason instanceof Error
+          ? `settings: ${snapResult.reason.message}`
+          : `settings: load failed`,
+      );
     }
+    if (keyResult.status === "fulfilled") {
+      setApiKeyPresence(keyResult.value.present, keyResult.value.lastValidatedAt ?? null);
+    } else {
+      errors.push(
+        keyResult.reason instanceof Error
+          ? `api-key: ${keyResult.reason.message}`
+          : `api-key: load failed`,
+      );
+    }
+    setLastError(errors.length > 0 ? errors.join("; ") : null);
+    setLoading(false);
   }, [setSnapshot, setApiKeyPresence, setLoading, setLastError]);
 
   const updateSettings = useCallback(
     async (patch: UpdateSettingsRequest) => {
-      const next = await httpRequest("/api/settings", {
+      const next = await mutatingRequest("/api/settings", {
         method: "PATCH",
         body: patch,
-        csrfToken,
+        getCsrfToken: () => useUiStore.getState().csrfToken,
+        refreshCsrfToken,
         responseSchema: settingsSnapshotSchema,
       });
       setSnapshot(next);
     },
-    [csrfToken, setSnapshot],
+    [refreshCsrfToken, setSnapshot],
   );
 
   const setApiKey = useCallback(
     async (value: string) => {
-      const next = await httpRequest("/api/settings/api-key", {
+      const next = await mutatingRequest("/api/settings/api-key", {
         method: "PUT",
         body: { value },
-        csrfToken,
+        getCsrfToken: () => useUiStore.getState().csrfToken,
+        refreshCsrfToken,
         responseSchema: apiKeyPresenceResponseSchema,
       });
       setApiKeyPresence(next.present, next.lastValidatedAt ?? null);
     },
-    [csrfToken, setApiKeyPresence],
+    [refreshCsrfToken, setApiKeyPresence],
   );
 
   const deleteApiKey = useCallback(async () => {
-    const next = await httpRequest("/api/settings/api-key", {
+    const next = await mutatingRequest("/api/settings/api-key", {
       method: "DELETE",
-      csrfToken,
+      getCsrfToken: () => useUiStore.getState().csrfToken,
+      refreshCsrfToken,
       responseSchema: apiKeyPresenceResponseSchema,
     });
     setApiKeyPresence(next.present, next.lastValidatedAt ?? null);
-  }, [csrfToken, setApiKeyPresence]);
+  }, [refreshCsrfToken, setApiKeyPresence]);
 
   useEffect(() => {
     if (snapshot) return;

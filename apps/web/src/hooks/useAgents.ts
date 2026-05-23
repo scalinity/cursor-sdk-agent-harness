@@ -11,9 +11,10 @@ import {
   type AgentSummary,
   type CreateAgentRequest,
 } from "@harness/shared";
-import { httpRequest } from "../lib/http-client.js";
+import { httpRequest, mutatingRequest } from "../lib/http-client.js";
 import { useAgentStore } from "../state/agent-store.js";
 import { useUiStore } from "../state/ui-store.js";
+import { useCsrfToken } from "./useCsrfToken.js";
 
 export interface UseAgentsResult {
   agents: AgentSummary[];
@@ -38,7 +39,7 @@ export function useAgents(): UseAgentsResult {
   const setActiveAgentId = useAgentStore((s) => s.setActiveAgentId);
   const setLoading = useAgentStore((s) => s.setLoading);
   const setLastError = useAgentStore((s) => s.setLastError);
-  const csrfToken = useUiStore((s) => s.csrfToken);
+  const { refresh: refreshCsrfToken } = useCsrfToken();
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -65,28 +66,30 @@ export function useAgents(): UseAgentsResult {
 
   const createAgent = useCallback(
     async (request: CreateAgentRequest): Promise<AgentSummary> => {
-      const created = await httpRequest("/api/agents", {
+      const created = await mutatingRequest("/api/agents", {
         method: "POST",
         body: request,
-        csrfToken,
+        getCsrfToken: () => useUiStore.getState().csrfToken,
+        refreshCsrfToken,
         responseSchema: agentSummarySchema,
       });
       upsertAgent(created);
       return created;
     },
-    [csrfToken, upsertAgent],
+    [refreshCsrfToken, upsertAgent],
   );
 
   const terminateAgent = useCallback(
     async (agentId: string) => {
-      await httpRequest(`/api/agents/${encodeURIComponent(agentId)}/terminate`, {
+      await mutatingRequest(`/api/agents/${encodeURIComponent(agentId)}/terminate`, {
         method: "POST",
         body: {},
-        csrfToken,
+        getCsrfToken: () => useUiStore.getState().csrfToken,
+        refreshCsrfToken,
       });
       removeAgent(agentId);
     },
-    [csrfToken, removeAgent],
+    [refreshCsrfToken, removeAgent],
   );
 
   useEffect(() => {
