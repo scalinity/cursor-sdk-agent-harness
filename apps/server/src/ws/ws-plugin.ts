@@ -253,6 +253,12 @@ function teardownConnection(state: ConnectionState): void {
     sub.unsubscribe();
   }
   state.subscriptions.clear();
+  // Explicit clears below are belt-and-braces — GC reclaims the state
+  // object anyway. Worth keeping in case a future refactor pools
+  // ConnectionState across reconnects (or runs into a leak that this
+  // makes easier to diagnose).
+  state.recentFrameIds.clear();
+  state.pendingHeartbeatIds.clear();
 }
 
 function runHeartbeatTick(state: ConnectionState, missedPongTimeoutMs: number): void {
