@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import type { AgentSummary } from "@harness/shared";
 import { useUiStore } from "../../state/ui-store.js";
 import { useErrorReporter } from "../../hooks/useErrorReporter.js";
@@ -17,11 +17,13 @@ export function Composer({ activeAgent, onSubmit }: ComposerProps) {
   const draft = useUiStore((s) => s.composerDraft);
   const setDraft = useUiStore((s) => s.setComposerDraft);
   const [busy, setBusy] = useState(false);
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const { report } = useErrorReporter("composer");
 
   const submit = useCallback(async () => {
-    const trimmed = draft.trim();
+    // Read the latest draft from the store at submit time rather than the
+    // captured closure value — protects against programmatic updates
+    // (Phase 12 templates / /commands) racing the captured snapshot.
+    const trimmed = useUiStore.getState().composerDraft.trim();
     if (!trimmed || !activeAgent || busy) return;
     setBusy(true);
     try {
@@ -32,18 +34,15 @@ export function Composer({ activeAgent, onSubmit }: ComposerProps) {
     } finally {
       setBusy(false);
     }
-  }, [draft, activeAgent, busy, onSubmit, setDraft, report]);
+  }, [activeAgent, busy, onSubmit, setDraft, report]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Guard against IME composition: during CJK/Korean candidate selection
     // browsers dispatch a keydown with key="Enter" AND isComposing=true to
     // commit the candidate; submitting here would burn API budget on the
-    // half-finished prompt. keyCode 229 is the legacy fallback some browsers
-    // still emit during composition.
-    // keyCode 229 is the legacy IME-composition signal on some browsers
-    // (older mobile WebViews) that don't surface isComposing on the React
-    // synthetic event. The TS deprecation hint is informational — the
-    // property still works for this exact compatibility case.
+    // half-finished prompt. keyCode 229 is the legacy fallback some older
+    // mobile WebViews still emit during composition; TS flags it as
+    // deprecated but the property is what these clients actually surface.
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -64,7 +63,6 @@ export function Composer({ activeAgent, onSubmit }: ComposerProps) {
           </span>
         </div>
         <textarea
-          ref={inputRef}
           className="composer-textarea"
           placeholder={placeholder}
           value={draft}
