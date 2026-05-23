@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Writable } from "node:stream";
 import { pino } from "pino";
-import { REDACT_CONFIG } from "../logger.js";
+import { REDACT_CONFIG, redactCsrfFromUrl, safeReqSerializer } from "../logger.js";
 
 function captureLogs(): { sink: Writable; getLines: () => string[] } {
   const lines: string[] = [];
@@ -72,5 +72,59 @@ describe("logger redaction", () => {
     const payload = JSON.parse(getLines()[0]!);
     expect(payload.requestId).toBe("abc");
     expect(payload.durationMs).toBe(42);
+  });
+});
+
+describe("redactCsrfFromUrl", () => {
+  it("scrubs the csrf query param value", () => {
+    expect(redactCsrfFromUrl("/ws?csrf=ABC123")).toBe("/ws?csrf=[REDACTED]");
+    expect(redactCsrfFromUrl("/ws?foo=1&csrf=ABC123")).toBe("/ws?foo=1&csrf=[REDACTED]");
+    expect(redactCsrfFromUrl("/ws?csrf=ABC123&foo=1")).toBe("/ws?csrf=[REDACTED]&foo=1");
+  });
+
+  it("is case-insensitive on the param name (replacement uses canonical lowercase)", () => {
+    expect(redactCsrfFromUrl("/ws?CSRF=ABC123")).toBe("/ws?csrf=[REDACTED]");
+  });
+
+  it("scrubs URL-encoded values", () => {
+    expect(redactCsrfFromUrl("/ws?csrf=ABC%2Edef")).toBe("/ws?csrf=[REDACTED]");
+  });
+
+  it("leaves URLs without a csrf param untouched", () => {
+    expect(redactCsrfFromUrl("/api/runs?after_seq=10")).toBe("/api/runs?after_seq=10");
+  });
+});
+
+describe("safeReqSerializer", () => {
+  it("scrubs csrf from the captured req.url", () => {
+    const out = safeReqSerializer({
+      id: 1,
+      method: "GET",
+      url: "/ws?csrf=token-XYZ-secret",
+      headers: { origin: "http://127.0.0.1:5173" },
+    });
+    expect(out.url).toBe("/ws?csrf=[REDACTED]");
+    // The original token literal must not appear anywhere in the
+    // serialised output (defence-in-depth against future copy-paste
+    // bugs that re-include the raw URL).
+    expect(JSON.stringify(out)).not.toContain("token-XYZ-secret");
+  });
+
+  it("preserves non-sensitive fields", () => {
+    const out = safeReqSerializer({
+      id: "req-1",
+      method: "POST",
+      url: "/api/agents",
+      headers: { origin: "http://127.0.0.1:5173" },
+      remoteAddress: "127.0.0.1",
+      remotePort: 5678,
+    });
+    expect(out).toMatchObject({
+      id: "req-1",
+      method: "POST",
+      url: "/api/agents",
+      remoteAddress: "127.0.0.1",
+      remotePort: 5678,
+    });
   });
 });

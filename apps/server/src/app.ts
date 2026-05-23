@@ -3,7 +3,7 @@ import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { registerRoutes } from "./routes/index.js";
 import type { Env } from "./config/env.js";
-import { REDACT_CONFIG } from "./observability/logger.js";
+import { REDACT_CONFIG, safeReqSerializer } from "./observability/logger.js";
 import {
   CursorApiKeyStore,
   CsrfSecretStore,
@@ -93,6 +93,11 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       level: env.LOG_LEVEL,
       redact: REDACT_CONFIG,
       base: { service: "cursor-sdk-agent-harness" },
+      // The default `req` serializer captures `req.url` verbatim,
+      // which leaks `?csrf=<token>` on WS upgrades (browsers can't add
+      // custom headers to a WS upgrade so the token rides in the
+      // query). Replace with one that scrubs the param.
+      serializers: { req: safeReqSerializer },
     },
     disableRequestLogging: false,
     trustProxy: false,

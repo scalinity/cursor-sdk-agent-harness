@@ -42,6 +42,47 @@ export const REDACT_CONFIG = {
   remove: false,
 } as const satisfies NonNullable<LoggerOptions["redact"]>;
 
+/**
+ * Redact the `csrf` query parameter from a URL string. Used by the
+ * Fastify request serializer so WS upgrade access logs (which include
+ * `?csrf=<token>` because browsers can't add custom headers to a WS
+ * upgrade) don't capture the token in plaintext.
+ *
+ * Pino's path-based redaction can't reach inside a URL string, so we
+ * intercept at the serializer level. Handles both bare values
+ * (`?csrf=ABC`) and URL-encoded ones (`?csrf=ABC%2Edef`). Case-
+ * insensitive to match HTTP norms.
+ */
+export function redactCsrfFromUrl(url: string): string {
+  if (typeof url !== "string" || url.length === 0) return url;
+  // Match `csrf=<value>` up to the next `&` or end of string. The `i`
+  // flag is case-insensitive; the `g` flag covers the (unlikely) case
+  // where the param appears twice.
+  return url.replace(/([?&])csrf=[^&]*/gi, "$1csrf=[REDACTED]");
+}
+
+/**
+ * Fastify request serializer. Drop-in replacement for pino's default
+ * that also strips CSRF tokens from the captured URL.
+ */
+export function safeReqSerializer(req: {
+  id?: string | number;
+  method?: string;
+  url?: string;
+  headers?: Record<string, unknown>;
+  remoteAddress?: string;
+  remotePort?: number;
+}): Record<string, unknown> {
+  return {
+    ...(req.id !== undefined ? { id: req.id } : {}),
+    ...(req.method !== undefined ? { method: req.method } : {}),
+    ...(req.url !== undefined ? { url: redactCsrfFromUrl(req.url) } : {}),
+    ...(req.headers !== undefined ? { headers: req.headers } : {}),
+    ...(req.remoteAddress !== undefined ? { remoteAddress: req.remoteAddress } : {}),
+    ...(req.remotePort !== undefined ? { remotePort: req.remotePort } : {}),
+  };
+}
+
 export function createLogger(level: LoggerOptions["level"] = "info"): Logger {
   return pino({
     level,
