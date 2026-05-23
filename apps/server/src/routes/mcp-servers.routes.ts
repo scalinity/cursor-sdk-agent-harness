@@ -276,7 +276,13 @@ export async function registerMcpServersRoutes(
         parsed.data.name !== existing.name &&
         deps.mcpServers.getByName(parsed.data.name)
       ) {
-        return reply.code(409).send({ code: "NAME_CONFLICT" });
+        // REVIEW-S10: include the same message that POST + PUT emit so
+        // the frontend's `error.message ?? error.code` rendering shows
+        // user-visible detail on the PATCH path too.
+        return reply.code(409).send({
+          code: "NAME_CONFLICT",
+          message: `An MCP server named "${parsed.data.name}" already exists.`,
+        });
       }
       const updateInput: Parameters<typeof deps.mcpServers.update>[1] = {};
       if (parsed.data.name !== undefined) updateInput.name = parsed.data.name;
