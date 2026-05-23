@@ -256,10 +256,12 @@ export class RunController {
 
   private setStatus(next: SdkRunStatus): void {
     if (this.status === next) return;
+    // Don't overwrite a terminal status (FINISHED / ERROR / CANCELLED /
+    // EXPIRED) with a non-terminal one — the SDK can fire a stale status
+    // frame for a previously-terminal run during teardown, and the harness
+    // must NOT regress a finalised run to RUNNING.
+    if (isTerminalStatus(this.status) && !isTerminalStatus(next)) return;
     this.status = next;
-    // Don't overwrite an ERROR/CANCELLED state with a stale RUNNING — the
-    // SDK can fire a status frame for a previously-terminal run during
-    // teardown.
     this.init.runsRepo.updateStatus(this.runId, next);
   }
 }
