@@ -246,4 +246,16 @@ export type {
   UsageSummary,
 } from "./rest-contracts.js";
 
+export {
+  createNoopPerfCounters,
+  createPerfCountersBase,
+  DEFAULT_RING_SIZE,
+  EMPTY_SNAPSHOT,
+} from "./perf-counters.js";
+export type {
+  CounterSnapshot,
+  CreatePerfCountersOptions,
+  PerfCountersAPI,
+} from "./perf-counters.js";
+
 export const HARNESS_VERSION = "0.0.0" as const;

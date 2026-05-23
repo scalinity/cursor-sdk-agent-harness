@@ -250,7 +250,7 @@ export function createPersistAndBroadcast(
         const broadcastStart = performance.now();
         deps.bus.publish(args.runId, row);
         perf.observe(
-          "db_commit_to_ws_broadcast_ms",
+          "db_commit_to_bus_publish_ms",
           performance.now() - broadcastStart,
         );
       }
@@ -337,7 +337,7 @@ export function createPersistAndBroadcast(
       const broadcastStart = performance.now();
       deps.bus.publish(args.runId, row);
       perf.observe(
-        "db_commit_to_ws_broadcast_ms",
+        "db_commit_to_bus_publish_ms",
         performance.now() - broadcastStart,
       );
     },

@@ -145,7 +145,7 @@ describe("stress: 10k events through persist-and-broadcast", () => {
 
       // Perf budget assertions (spec §13).
       const commit = perf.snapshot("sdk_event_received_to_db_commit_ms");
-      const broadcast = perf.snapshot("db_commit_to_ws_broadcast_ms");
+      const broadcast = perf.snapshot("db_commit_to_bus_publish_ms");
       console.info(
         `[stress] ${TOTAL_EVENTS.toString()} events in ${wallElapsed.toFixed(0)}ms` +
           ` | commit p50=${(commit.p50 ?? 0).toFixed(3)}ms p95=${(commit.p95 ?? 0).toFixed(3)}ms` +

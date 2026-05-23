@@ -36,10 +36,10 @@ describe("perf-counters", () => {
 
   it("discards NaN and negative samples", () => {
     const counters = createPerfCounters();
-    counters.observe("client_frame_validation_ms", Number.NaN);
-    counters.observe("client_frame_validation_ms", -5);
-    counters.observe("client_frame_validation_ms", 7);
-    const snap = counters.snapshot("client_frame_validation_ms");
+    counters.observe("ws_flush_delay_ms", Number.NaN);
+    counters.observe("ws_flush_delay_ms", -5);
+    counters.observe("ws_flush_delay_ms", 7);
+    const snap = counters.snapshot("ws_flush_delay_ms");
     expect(snap.count).toBe(1);
     expect(snap.p50).toBe(7);
   });
@@ -49,9 +49,7 @@ describe("perf-counters", () => {
     const all = counters.snapshotAll();
     expect(Object.keys(all).sort()).toEqual(
       [
-        "client_event_ingest_ms",
-        "client_frame_validation_ms",
-        "db_commit_to_ws_broadcast_ms",
+        "db_commit_to_bus_publish_ms",
         "sdk_event_received_to_db_commit_ms",
         "ws_flush_delay_ms",
       ].sort(),
