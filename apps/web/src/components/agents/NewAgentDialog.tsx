@@ -251,11 +251,7 @@ export function NewAgentDialog({ open, onClose, onCreated }: NewAgentDialogProps
         </header>
 
         <nav className="flex gap-1 border-b border-border-subtle text-sm">
-          {(["basics", "local", "cloud", "mcp", "subagents"] as TabId[]).map((tab) => {
-            const hidden =
-              (state.mode === "local" && tab === "cloud") ||
-              (state.mode === "cloud" && tab === "local");
-            if (hidden) return null;
+          {visibleTabs(state.mode).map((tab) => {
             const isActive = state.activeTab === tab;
             return (
               <button
@@ -350,6 +346,19 @@ const TAB_LABELS: Record<TabId, string> = {
   mcp: "MCP servers",
   subagents: "Subagents",
 };
+
+/**
+ * REVIEW-S6: the visible tab set is a pure function of `mode`. Pre-compute
+ * here so the render path doesn't mix iteration with hidden-flag checks.
+ */
+function visibleTabs(mode: AgentMode): TabId[] {
+  const all: TabId[] = ["basics", "local", "cloud", "mcp", "subagents"];
+  return all.filter(
+    (tab) =>
+      !(mode === "local" && tab === "cloud") &&
+      !(mode === "cloud" && tab === "local"),
+  );
+}
 
 interface TabProps {
   state: DialogState;
