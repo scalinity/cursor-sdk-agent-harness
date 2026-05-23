@@ -116,6 +116,36 @@ describe("/api/mcp-servers", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.config.auth.CLIENT_SECRET).toBe("shh");
+    // REVIEW-W8: secrets must not sit in browser caches.
+    expect(res.headers["cache-control"]).toMatch(/no-store/);
+  });
+
+  it("REVIEW-W7: reveal endpoint rate-limits to 1 req/sec/id", async () => {
+    const { db, repos, app } = setup();
+    cleanup.push(() => app.close(), () => db.close());
+    const row = repos.mcpServers.create({
+      name: "secret",
+      config: {
+        url: "https://example.test",
+        auth: { CLIENT_ID: "id", CLIENT_SECRET: "shh" },
+      },
+    });
+    await registerMcpServersRoutes(app, {
+      mcpServers: repos.mcpServers,
+      validatorOverride: async () => ({ status: "valid" as const, transport: "http" as const }),
+    });
+    const first = await app.inject({
+      method: "GET",
+      url: `/api/mcp-servers/${row.id}/reveal`,
+    });
+    expect(first.statusCode).toBe(200);
+    const second = await app.inject({
+      method: "GET",
+      url: `/api/mcp-servers/${row.id}/reveal`,
+    });
+    expect(second.statusCode).toBe(429);
+    expect(second.json().code).toBe("RATE_LIMITED");
+    expect(second.headers["retry-after"]).toBeDefined();
   });
 
   it("re-validates on config change but not on enabled-only PATCH", async () => {

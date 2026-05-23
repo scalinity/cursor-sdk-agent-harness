@@ -1,3 +1,12 @@
+/**
+ * SECURITY (REVIEW-W10): This component's state holds the raw MCP
+ * server config — including secrets — between the user's "Reveal
+ * secrets" click and the dialog close. Any future global error
+ * reporter, redux devtools snapshot, or session-replay capture MUST
+ * exclude this component's state. There is no opt-out plumbing yet;
+ * adding one here would be the place. If you add a project-wide
+ * state-snapshot mechanism, exempt `McpServerEditor` explicitly.
+ */
 import { useCallback, useMemo, useState } from "react";
 import {
   mcpServerConfigSchema,

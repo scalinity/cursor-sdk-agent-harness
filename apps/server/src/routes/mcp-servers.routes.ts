@@ -151,6 +151,21 @@ export async function registerMcpServersRoutes(
       : {}),
   };
 
+  /**
+   * REVIEW-W7: per-server reveal rate limiter. The reveal endpoint
+   * returns the raw MCP config (token-bearing). CSRF + Origin gate the
+   * call, but a caller with valid origin (e.g. an XSS foothold in the
+   * SPA) could otherwise poll reveal at arbitrary rates and harvest
+   * every secret. We cap to 1 reveal per server-id per second.
+   *
+   * In-memory map; loopback single-user deployment doesn't need
+   * cross-process coordination. The map is unbounded across distinct
+   * IDs but each entry is a single number and the SET of IDs is
+   * bounded by the mcp_servers table (a few rows).
+   */
+  const revealLastAt = new Map<string, number>();
+  const REVEAL_MIN_INTERVAL_MS = 1000;
+
   app.get("/api/mcp-servers", async () => {
     const items = deps.mcpServers.list().map(toSummary);
     return listMcpServersResponseSchema.parse({ items });
@@ -310,6 +325,29 @@ export async function registerMcpServersRoutes(
       // surface is intentionally read-only and per-server.
       const row = deps.mcpServers.getById(req.params.id);
       if (!row) return reply.code(404).send({ code: "NOT_FOUND" });
+
+      // REVIEW-W7: per-server rate limit (1 req/sec/id).
+      const now = Date.now();
+      const last = revealLastAt.get(row.id);
+      if (last !== undefined && now - last < REVEAL_MIN_INTERVAL_MS) {
+        return reply
+          .code(429)
+          .header(
+            "Retry-After",
+            String(Math.ceil((REVEAL_MIN_INTERVAL_MS - (now - last)) / 1000)),
+          )
+          .send({
+            code: "RATE_LIMITED",
+            message: "Reveal is rate-limited to one request per second per server.",
+          });
+      }
+      revealLastAt.set(row.id, now);
+
+      // REVIEW-W8: defense-in-depth — even on loopback the raw secret
+      // should not sit in browser caches, devtools history snapshots,
+      // or any intermediary.
+      reply.header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+      reply.header("Pragma", "no-cache");
       return mcpServerRevealResponseSchema.parse({
         id: row.id,
         name: row.name,
