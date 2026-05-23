@@ -70,22 +70,16 @@ export interface WsPluginOptions {
   runs: RunsRepo;
   bus: RunBus;
   activeRuns: ActiveRuns;
-  /**
-   * Optional storage for approval responses received over WS. Phase 13 will
-   * wire this to the real `ApprovalResponder`; in Phase 07 we simply log
-   * receipt so no fake resolution can happen.
-   */
-  onApprovalResponse?: (input: {
-    runId: string;
-    requestId: string;
-    decision: "approve" | "deny";
-    reason?: string;
-    payload?: unknown;
-  }) => void;
   /** Override the heartbeat ping interval (ms). Defaults to 15s. */
   heartbeatIntervalMs?: number;
   /** Override the missed-pong timeout (ms). Defaults to 45s. */
   missedPongTimeoutMs?: number;
+  // NOTE: a Phase 07 `onApprovalResponse` hook was intentionally
+  // omitted. OQ-10 stays unverified — there is no SDK method to
+  // resolve a `request` event in @cursor/sdk@1.0.13 — so the plugin
+  // ALWAYS replies with APPROVAL_NOT_PENDING. When Phase 13 lands a
+  // real responder, add the hook then as part of a single coherent
+  // change rather than a half-step here.
 }
 
 /**
@@ -319,7 +313,7 @@ function handleClientFrame(
       void handleCancelRun(state, frame, opts);
       return;
     case "approval_response":
-      handleApprovalResponse(state, frame, opts);
+      handleApprovalResponse(state, frame);
       return;
     case "submit_user_input":
     case "delete_run":
@@ -564,22 +558,21 @@ async function handleCancelRun(
 function handleApprovalResponse(
   state: ConnectionState,
   frame: Extract<ClientFrame, { type: "approval_response" }>,
-  opts: WsPluginOptions,
 ): void {
-  // Per OQ-10 there's no SDK method to resolve approval. We persist receipt
-  // so the UI can record the user's intent, but the resolver is wired in
-  // Phase 13. NEVER fake resolution success here.
-  if (opts.onApprovalResponse) {
-    opts.onApprovalResponse({
+  // Per OQ-10 there's no SDK method to resolve approval in
+  // @cursor/sdk@1.0.13. Log the user's intent at info level so a
+  // future audit can see they tried, then reply APPROVAL_NOT_PENDING.
+  // No callback hook here — Phase 13 will introduce the responder
+  // cleanly once the SDK exposes a resolution method.
+  state.log.info(
+    {
       runId: frame.run_id,
       requestId: frame.request_id,
       decision: frame.decision,
       ...(frame.reason !== undefined ? { reason: frame.reason } : {}),
-      ...(frame.payload !== undefined ? { payload: frame.payload } : {}),
-    });
-  }
-  // Today we have no resolver — surface APPROVAL not pending so the client
-  // sees an explicit failure rather than a silent ack.
+    },
+    "approval_response received; no SDK resolver wired — replying APPROVAL_NOT_PENDING",
+  );
   sendFrame(
     state,
     errorFrame(
