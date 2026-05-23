@@ -143,6 +143,13 @@ export class RunController {
     // dedicated setter — `setInterrupted` would write status='ERROR',
     // which is the wrong terminal state for a successful user cancel.
     this.init.runsRepo.setCancelled(this.runId, reason);
+    // Wait for the background consume loop to settle BEFORE returning to
+    // the caller. Otherwise the route resolves "cancelled" while the row
+    // is still being updated (final-result, usage) by the detached
+    // consume task, and an immediately-following GET can see a non-final
+    // row. The consume loop is bounded by `run.wait()`'s timeout (see
+    // RUN_WAIT_TIMEOUT_MS below) so this can't hang forever.
+    await this.awaitSettled();
     return "cancelled";
   }
 
@@ -181,7 +188,12 @@ export class RunController {
     let finalResult: Awaited<ReturnType<Run["wait"]>> | null = null;
     if (run.supports("wait")) {
       try {
-        finalResult = await run.wait();
+        // Bounded await — if the SDK fails to resolve wait() (e.g. after
+        // a cancel-mid-stream where the stream returned but wait() hangs),
+        // we fall back to the observed status rather than leaking the
+        // consume task forever. 30s is generous for already-terminal runs
+        // and tight enough that an integration test catches a regression.
+        finalResult = await raceWithTimeout(run.wait(), RUN_WAIT_TIMEOUT_MS);
       } catch (waitErr) {
         this.init.logger.warn(
           { err: waitErr, runId: this.runId },
@@ -282,4 +294,24 @@ function isTerminalStatus(status: SdkRunStatus): boolean {
 
 export function newRunId(): string {
   return randomUUID();
+}
+
+const RUN_WAIT_TIMEOUT_MS = 30_000;
+
+class RunWaitTimeoutError extends Error {
+  constructor() {
+    super(`run.wait() did not resolve within ${RUN_WAIT_TIMEOUT_MS}ms`);
+    this.name = "RunWaitTimeoutError";
+  }
+}
+
+function raceWithTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new RunWaitTimeoutError()), ms);
+    if (typeof timer.unref === "function") timer.unref();
+  });
+  return Promise.race([p, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
