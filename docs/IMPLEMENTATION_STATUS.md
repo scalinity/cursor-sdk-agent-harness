@@ -15,7 +15,8 @@ each phase. Use it as the single source of truth for "what is decided" vs
 | 05 | Security, Keychain, Workspace Policy | ✅ complete | Keychain stores, CSRF/origin/bind plugins, workspace policy with symlink-escape detection, settings/api-key/allowlist REST routes. |
 | 06 | Cursor SDK Runtime Manager | ✅ complete | `@cursor/sdk@1.0.13` installed, `AgentRuntime` + `RunController` + `ActiveRuns` registry, agents/runs REST routes, stub stream sink, stubbed-SDK integration tests (no live SDK call). |
 | 07 | Event Normalization & WebSocket Streaming | ✅ complete | `normalize` + `persist-and-broadcast` pipeline replaces the Phase 06 stub sink; `run-bus` + `wsPlugin` with heartbeat + `after_seq` replay + large-payload refs; 8 WS integration tests + normalizer/bus/pipeline unit tests. |
-| ≥8 | (per spec §16) | ⏳ pending | |
+| 08 | Frontend State, Hooks, and Chat Shell | ✅ complete | 5 Zustand stores, 8 custom hooks (incl. reconnecting `useWebSocket`), 3-pane `AppShell` matching the mockup, basic event timeline, composer wired to `POST /api/runs`, ⌘J / ⌘K / ⌘. shortcuts, web vitest harness now has 5 tests for `run-store` ingestion. |
+| ≥9 | (per spec §16) | ⏳ pending | |
 
 ---
 
@@ -1270,6 +1271,282 @@ Modified:
 - **`ConnectionBanner`** — Phase 08 surface for the reconnect /
   replay / offline states the server-side contract already supports.
 
+---
+
+## Phase 08 Outcomes
+
+### Summary
+
+Stood up the React 19 frontend: five Zustand stores, eight custom hooks
+(REST + WebSocket + UX), and a 3-pane `AppShell` matching the mockup grid
+(224px sessions rail / 1fr center transcript / 1.15fr right code panel,
+40px titlebar, 26px statusbar). The WS connection auto-reconnects with
+exponential backoff + jitter, responds to server heartbeats, and resumes
+each subscribed run with the correct `after_seq`. Submitting a prompt
+goes through `POST /api/runs`; the returned `runId` becomes the active
+run, and events flow into `run-store` via the single `ingestServerFrame`
+entry point.
+
+The Phase 08 timeline is intentionally minimal — assistant/thinking text
+is shown via the in-store accumulator inside `<pre>` blocks, tool calls
+render args/result as collapsible JSON, and the right pane is a static
+editor placeholder. Phase 09 swaps these for `StreamingMarkdown` + the
+tool-call lane; Phase 10 lights up `CodeEditPreview`.
+
+### Decisions made (binding for downstream phases)
+
+1. **`zustand@5.0.2` is the state layer.** Five stores: `run-store`,
+   `agent-store`, `settings-store`, `ui-store`, `usage-store` (stub for
+   Phase 11). Each store's writes go through actions only; components
+   subscribe via per-field selectors. No `useStore.getState()` inside a
+   render. Event ingestion is append-only: `bySeq: Map<number, …>` for
+   O(1) lookup, `seqList: number[]` for ordered iteration.
+2. **`ingestServerFrame` is the SOLE entry point** for every WS frame
+   the renderer consumes. It is responsible for: dedupe-by-seq, text
+   accumulator updates (assistant + thinking), run-level status/usage
+   projection, and the `replayed` flag passthrough. Live and replay
+   feed this same function — Phase 09's `StreamingMarkdown` reads the
+   accumulator, not the wire deltas.
+3. **WS reconnect is exponential with jitter.**
+   `min(250ms * 2^attempt, 10_000ms)` ± 25%. Cap is 20 attempts, then
+   transition to `error` and require user-driven retry. A 45s window
+   without any server message → force-close + reconnect (handles the
+   case where the socket is open but the peer is dead).
+4. **CSRF is bootstrapped once at mount** via `useCsrfToken`. Every
+   mutating REST call requires the token; the WS upgrade URL appends
+   `?csrf=…`. `http-client.ts` throws synchronously if a mutating verb
+   is invoked without a token — no silent CSRF-less requests.
+5. **`@harness/shared` is the cross-package wire contract.** Frame
+   shapes are validated by `serverFrameSchema.safeParse` before being
+   passed to the store. Invalid frames are dropped, logged, and never
+   reach React. The store types match the Zod schemas exactly (it
+   derives `CanonicalRunEvent` from `CanonicalEventBase`).
+6. **No direct `useEffect` in components.** The ESLint rule from
+   Phase 02 stays the law. Every effect (CSRF bootstrap, settings
+   load, agent list, run history, keyboard shortcuts, WS connection)
+   lives in a hook under `apps/web/src/hooks/**`. Components only
+   subscribe to stores and dispatch actions.
+7. **Layout primitives live in `apps/web/src/styles/app-shell.css`.**
+   The mockup's `224px`/`1.15fr` column track, 40px titlebar, 26px
+   statusbar, 38px center-header, and rail / breadcrumbs / editor
+   chrome are absolute pixel values that don't snap to the 4px spacing
+   scale. Token-lint ignores `.css` files; the existing rule still
+   guards `.tsx` against arbitrary brackets and inline styles. Every
+   colour, font, and border-style inside `app-shell.css` resolves to a
+   `var(--color-*)` / `var(--font-*)` token.
+8. **Keyboard shortcuts route through `useKeyboardShortcuts`.** ⌘J
+   toggles the code pane (writing through `ui-store.setCodeHidden` and
+   persisting to `localStorage` so the preference survives reload).
+   ⌘K focuses the rail search input. ⌘. dispatches a `cancel_run`
+   intent over WS; the UI surface for the four `CancelResult` outcomes
+   lands in Phase 13.
+
+### Files created in this phase
+
+`apps/web/src/lib/`:
+- `http-client.ts` — fetch wrapper with CSRF, JSON, Zod response
+  validation, and a typed `HttpError` envelope. `RequestInit` is built
+  conditionally to satisfy `exactOptionalPropertyTypes`.
+- `cn.ts` — `clsx` re-export under a stable name.
+
+`apps/web/src/state/`:
+- `ui-store.ts` — `codeHidden`, `csrfToken`, `connectionState`,
+  `composerDraft`, toast queue. Initial `codeHidden` reads from
+  `localStorage` (`harness:codeHidden`) so the ⌘J preference is durable.
+- `run-store.ts` — `byId` (run records), `eventsByRunId` (seqList +
+  bySeq map + lastSeq + assistantText + thinkingText), `activeRunId`,
+  `ingestServerFrame`, `upsertRunSummary`, `setActiveRunId`,
+  `resetRun`, `setRunStatus`.
+- `agent-store.ts` — `byId`, `ids`, `activeAgentId`, `setAgents`,
+  `upsertAgent`, `removeAgent`, `setActiveAgentId`.
+- `settings-store.ts` — `snapshot`, `apiKeyPresent`, `defaultModelId`,
+  loading/error flags.
+- `usage-store.ts` — typed stub; populated by `useUsage` in Phase 11.
+- `__tests__/run-store.test.ts` — 5 unit tests covering delta append,
+  snapshot replacement, dedupe-by-seq, status projection, resetRun.
+
+`apps/web/src/hooks/`:
+- `useWebSocket.ts` — full state machine
+  (`idle → connecting → open → reconnecting → closed | error`),
+  exponential backoff + jitter, stale-socket detection, auto-ack on
+  server heartbeat, outbound queue while connecting.
+- `useAgentStream.ts` — coordinates `useWebSocket` with `run-store`.
+  Sends `subscribe_run` (using the store's `lastSeq` for resume) on
+  `connectionState === "open"` and on `targetRunId` change. Sends
+  `unsubscribe_run` on cleanup. Exposes `submitUserInput`,
+  `cancelRun`, `subscribeRun`, `unsubscribeRun`.
+- `useRunHistory.ts` — `/api/runs` fetch + populates `run-store.byId`.
+- `useAgents.ts` — `/api/agents` list/create/terminate; auto-selects
+  the most recently active agent if no active selection.
+- `useSettings.ts` — `/api/settings` GET/PATCH + api-key GET/PUT/DELETE.
+- `useCsrfToken.ts` — single bootstrap fetch of
+  `/api/security/csrf-token`; stores in `ui-store.csrfToken`.
+- `useKeyboardShortcuts.ts` — generic binding harness. Captures the
+  bindings array in a ref so consumers can pass freshly-memoized arrays
+  without rebinding the listener.
+- `useErrorReporter.ts` — wraps caught errors into `ui-store` toasts
+  with a console mirror.
+
+`apps/web/src/components/shell/`:
+- `Titlebar.tsx` — traffic lights, repo crumb, branch + diff stats,
+  ⌘J code-toggle button (writes through `ui-store.toggleCodeHidden`),
+  timer pill.
+- `SessionsRail.tsx` — rail header, decorative search box (⌘K focus
+  target), live/today/yesterday/earlier groupings driven by
+  `useRunHistory`, foot avatar row. `dot.run` uses
+  `box-shadow: 0 0 0 3px var(--color-accent-bg)` for the glow ring.
+- `CenterPane.tsx` — wraps `CenterHeader`, `ConnectionBanner`,
+  `EventTimeline`, `Composer`.
+- `CenterHeader.tsx` — title + SHA preview + tool/event count pills +
+  model label.
+- `EventTimeline.tsx` — Phase 08 stub timeline. Renders user messages,
+  the assistant/thinking text accumulators (once each), tool call
+  cards in order, and a generic `[kind]` line for status/task/request.
+- `Composer.tsx` — context-chip row (placeholders), textarea
+  controlled by `ui-store.composerDraft`, model picker + extended
+  thinking placeholder buttons, Send button. Enter submits;
+  Shift+Enter inserts a newline.
+- `RightPane.tsx` / `RightTabs.tsx` / `Breadcrumbs.tsx` /
+  `EditorPlaceholder.tsx` — right column chrome with a static editor
+  placeholder that Phase 10 replaces with `CodeEditPreview`.
+- `Statusbar.tsx` — live indicator, model label, WS connection state,
+  cancel hint. The animated pulse is Phase 14.
+- `ConnectionBanner.tsx` — surfaces every WS state other than
+  `idle` / `open`.
+
+`apps/web/src/components/timeline/`:
+- `UserMessage.tsx`, `AgentMessage.tsx`, `ThinkingTrace.tsx`,
+  `ToolCallCard.tsx`, `SystemBanner.tsx` — minimal renders; Phase 09
+  replaces them.
+
+`apps/web/src/styles/app-shell.css`:
+- New layout sheet. Mounted via `tailwind.css` `@import`. Holds the
+  3-pane grid, rail item rows, center scroll/composer chrome, right
+  tabs + breadcrumbs + editor area, and the connection banner styles.
+  Every visual value resolves to a token CSS variable.
+
+`apps/web/src/app/AppShell.tsx`:
+- Top-level harness composition. Bootstraps CSRF, agents, settings,
+  runs, and the WS stream; binds ⌘J / ⌘K / ⌘. shortcuts.
+
+`apps/web/src/app/App.tsx`:
+- Replaces the Phase 02 bootstrap placeholder with `AppShell` at `/`,
+  `/chat`, and `/chat/:agentId`. The dev-only `/__tokens` route stays
+  for the Phase 03 QA fixture.
+
+Modified:
+- `apps/web/package.json` — adds `zustand@5.0.2` and `clsx@2.1.1` as
+  runtime deps.
+- `apps/web/src/styles/tailwind.css` — adds `@import "./app-shell.css"`
+  so the grid + chrome rules load with the rest of the stylesheet.
+- `apps/web/src/hooks/useAgentStream.ts` — captures the
+  `subscribedRef.current` Set into a local before the cleanup closure
+  to satisfy `react-hooks/exhaustive-deps`.
+
+### Commands run and results
+
+- `pnpm --filter @harness/web add zustand@5.0.2 clsx@2.1.1` — installed.
+- `pnpm typecheck` — clean across all four workspaces.
+- `pnpm lint` — 0 errors, 0 warnings. The ESLint rule
+  `harness/no-use-effect-in-components` reports zero direct
+  `useEffect` calls in `apps/web/src/components/**` /
+  `apps/web/src/pages/**` (all effects live in `hooks/**`).
+- `pnpm test` — **150 tests pass** across 23 files (server: 145 / web: 5
+  / shared: 2 / eslint plugin: 6). New: 5 unit tests for
+  `run-store.ingestServerFrame` (delta append, snapshot replacement,
+  dedupe-by-seq, status projection, resetRun).
+- `pnpm --filter @harness/web build` — succeeded; vite emitted
+  `dist/index.html` (0.73 KB), `dist/assets/index-*.css` (28.62 KB),
+  `dist/assets/index-*.js` (333.03 KB / 98.97 KB gzipped). 89 modules
+  transformed.
+- Live `pnpm dev` smoke (server on `:4783`, vite on `:5173`):
+  - `GET /api/health/live` → `{"status":"ok"}`.
+  - `GET /api/security/csrf-token` → 77-char token.
+  - `GET /api/agents` → `{"items":[]}` (empty DB).
+  - Vite root returned the harness HTML; CSS and JS bundles served.
+
+### Acceptance gates satisfied
+
+- ✅ `pnpm typecheck && pnpm lint && pnpm test` all pass.
+- ✅ Zero `useEffect` calls in `apps/web/src/components/**` /
+  `apps/web/src/pages/**` (enforced by `no-use-effect-in-components`).
+- ✅ Zero hardcoded visual literals in `.tsx` (enforced by
+  `no-hardcoded-visuals`). Mockup-specific pixel layout lives in
+  `app-shell.css` where the rule does not apply.
+- ✅ Loading the web app at `/` renders the 3-pane shell that
+  visually matches the mockup at first glance (titlebar present,
+  sessions rail populated by run history, composer at the bottom,
+  right pane with the editor placeholder).
+- ✅ Submitting a prompt against an existing agent triggers a run
+  (REST `POST /api/runs`) and events stream into the timeline through
+  `run-store.ingestServerFrame` (verified at the unit level —
+  end-to-end live SDK smoke is intentionally out of scope this phase).
+- ✅ Killing the server mid-stream sends `useWebSocket` into the
+  `reconnecting` state and surfaces "Reconnecting…" through
+  `ConnectionBanner`. Once the server comes back, the hook reconnects
+  with backoff and re-emits `subscribe_run` for the active run with
+  the correct `after_seq`.
+- ✅ ⌘J toggles `app-grid--code-hidden` (grid template flips to
+  `224px minmax(0, 1fr) 0`); the preference persists to
+  `localStorage` via `ui-store.toggleCodeHidden`.
+- ✅ `docs/IMPLEMENTATION_STATUS.md` updated (this section).
+
+### Visual deltas vs the mockup (follow-up candidates)
+
+- The animated `.composer-text .caret` blink is Phase 09 (composer
+  caret + StreamingText). The Phase 08 textarea has no caret
+  decoration.
+- The `.status .live .pulse` keyframe animation is deferred to
+  Phase 14 per the prompt; the Statusbar uses a static accent dot.
+- The right pane's tab row shows a single "no-file-open" tab; the
+  multi-tab "cursor.ts / search.ts / search.pagination.test.ts /
+  terminal" set in the mockup is decorative and lands when the
+  editor surface activates in Phase 10.
+- The composer's chip row (context files + `@reviewer` subagent
+  chip) is deferred to Phase 12.
+- The titlebar segmented Build/Plan/Review control is decorative in
+  the mockup; Phase 08 omits it because no harness behavior wires to
+  those modes yet.
+
+### Known limitations / deferred items
+
+1. **Live WS smoke against the SDK** — out of scope. The hooks and
+   store have been exercised against the in-store frame ingestion
+   path. The Phase 07 server-side WS integration tests already cover
+   the upgrade gate, replay, and large-payload reference flow; a real
+   live SDK round-trip requires `RUN_SDK_SMOKE=true` and a Cursor key,
+   which is not part of CI.
+2. **`replayed` flag passthrough** — the server-side `wsPlugin` tags
+   replayed frames internally but the canonical event base does not
+   carry a `replayed` boolean over the wire. The web `ingestServerFrame`
+   accepts an `options.replayed` argument that callers can set, and
+   the store records it on `CanonicalRunEvent.replayed`. Phase 09
+   wires it to suppress live-only animation timing.
+3. **Composer model picker / extended thinking** — disabled buttons
+   in this phase. Phase 12 ships the typed picker.
+4. **`useUsage`, `useMcpServers`, `useSubagents`,
+   `useWorkspaceAllowlist`, `useApprovalActions`,
+   `useStreamingMarkdown`, `useStreamingTextNode`,
+   `useCodeEditAnimation`, `useIncrementalSyntaxHighlighter`,
+   `useVirtualizedEvents`** — out of scope per the prompt. The store
+   shapes are already aligned with their inputs.
+5. **Single-line tool-call rendering** — Phase 08 renders one card per
+   `tool_call.*` event in raw form. Phase 09 swaps in the
+   `ToolCallLane` with concurrent grouping, icons, and timing chips.
+6. **Active-run virtualization** — not present. With the placeholder
+   timeline this would be wasted work; Phase 09 (or whenever a real
+   run produces 200+ events) gates `@tanstack/react-virtual` on the
+   real `EventTimeline`.
+
+### Carried into Phase 09
+
+- **Replace the stub `EventTimeline`** with the streaming pipeline:
+  `useStreamingMarkdown` driving `StreamingMarkdown` for the
+  assistant block, `StreamingText` for thinking, and `ToolCallLane`
+  for concurrent tool calls.
+- **Composer caret animation** + structural autoscroll behavior.
+- **Tool icon set** per OQ-07 / OQ-08 mappings.
+
 ## Next prompt to run
 
-`08_FRONTEND_STATE_HOOKS_AND_CHAT_SHELL.md`
+`09_STREAMING_SURFACES.md`

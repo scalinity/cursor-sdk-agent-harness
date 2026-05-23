@@ -1,0 +1,320 @@
+/*
+ * AppShell layout. The 3-pane grid (rail / center / right) and chrome rails
+ * (titlebar / statusbar) live here because the column/row sizes (224px,
+ * 1fr, 1.15fr, 40px, 26px) come straight from the mockup's pixel grid and
+ * are not part of the 4px spacing scale exposed in tokens.css.
+ *
+ * Each numeric literal below mirrors `docs/mockup-design-dna.html` exactly.
+ * Visual values (colors, font weights) MUST come from tokens.css — these
+ * declarations only carry layout primitives.
+ */
+
+.app-grid {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr) minmax(0, 1.15fr);
+  grid-template-rows: 40px minmax(0, 1fr) 26px;
+  height: 100vh;
+  min-height: 900px;
+  background: var(--color-background);
+  color: var(--color-text-primary);
+}
+
+.app-grid.app-grid--code-hidden {
+  grid-template-columns: 224px minmax(0, 1fr) 0;
+}
+
+.app-grid.app-grid--code-hidden .right-pane {
+  display: none;
+}
+
+/* Each named region anchors to its grid track. */
+.titlebar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: linear-gradient(to bottom, var(--color-surface-1), var(--color-background));
+  padding-right: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sessions-rail {
+  grid-column: 1;
+  grid-row: 2;
+  border-right: 1px solid var(--color-border-subtle);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.center-pane {
+  grid-column: 2;
+  grid-row: 2;
+  border-right: 1px solid var(--color-border-subtle);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.right-pane {
+  grid-column: 3;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.statusbar {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  border-top: 1px solid var(--color-border-subtle);
+  background: var(--color-surface-1);
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-secondary);
+  gap: 10px;
+  overflow: hidden;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* ---- Sessions rail row ---- */
+.rail-item {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
+  padding: 6px 14px 6px 10px;
+  margin: 0 4px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+}
+.rail-item:hover {
+  background: var(--color-surface-1);
+}
+.rail-item.rail-item--active {
+  background: var(--color-surface-2);
+  color: var(--color-text-primary);
+}
+.rail-item .rail-item__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-tertiary);
+}
+.rail-item .rail-item__dot.rail-item__dot--run {
+  background: var(--color-accent-primary);
+  box-shadow: 0 0 0 3px var(--color-accent-bg);
+}
+.rail-item .rail-item__dot.rail-item__dot--ok {
+  background: var(--color-success);
+}
+.rail-item .rail-item__dot.rail-item__dot--err {
+  background: var(--color-danger);
+}
+.rail-item .rail-item__title {
+  font-size: var(--font-size-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rail-item .rail-item__meta {
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-family-mono);
+}
+
+/* ---- Center header ---- */
+.center-head {
+  height: 38px;
+  min-height: 38px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  gap: 10px;
+  background: var(--color-background);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.center-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 18px 22px 4px;
+  scrollbar-color: var(--color-surface-3) transparent;
+  scrollbar-width: thin;
+}
+.center-scroll::-webkit-scrollbar,
+.editor-area::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.center-scroll::-webkit-scrollbar-thumb,
+.editor-area::-webkit-scrollbar-thumb {
+  background: var(--color-surface-3);
+  border-radius: 4px;
+}
+.center-scroll::-webkit-scrollbar-track,
+.editor-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---- Composer ---- */
+.composer {
+  border-top: 1px solid var(--color-border-subtle);
+  background: var(--color-background);
+  padding: 10px 14px 12px;
+}
+.composer-box {
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  background: var(--color-surface-1);
+  padding: 8px 10px;
+}
+.composer-textarea {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  max-height: 200px;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
+  font-feature-settings: var(--font-feature-default);
+}
+.composer-textarea::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+/* ---- Right pane ---- */
+.tabs {
+  height: 38px;
+  min-height: 38px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  display: flex;
+  align-items: stretch;
+  background: var(--color-background);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  flex: none;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  border-right: 1px solid var(--color-border-subtle);
+  cursor: pointer;
+  position: relative;
+}
+.tab.tab--active {
+  background: var(--color-surface-1);
+  color: var(--color-text-primary);
+}
+.tab.tab--active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1.5px;
+  background: var(--color-accent-primary);
+}
+.tab .tab__agent-mark {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent-primary);
+  box-shadow: 0 0 0 3px var(--color-accent-bg);
+  display: inline-block;
+}
+
+.breadcrumbs {
+  height: 26px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  background: var(--color-background);
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.breadcrumbs .breadcrumbs__last {
+  color: var(--color-text-secondary);
+}
+.breadcrumbs .breadcrumbs__agent-banner {
+  margin-left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--color-accent-bg);
+  color: var(--color-accent-primary);
+  border-radius: 3px;
+  height: 18px;
+  padding: 0 6px;
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-medium);
+}
+
+.editor-area {
+  flex: 1;
+  overflow: auto;
+  background: var(--color-surface-1);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-md);
+  line-height: 20px;
+  position: relative;
+  padding: 10px 14px;
+  color: var(--color-text-tertiary);
+}
+
+/* ---- Connection banner ---- */
+.connection-banner {
+  margin: 8px 22px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  font-size: var(--font-size-sm);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.connection-banner.connection-banner--warn {
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+.connection-banner.connection-banner--err {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+/* ---- Live status pulse (Phase 14 animates) ---- */
+.status-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent-primary);
+  display: inline-block;
+}

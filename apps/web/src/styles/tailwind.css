@@ -12,6 +12,7 @@
  */
 @import "./tokens.css";
 @import "tailwindcss";
+@import "./app-shell.css";
 
 @theme inline {
   /* ---- Color: Surface ---- */
