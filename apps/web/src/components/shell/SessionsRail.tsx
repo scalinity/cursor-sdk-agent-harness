@@ -1,6 +1,8 @@
 import { useMemo, useRef } from "react";
 import type { RunSummary, SdkRunStatus } from "@harness/shared";
 import { cn } from "../../lib/cn.js";
+import { useRunStore } from "../../state/run-store.js";
+import { useMidnightTick } from "../../hooks/useMidnightTick.js";
 
 /**
  * SessionsRail — left rail with the sessions list. Live/Today/Yesterday
@@ -37,14 +39,32 @@ function dotClass(status: SdkRunStatus): string {
 
 export function SessionsRail({ runs, activeRunId, onSelectRun }: SessionsRailProps) {
   const searchRef = useRef<HTMLInputElement | null>(null);
-  // Expose the search input ref to keyboard shortcuts: the parent assigns
-  // `data-rail-search="true"` and focuses via document query.
+  // Re-render at the next midnight so today/yesterday buckets refresh
+  // without requiring a manual reload (RV2-W17).
+  const midnightTick = useMidnightTick();
+  // Overlay the live run-store status over the REST RunSummary so an
+  // in-flight status update (CANCELLED, FINISHED, …) from a stream
+  // surfaces in the rail without waiting for the next REST reload
+  // (RV2-S11).
+  const runStoreById = useRunStore((s) => s.byId);
+  const effectiveRuns = useMemo<RunSummary[]>(
+    () =>
+      runs.map((r) => {
+        const live = runStoreById[r.id];
+        return live?.status ? { ...r, status: live.status } : r;
+      }),
+    [runs, runStoreById],
+  );
   const grouped = useMemo(() => {
     const now = new Date();
     const groups: Record<Bucket, RunSummary[]> = { live: [], today: [], yesterday: [], earlier: [] };
-    for (const r of runs) groups[bucketize(now, r)].push(r);
+    for (const r of effectiveRuns) groups[bucketize(now, r)].push(r);
     return groups;
-  }, [runs]);
+    // midnightTick is a load-bearing dep even though it's not read inside —
+    // bumping it once per day forces recomputation so today/yesterday
+    // buckets refresh without requiring `effectiveRuns` to change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveRuns, midnightTick]);
 
   return (
     <aside className="sessions-rail">
