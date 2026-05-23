@@ -405,14 +405,24 @@ async function handleSubscribeRun(
     );
     return;
   }
-  if (state.subscriptions.has(frame.run_id)) {
-    // Already subscribed — replay from the new cursor without touching the
-    // existing bus subscription. Avoids duplicate liveQueue entries.
+  const existing = state.subscriptions.get(frame.run_id);
+  if (existing) {
+    // Re-subscribe over the same run. Reject rather than silently
+    // re-replaying: the existing subscription may have queued live
+    // events (still in `liveQueue` while `replaying === true`); the
+    // second replay reads SQLite directly with the new cursor and
+    // would leak those queued events past the boundary, producing
+    // out-of-seq frames. The client's expected pattern is
+    // unsubscribe → subscribe; an in-place resubscribe is a client
+    // bug we don't try to paper over.
     sendFrame(
       state,
-      ackFrame(frame.id, { message: "already subscribed; replay reissued" }),
+      errorFrame(
+        "VALIDATION_ERROR",
+        "Already subscribed to this run; send unsubscribe_run before re-subscribing",
+        { ack_for: frame.id },
+      ),
     );
-    await runReplay(state, frame.run_id, frame.after_seq, opts);
     return;
   }
 
