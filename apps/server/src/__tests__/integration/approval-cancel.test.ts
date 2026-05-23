@@ -346,6 +346,91 @@ describe("approval and cancellation integration", () => {
     ws.close();
   });
 
+  it("RV2-C2: a second approval_response for the same request_id while the first is in flight is rejected as already in flight", async () => {
+    // Slow responder so the first frame is parked in `await
+    // approvalResponder.resolve(...)` while the second arrives.
+    let releaseFirst!: () => void;
+    const firstPromise = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let resolveCallCount = 0;
+    h = await buildHarness({
+      approvalResponder: {
+        resolve: async () => {
+          resolveCallCount += 1;
+          if (resolveCallCount === 1) await firstPromise;
+        },
+      },
+    });
+    const csrf = await h.csrfToken();
+    const agentId = await createAgent(h, csrf);
+    const runId = await startRun(h, csrf, agentId);
+    await new Promise((r) => setTimeout(r, 100));
+
+    const ws = await h.openSocket(csrf);
+    ws.send(
+      JSON.stringify({
+        id: "sub-1234",
+        type: "subscribe_run",
+        sent_at: new Date().toISOString(),
+        run_id: runId,
+        after_seq: 0,
+        replay: { enabled: true, speed: "instant" },
+      }),
+    );
+    await waitForFrame<{ type: string; event?: { kind?: string } }>(
+      ws,
+      (frame) => frame.type === "sdk.request" && frame.event?.kind === "request.created",
+    );
+
+    // Fire two approval frames back-to-back. Different IDs so dedupe
+    // doesn't catch them.
+    ws.send(
+      JSON.stringify({
+        id: "approval-first-frame-id-aaaa",
+        type: "approval_response",
+        sent_at: new Date().toISOString(),
+        run_id: runId,
+        request_id: "req-1",
+        decision: "approve",
+      }),
+    );
+    ws.send(
+      JSON.stringify({
+        id: "approval-second-frame-id-bbb",
+        type: "approval_response",
+        sent_at: new Date().toISOString(),
+        run_id: runId,
+        request_id: "req-1",
+        decision: "deny",
+      }),
+    );
+
+    // Second frame should bounce immediately as APPROVAL_NOT_PENDING
+    // (already in flight). The first is still parked in firstPromise.
+    const err = await waitForFrame<{ type: string; code?: string; ack_for?: string }>(
+      ws,
+      (frame) =>
+        frame.type === "error" &&
+        frame.code === "APPROVAL_NOT_PENDING" &&
+        frame.ack_for === "approval-second-frame-id-bbb",
+    );
+    expect(err.code).toBe("APPROVAL_NOT_PENDING");
+
+    // Now release the first so the responder finishes and the
+    // approval.resolved frame goes out.
+    releaseFirst();
+    const resolved = await waitForFrame<{ type: string }>(
+      ws,
+      (frame) => frame.type === "approval.resolved",
+    );
+    expect(resolved.type).toBe("approval.resolved");
+    // Only the first responder call should have run; the second never
+    // reached the responder.
+    expect(resolveCallCount).toBe(1);
+    ws.close();
+  });
+
   it("startup-recovery finalizes RUNNING runs left by a prior process", async () => {
     // Seed a RUNNING row BEFORE buildApp runs recovery in onReady.
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "harness-recovery-"));

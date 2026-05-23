@@ -173,6 +173,24 @@ interface RunSubscription {
   unsubscribe: () => void;
 }
 
+/**
+ * RV2-C2: per-plugin-instance set of (runId, requestId) approval keys
+ * currently in flight through `handleApprovalResponse`. Two
+ * `approval_response` frames for the same request — coming in from
+ * the same socket, different sockets, or different tabs — race past
+ * `findPendingRequest` (which reads from SQLite, not from this set)
+ * unless we explicitly serialize them here. Without this guard the
+ * responder would be invoked twice and two outcome events would
+ * land in the log.
+ *
+ * Module-scoped Set is fine for a single-user local harness: scope
+ * is the buildApp lifetime, the key space is bounded by pending
+ * request IDs (single digit per run), and the finally-cleanup runs
+ * synchronously after `appendCanonicalEvent`'s commit (which makes
+ * `findPendingRequest` see the outcome row immediately).
+ */
+const inflightApprovals = new Set<string>();
+
 const wsPluginImpl: FastifyPluginAsync<WsPluginOptions> = async (
   app: FastifyInstance,
   opts: WsPluginOptions,
@@ -669,6 +687,23 @@ async function handleApprovalResponse(
   // `approval.failed` with code `APPROVAL_UNIMPLEMENTED` so the UI is
   // honest. Persist-before-broadcast: the synthetic canonical event
   // lands in `events` BEFORE the WS ack/error goes out.
+  // RV2-C2: serialize per-(runId, requestId). The SQLite lookup
+  // below sees "still pending" until our outcome row commits, so two
+  // concurrent frames would both pass it and double-resolve. Hold
+  // the inflight key until persist completes; the finally below
+  // releases it.
+  const inflightKey = `${frame.run_id}::${frame.request_id}`;
+  if (inflightApprovals.has(inflightKey)) {
+    sendFrame(
+      state,
+      errorFrame(
+        "APPROVAL_NOT_PENDING",
+        `Approval for request_id=${frame.request_id} is already in flight`,
+        { ack_for: frame.id },
+      ),
+    );
+    return;
+  }
   const pending = findPendingRequest(opts, frame.run_id, frame.request_id);
   if (!pending) {
     sendFrame(
@@ -688,6 +723,7 @@ async function handleApprovalResponse(
     decision: frame.decision,
     ...(frame.reason !== undefined ? { reason: frame.reason } : {}),
   };
+  inflightApprovals.add(inflightKey);
   try {
     await opts.approvalResponder.resolve(input);
     // RV2-C1 + W5: one ISO timestamp per branch shared between
@@ -768,6 +804,13 @@ async function handleApprovalResponse(
       return;
     }
     sendFrame(state, errorFrame(code, message, { ack_for: frame.id }));
+  } finally {
+    // RV2-C2: release the per-(runId, requestId) inflight key. By
+    // this point the outcome event has either committed (so a
+    // re-issue will see hasOutcome === true via findPendingRequest)
+    // or it failed and the client received INTERNAL_ERROR. Either
+    // way, the next attempt is safe to admit.
+    inflightApprovals.delete(inflightKey);
   }
 }
 
