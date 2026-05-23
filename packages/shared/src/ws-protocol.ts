@@ -91,7 +91,10 @@ export const approvalResponseFrameSchema = frameBaseSchema.extend({
   request_id: requestIdSchema,
   decision: z.enum(["approve", "deny"]),
   reason: z.string().max(2_000).optional(),
-  payload: z.unknown().optional(),
+  // RV2-S5: payload was optional and unused. Dropped to prevent
+  // clients shoveling arbitrary data through; if a future protocol
+  // needs structured response data, add it back with an explicit
+  // schema, not z.unknown().
 });
 
 export const clientHeartbeatFrameSchema = frameBaseSchema.extend({
