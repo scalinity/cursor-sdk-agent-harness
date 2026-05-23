@@ -752,6 +752,14 @@ async function handleApprovalResponse(
     // client never sees ack-ok on a failed persist.
     try {
       const now = new Date().toISOString();
+      // RV2-S9 / SECURITY: `frame.reason` is user-controlled text
+      // (≤2000 chars via the wire schema). We persist it verbatim
+      // into `payload.reason`. The JsonInspector renders it through
+      // safe React text nodes today, so there is no live XSS sink —
+      // but a future markdown/HTML inspector that renders this field
+      // MUST escape it. Treat any new consumer of `payload.reason`
+      // as untrusted input. Same caveat applies to the failure
+      // branch below.
       opts.pipeline.appendCanonicalEvent({
         runId: frame.run_id,
         agentId,

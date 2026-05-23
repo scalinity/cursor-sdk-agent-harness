@@ -305,6 +305,14 @@ export const useRunStore = create<RunState>((set) => ({
         // request_id. The originating seq lets the renderer scroll
         // back to the inline location when the user clicks the
         // banner.
+        //
+        // RV2-W8: the `{ ...approvalsByRequestId, [reqId]: ... }`
+        // spread is O(N) per request in the count of approvals
+        // already seen for this run. In practice N is single-digit
+        // per run (spec §4 caps pending approvals per turn; harness
+        // retention bounds historical accumulation). If a future
+        // protocol grows the per-run approval count meaningfully,
+        // swap this for a structural-share Map or Immer-style draft.
         const reqId = frame.event.payload.request_id;
         nextEvents.approvalsByRequestId = {
           ...nextEvents.approvalsByRequestId,
