@@ -14,6 +14,7 @@ import { useRunHistory } from "../hooks/useRunHistory.js";
 import { useSettings } from "../hooks/useSettings.js";
 import { useAgentStream } from "../hooks/useAgentStream.js";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
+import { useToastSweeper } from "../hooks/useToastSweeper.js";
 import { useUiStore } from "../state/ui-store.js";
 import { useRunStore } from "../state/run-store.js";
 import { Titlebar } from "../components/shell/Titlebar.js";
@@ -27,6 +28,7 @@ import { cn } from "../lib/cn.js";
 export function AppShell() {
   const csrf = useCsrfToken(); // bootstrap CSRF into ui-store.
   useSettings(); // hydrate settings on mount.
+  useToastSweeper(); // dismiss expired toasts automatically (RV2-S8).
   const { activeAgent } = useAgents();
   const { runs } = useRunHistory();
   const activeRunId = useRunStore((s) => s.activeRunId);
