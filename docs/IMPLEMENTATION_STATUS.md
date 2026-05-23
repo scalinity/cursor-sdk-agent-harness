@@ -10,9 +10,11 @@ each phase. Use it as the single source of truth for "what is decided" vs
 |---|---|---|---|
 | 01 | SDK Verification & Open Questions | ✅ complete | See `SDK_VERIFICATION_LEDGER.md`. |
 | 02 | Monorepo Bootstrap | ✅ complete | pnpm workspace, 3 packages, ESLint flat config + custom rule, Tailwind v4 stub. |
-| 03 | Design Token Extraction | ⏳ pending | Next: run `03_DESIGN_TOKENS_FROM_MOCKUP.md`. |
-| 1 | Shared Contracts & DB Foundation | ⏳ pending | |
-| ≥2 | (per spec §16) | ⏳ pending | |
+| 03 | Design Token Extraction | ✅ complete | OKLCH tokens from mockup, Tailwind v4 `@theme inline`, Button primitive, `/__tokens` QA page, `no-hardcoded-visuals` rule. |
+| 04 | Shared Contracts & DB Foundation | ✅ complete | Zod schemas, SQLite/Drizzle schema mirroring spec §8, seven repositories, default settings seed, retention job. |
+| 05 | Security, Keychain, Workspace Policy | ✅ complete | Keychain stores, CSRF/origin/bind plugins, workspace policy with symlink-escape detection, settings/api-key/allowlist REST routes. |
+| 06 | Cursor SDK Runtime Manager | ✅ complete | `@cursor/sdk@1.0.13` installed, `AgentRuntime` + `RunController` + `ActiveRuns` registry, agents/runs REST routes, stub stream sink, stubbed-SDK integration tests (no live SDK call). |
+| ≥7 | (per spec §16) | ⏳ pending | |
 
 ---
 
@@ -302,6 +304,744 @@ Scripts:
    different vite type chains internally; runtime is unaffected and
    `pnpm --filter @harness/web typecheck` is green.
 
+---
+
+## Phase 03 Outcomes
+
+### Summary
+
+Extracted OKLCH design tokens directly from `docs/mockup-design-dna.html`,
+materialized them as CSS custom properties in `apps/web/src/styles/tokens.css`,
+wired Tailwind v4 to read them via `@theme inline`, shipped a `Button`
+primitive covering every variant × size × state, added a dev-only
+`/__tokens` QA page, and locked the boundary with a new
+`harness/no-hardcoded-visuals` ESLint rule.
+
+### Decisions made (binding for downstream phases)
+
+1. **Token namespace is OKLCH**. Every colour token uses the OKLCH
+   colour space verbatim from the mockup `:root` block. Do not transcode
+   to hex/RGB/HSL — the warm dark coffee palette relies on OKLCH's
+   perceptual uniformity. Modern browsers support it natively.
+2. **Token authoring lives in `tokens.css`**. Tailwind v4 reads tokens
+   via `@theme inline { --color-foo: var(--color-foo); }`. The `inline`
+   variant prevents Tailwind from re-emitting `:root` declarations and
+   removes the otherwise-circular variable definition.
+3. **Tailwind v4 `@theme inline` is the only theme bridge**. No
+   utility classes are defined outside the theme or via custom
+   `@layer components`. Body defaults and the `.mono` helper live in
+   `@layer base` of `tailwind.css`.
+4. **Control heights are tokenised separately from spacing.**
+   Buttons live on a 22/26/32px scale (`--height-control-sm/md/lg`)
+   that does not snap to the 4px spacing scale. They are exposed via
+   `--spacing-control-sm/md/lg` in `@theme inline` so utilities
+   `h-control-sm/md/lg` exist.
+5. **`harness/no-hardcoded-visuals` is the visual-law enforcer**.
+   It scans all string literals and template elements under
+   `apps/web/src/{components,pages}/**`, flags arbitrary Tailwind
+   colour/size brackets (`bg-[#fff]`, `p-[13px]`, `text-[14px]`) and
+   any inline `style={{...}}` with banned colour/spacing/font keys.
+   Variant-selector brackets like `data-[selected=true]:` and
+   `aria-[busy=true]:` are not flagged (their contents have neither
+   a colour nor a CSS unit).
+6. **Dev-only `/__tokens` route**. The route registration is gated
+   by `import.meta.env.DEV`. Vite folds the constant at build time;
+   production bundles drop the route and tree-shake `TokensQA.tsx`
+   since nothing else references it.
+7. **No second theme this phase**. The mockup is dark-first; light
+   mode is not added until a reference image arrives. Spec §3.5
+   "Dark/light assumption" row holds.
+
+### Files created in this phase
+
+`apps/web/`:
+- `src/styles/tokens.css` — full token set (colour, typography, spacing,
+  control heights, radius, motion, elevation). Replaces the Phase 02
+  placeholder.
+- `src/styles/tailwind.css` — `@import "./tokens.css"`, `@import "tailwindcss"`,
+  `@theme inline` block registering every token, plus `@layer base`
+  body defaults and `.mono` helper.
+- `index.html` — adds Google Fonts preconnect + Inter / JetBrains Mono
+  link, removes Phase 02 `bg-black text-white` body classes.
+- `src/components/primitives/Button.tsx` — Button primitive: variants
+  `primary | secondary | ghost | danger`, sizes `sm | md | lg`, states
+  default/hover/active/focus-visible/disabled/loading/selected, plus
+  `leading` / `trailing` / `kbd` slots.
+- `src/pages/TokensQA.tsx` — `/__tokens` fixture: surface, border, text,
+  accent, semantic swatches; Inter + JetBrains Mono type scales; radii;
+  Button variant × size × state matrix; focus state row.
+- `src/app/App.tsx` — adds dev-only `/__tokens` route + dev hint on the
+  bootstrap placeholder.
+
+`tooling/eslint-plugin-harness/`:
+- `src/rules/no-hardcoded-visuals.js` — new rule.
+- `src/rules/no-hardcoded-visuals.test.js` — unit test (5 valid, 8 invalid).
+- `src/index.js` — registers the new rule.
+- `src/integration.test.js` — adds three new integration tests covering
+  scope (fires under `components/`, silent under `hooks/`, silent on
+  token-clean code).
+
+Root:
+- `eslint.config.js` — enables `harness/no-hardcoded-visuals: error` on
+  the existing `apps/web/src/{components,pages}/**` glob.
+
+### Commands run and results
+
+- `pnpm typecheck` — all four workspaces pass.
+- `pnpm lint` — clean, no warnings, no errors.
+- `pnpm test` — 9 tests across 4 packages pass:
+  - `packages/shared`: 2 tests
+  - `tooling/eslint-plugin-harness`: 6 tests
+    (no-use-effect-in-components: 1 / no-hardcoded-visuals: 1 /
+    integration: 4 — including 3 new ones for the visuals rule)
+  - `apps/server`: 2 tests
+  - `apps/web`: 0 tests (`passWithNoTests: true`)
+- `pnpm --filter @harness/web dev` + `curl /__tokens` → 200 OK.
+- Compiled `tailwind.css` (≈ 25 KB) inspected to confirm every utility
+  used in the Button and QA page resolves to a `var(--color-*)` or
+  `var(--height-*)` reference:
+  - `bg-accent-primary` → `background-color: var(--color-accent-primary)`
+  - `h-control-sm/md/lg` → `height: var(--height-control-sm|md|lg)`
+  - `text-2xs`, `text-md`, `text-base` → `font-size: var(--font-size-*)`
+  - `focus-visible:ring-accent-soft` → `--tw-ring-color: var(--color-accent-soft)`
+  - `data-[selected=true]:bg-accent-bg` compiled to
+    `[data-selected="true"] { background-color: var(--color-accent-bg) }`.
+- Visual confirmation: full-page screenshot saved as
+  `phase03-tokens-qa.png` shows surface stepping matches mockup, accent
+  amber at 72° hue is clearly distinguishable from a saturated orange,
+  4-level text greyscale reads cleanly, button variant matrix renders
+  every state from tokens.
+
+### Acceptance gates satisfied
+
+- ✅ Every spec §3.5 token category has at least one defined token
+  (colour, typography, spacing, radius, motion, elevation), plus the
+  Phase 03 additions: `--color-*-bg` semantics, control heights.
+- ✅ Colour tokens use OKLCH; values match the mockup `:root` block
+  verbatim. No placeholder hex remains in `tokens.css`.
+- ✅ Tailwind utilities `bg-surface-1`, `text-text-primary`,
+  `border-border-subtle`, `bg-accent-primary`, etc., work in JSX
+  (verified in compiled CSS and live render).
+- ✅ Button primitive renders every variant × size × state from tokens
+  only — no inline styles, no arbitrary Tailwind values.
+- ✅ `harness/no-hardcoded-visuals` fires on a fixture containing
+  `bg-[#231e1a]`, `text-[14px]`, and `style={{ color: 'red' }}` under
+  `apps/web/src/components/`, and is silent on the Button file and on
+  token-clean components (proved by the new integration tests).
+- ✅ `/__tokens` page renders all swatches, type scale, radii, and
+  Button states. Screenshot in `phase03-tokens-qa.png`.
+- ✅ `pnpm typecheck && pnpm lint && pnpm test` all pass.
+
+### Visual deltas vs. the mockup (follow-up candidates)
+
+- The derived `--color-accent-primary-hover` and `-pressed` values
+  (`oklch(0.82 0.14 72)` / `oklch(0.76 0.13 72)`) are eyeball-tuned
+  ±0.04 L from the base accent. They read correctly against the
+  mockup's `.send-btn` hover/active feel, but later phases may want a
+  hover-state pixel comparison against the live composer.
+- Tailwind v4's default `--spacing` (4px step) is left untouched. Our
+  token scale agrees through step 8 (32 px) but diverges at step 9
+  (40 px in our scale vs 36 px in TW's default). Components that need
+  40 px should use `p-10` (= 40 px). If this becomes a frequent footgun
+  Phase 08 can override `--spacing` in `@theme`.
+
+### Known limitations / deferred items
+
+1. **Caret-blink and pulse keyframes**: Spec §3.5 motion tokens exist
+   (`--duration-*`, `--ease-*`) but no `@keyframes` are defined yet.
+   Phase 09 (composer caret) and Phase 14 (status pulse) will land them.
+2. **No light theme**: Reference image is dark-first; light theme is
+   deferred until a second mockup arrives.
+3. **No second primitive**: The Button is the only primitive shipped
+   this phase. AppShell, Sidebar, Composer, Toolbar are Phase 08+.
+4. **`size-3` spinner**: The loading spinner uses `size-3` (12 px).
+   At `h-control-sm = 22px` this is visually tight; if Phase 09's
+   composer uses `size: "sm"` with `loading: true` we may want a
+   smaller spinner glyph.
+
+---
+
+## Phase 04 Outcomes
+
+### Summary
+
+Built the data foundation: `packages/shared` now exports the full Zod schema
+surface (JSON primitives, SDK message union, REST contracts, WebSocket frame
+protocol, pricing helpers, domain row projections). `apps/server` gained a
+SQLite + Drizzle persistence layer mirroring spec §8 verbatim — single
+`0001_initial.sql` migration, seven repositories, default settings seed, and
+a retention prune job. `pnpm migrate` is wired to a real migrator that runs
+`verifyMigrations()` against `DB_PATH`.
+
+### Decisions made (binding for downstream phases)
+
+1. **`better-sqlite3@12.10.0`** is required on Node 26 (v8 API changed in v26
+   broke `better-sqlite3@11.x`). Native binding is opted-in via
+   `pnpm.onlyBuiltDependencies` in the root `package.json`.
+2. **Drizzle 0.38.x array-form `extraConfig`** — schema callbacks return
+   arrays of indexes/checks/foreign keys, not deprecated object form.
+3. **SQL is the canonical schema artifact.** `apps/server/src/db/migrations/0001_initial.sql`
+   is reviewed-SQL and is what `pnpm migrate` applies. The Drizzle TS schema
+   exists only so the runtime gains typed table handles. The migrator reads
+   `.sql` files under `migrations/` ordered by their leading numeric prefix
+   and records applied names in `_harness_migrations`.
+4. **Sequence allocation is transactional inside the events repo.** `EventsRepo.appendCanonicalEvent`
+   runs a single `BEGIN…COMMIT` that bumps `runs.last_seq` via `UPDATE … RETURNING last_seq`
+   and inserts the row with that seq. `UNIQUE(run_id, seq)` is the safety net.
+   No caller may insert into `events` directly.
+5. **Repositories return camelCase domain objects.** SQL columns stay
+   snake_case; the per-repo `rowToDomain` mapper is the only place that knows
+   the column names. `packages/shared` never imports SQL.
+6. **Retention prunes `raw_json` only.** `pruneRawEventJson(now)` nulls
+   `raw_json` for events on terminal runs (FINISHED/ERROR/CANCELLED/EXPIRED)
+   older than `settings.rawEventRetentionDays`. Canonical `payload_json` is
+   never deleted. Scheduling is deferred to Phase 14 per the phase prompt.
+7. **Default settings seed runs once.** `verifyMigrations()` inserts the 13
+   spec-listed rows if and only if `settings` is empty. A re-run with a
+   user-edited row count > 0 never re-seeds. `pricing.last_verified_at`
+   defaults to JSON `null` so the freshness banner shows on first launch.
+8. **`pnpm migrate` indirection.** Root script shells into
+   `apps/server/node_modules/.bin/tsx src/scripts/run-migrations.ts` so the
+   CLI and runtime share `openDb` + `verifyMigrations`. `pnpm` shell shorthand
+   (`pnpm migrate`) is gone in pnpm 10 — use `pnpm -w run migrate`.
+9. **Workspace `findMatching` uses `path.normalize` + `path.relative`** for
+   the descendant check, not string prefix comparison. The proper realpath
+   resolution + symlink escape detection lives in Phase 05's
+   `workspace-policy.ts`.
+
+### Files created in this phase
+
+`packages/shared/src/`:
+- `constants.ts` — IDs, frame ID, ISO datetime, schema/protocol version,
+  `LARGE_PAYLOAD_THRESHOLD_BYTES`.
+- `models.ts` — `modelIdSchema`, `settingSourceSchema`, `sdkRunStatusSchema`,
+  `agentModeSchema`, `agentStatusSchema`, `usageSourceSchema`,
+  `replaySpeedSchema`, `mcpValidationStatusSchema`, plus
+  `SDK_RUN_TERMINAL_STATUSES`, `MODEL_LABELS`, `DEFAULT_MODEL_ID`.
+- `sdk-surface.ts` — `SDKMessage` discriminated union, `TextBlock`,
+  `ToolUseBlock`, `tokenUsageSchema`, `cloudAgentOptionsSchema`,
+  `mcpServerConfigSchema`, `subagentModelSchema`.
+- `domain.ts` — `agentRowSchema`, `runRowSchema`, `eventRowSchema`,
+  `canonicalEventBaseSchema`, `eventSdkTypeSchema`, `settingRowSchema`,
+  `mcpServerRowSchema`, `subagentDefinitionRowSchema`,
+  `workspaceAllowlistRowSchema`, `runInterruptedReasonSchema`.
+- `ws-protocol.ts` — every spec §7 client/server frame schema, the
+  `clientFrameSchema` and `serverFrameSchema` discriminated unions,
+  `wsErrorCodeSchema`.
+- `pricing.ts` — `PRICING_SETTING_KEYS`, `pricingSettingsSchema`,
+  micro-USD helpers, `pricingKeyForModel`.
+- `rest-contracts.ts` — health/agents/runs/events/settings/usage/MCP/
+  subagent/workspace request and response schemas. Routes not yet
+  implemented carry a `// TODO: implement in Phase NN` comment.
+- `index.ts` — single barrel for all of the above.
+
+`apps/server/src/db/`:
+- `client.ts` — `openDb({ filePath, migrationsDir?, skipSeed? })`, runs
+  PRAGMAs, applies `.sql` migrations idempotently via
+  `_harness_migrations`, seeds defaults.
+- `schema.ts` — Drizzle schema mirroring spec §8 (snake_case columns,
+  camelCase field properties).
+- `seed.ts` — 13-row default settings seed; idempotent.
+- `retention.ts` — `pruneRawEventJson(raw, now?)` with
+  `RetentionResult`.
+- `migrations/0001_initial.sql` — full DDL verbatim from spec §8.
+- `repositories/{agents,runs,events,settings,mcp-servers,subagents,workspace-allowlist}.repo.ts`
+  plus `repositories/mapping.ts` and `repositories/index.ts`.
+- `__tests__/{migrations,agents-runs-events,settings-mcp-subagents,workspace-allowlist,retention}.test.ts`
+  plus `__tests__/helpers.ts`.
+
+`apps/server/`:
+- `drizzle.config.ts` — Drizzle CLI config (dialect: sqlite, out: ./src/db/migrations).
+- `src/scripts/run-migrations.ts` — standalone CLI that opens the DB,
+  applies migrations, seeds defaults, prints `applied=… seeded=…`.
+
+Root:
+- `scripts/migrate.mjs` — replaces the Phase 02 stub; shells into the
+  server's bundled `tsx` to run `run-migrations.ts`.
+- `package.json` — adds `pnpm.onlyBuiltDependencies` allowlist for
+  `better-sqlite3` so the native binding can build under pnpm 10.
+
+`apps/server/package.json`:
+- Adds `better-sqlite3@12.10.0`, `drizzle-orm@0.38.3` as runtime deps;
+  `@types/better-sqlite3@7.6.12`, `drizzle-kit@0.30.1` as dev deps.
+
+### Commands run and results
+
+- `pnpm --filter @harness/server add better-sqlite3@12.10.0 drizzle-orm@0.38.3`
+  — installed.
+- `pnpm --filter @harness/server add -D drizzle-kit@0.30.1 @types/better-sqlite3@7.6.12`
+  — installed.
+- `pnpm rebuild better-sqlite3` — native binding built against Node 26.
+- `pnpm typecheck` — all four workspaces pass.
+- `pnpm lint` — clean (no warnings).
+- `pnpm test` — 33 tests pass:
+  - `packages/shared`: 2 (json round-trip)
+  - `tooling/eslint-plugin-harness`: 6 (rules + integration)
+  - `apps/server`: 24 (app smoke 2 + DB tests 22 across migrations,
+    agents/runs/events, settings/mcp/subagents, workspace allowlist,
+    retention)
+  - `apps/web`: 0 (`passWithNoTests: true`)
+- `DB_PATH=/tmp/harness-migrate-test.sqlite pnpm -w run migrate`
+  - First run: `applied=1 seeded=true`, 7 tables created, 13 settings
+    rows present.
+  - Second run: `applied=0 seeded=false` — idempotent.
+  - `PRAGMA journal_mode → wal` confirmed on the on-disk DB.
+
+### Acceptance gates satisfied
+
+- ✅ `pnpm typecheck && pnpm lint && pnpm test` all pass.
+- ✅ `pnpm -w run migrate` against a fresh `.sqlite` file applies the
+  full schema; rerun applies zero migrations.
+- ✅ Concurrent `appendCanonicalEvent` calls produce gapless sequences
+  (50 sequential appends, seqs = 1..50, no `UNIQUE` violation).
+- ✅ `DELETE FROM agents WHERE id = ?` cascades runs and events
+  (verified row counts go to zero).
+- ✅ CHECK constraints reject invalid `sdk_type`, malformed JSON in
+  `payload_json`, and duplicate `(run_id, seq)` inserts.
+- ✅ Default settings seed produces every key listed in spec §8 →
+  Default Settings Seed (asserted against `DEFAULT_SETTING_KEYS`
+  constant exported from `seed.ts`).
+- ✅ `packages/shared` imports cleanly from both `apps/server` (proven
+  by repository code) and (transitively, via `@harness/shared`)
+  `apps/web`.
+
+### Spec deltas
+
+None. The migration SQL is verbatim from spec §8. Drizzle schema and
+repositories use camelCase TypeScript projections of those columns; that
+boundary is documented in the working agreement (CLAUDE.md) and was
+already specified.
+
+### Known limitations / deferred items
+
+1. **Retention job scheduling.** The `pruneRawEventJson` function exists
+   and is tested, but the 24-hour interval scheduler lives in Phase 14
+   per the phase prompt.
+2. **REST contract bodies.** All schemas are written but only the
+   health-route handlers are wired. Each non-health route in
+   `rest-contracts.ts` carries a `// TODO: implement in Phase NN`
+   comment so phases consuming them later don't drift.
+3. **`Buffer.byteLength` is used for `payload_bytes` / `raw_bytes`.**
+   This is correct for UTF-8 JSON. If a future phase adds binary blob
+   columns, the byte-count helper should move to a shared place.
+4. **`drizzle-kit` is installed but unused.** We hand-author SQL
+   migrations (per spec §8 "explicit reviewed SQL"); `drizzle-kit` is
+   present so future phases can use it for migration scaffolding if
+   desired, but the runtime path is the file-based applier in
+   `client.ts`.
+
+---
+
+## Phase 05 Outcomes
+
+### Summary
+
+Built the local-only security perimeter. `keytar` is now the sole API-key
+store; CSRF and Origin policies gate every mutating REST call; `WorkspacePolicy`
+resolves candidate paths through `fs.realpath` and rejects symlink escapes
+before any allowlist lookup. The settings, API-key, and workspace-allowlist
+REST routes are wired with Zod validation and proper error codes. The
+one-shot `CURSOR_API_KEY` env-import is wired in `buildApp.onReady` and
+never overwrites an existing Keychain entry.
+
+### Decisions made (binding for downstream phases)
+
+1. **`keytar@7.9.0` is the only secret store.** Added to
+   `pnpm.onlyBuiltDependencies`. A `KeychainDriver` interface lives in
+   `apps/server/src/keychain/keytar-driver.ts` so tests can swap in
+   `createInMemoryKeychainDriver()` without loading the native binding.
+   Production code path is `getKeychainDriver()` → `createRequire` →
+   `keytar` (lazy-loaded to keep cold-start cheap).
+2. **Three Keychain accounts** under the configured service name
+   (`KEYCHAIN_SERVICE`, default `cursor-sdk-agent-harness`):
+   - `cursor-api-key` — Cursor SDK API key
+   - `local-session-secret` — reserved for future cookie/session work
+   - `csrf-secret` — HMAC key for the CSRF tokenizer
+   New 32-byte base64url secrets are minted on first run and persisted.
+3. **CSRF token shape**: `${nonceB64u}.${expSec}.${hmacB64u}` with HMAC-SHA256
+   over `${nonce}.${exp}` using the Keychain-stored secret. 24-hour TTL.
+   Validation is constant-time (`crypto.timingSafeEqual`).
+4. **`/api/security/csrf-token` is the bootstrap endpoint.** It is GET-only
+   and CSRF-exempt (`exemptUrls` in the plugin). All `POST/PUT/PATCH/DELETE`
+   requests under `/api/*` must present a valid `X-CSRF-Token` header.
+5. **Origin policy is strict**. `originPolicyPlugin` accepts only the
+   configured `WEB_ORIGIN`. A missing `Origin` header is allowed only for
+   safe methods AND only when the request came from a loopback IP (covers
+   `curl`). Mutating methods without an Origin are 403 `ORIGIN_MISSING`.
+   Wildcard CORS is never accepted.
+6. **Bind policy is enforced in two places.** `apps/server/src/config/env.ts`
+   rejects non-loopback `HOST` at parse time. `apps/server/src/security/bind-policy.ts`
+   exposes `assertBindAllowed` for re-assertion inside `index.ts` so a future
+   refactor cannot accidentally drop the check. Both consult `LOOPBACK_HOSTS`.
+7. **`WorkspacePolicy.check` order is fixed.** `path.normalize` → `fs.realpath`
+   (ENOENT → `missing`) → symlink-escape check (realpath of candidate must be
+   inside `fs.realpath` of the apparent parent) → allowlist match against the
+   realpath. `last_used_at` is updated by callers, not by this method.
+8. **One-shot `CURSOR_API_KEY` import** runs inside `app.onReady`. It is a
+   pure write: no overwrite, no log of the value, info-level log line saying
+   the env var can now be unset.
+9. **Pino redaction is centralized** in `REDACT_CONFIG` (`apps/server/src/observability/logger.ts`).
+   Both the standalone `createLogger` and the Fastify logger config import
+   it. Covers: top-level `apiKey`/`CURSOR_API_KEY`/`Authorization`, header
+   variants (`x-csrf-token`, `X-CSRF-Token`, `authorization` lower/upper
+   case), wildcard `*.token`/`*.secret`/`*.password`/`*.key`, and nested
+   `config.*.token`/`config.*.secret`. All paths censor to `[REDACTED]`.
+10. **Settings shape mapping lives in
+    `apps/server/src/services/settings.service.ts`.** Flat settings keys
+    (e.g. `pricing.composer-2-5-fast.input_per_million_usd_micros`) are
+    folded into the structured `SettingsSnapshot` defined in
+    `packages/shared`. Reads return zero for missing pricing keys (default
+    per spec §8 seed); writes patch only specified fields.
+
+### Files created in this phase
+
+`apps/server/src/keychain/`:
+- `keytar-driver.ts` — `KeychainDriver` interface + `getKeychainDriver()` +
+  `createInMemoryKeychainDriver()` + `setKeychainDriver()`/`resetKeychainDriverForTests()`.
+- `cursor-api-key.ts` — `CursorApiKeyStore` (get/set/delete/hasApiKey).
+- `local-session-secret.ts` — `LocalSessionSecretStore.getOrCreate()`.
+- `csrf-secret.ts` — `CsrfSecretStore.getOrCreate()`.
+- `index.ts` — barrel.
+- `__tests__/keychain.test.ts` — 6 tests.
+
+`apps/server/src/security/`:
+- `bind-policy.ts` — `LOOPBACK_HOSTS`, `isLoopback`, `checkBind`,
+  `assertBindAllowed`, `BindPolicyError`.
+- `csrf.ts` — `CsrfTokenizer` + `csrfPlugin` (Fastify plugin via
+  `fastify-plugin`).
+- `origin-policy.ts` — `originPolicyPlugin`.
+- `workspace-policy.ts` — `WorkspacePolicy.check`.
+- `index.ts` — barrel.
+- `__tests__/{bind-policy,csrf,workspace-policy}.test.ts` — 5 + 6 + 8 tests.
+
+`apps/server/src/routes/`:
+- `security.routes.ts` — `GET /api/security/csrf-token`.
+- `settings.routes.ts` — `GET/PATCH /api/settings`, `PATCH /api/settings/pricing`,
+  `GET/PUT/DELETE /api/settings/api-key`.
+- `workspace-allowlist.routes.ts` — `GET/POST /api/workspace-allowlist`,
+  `DELETE /api/workspace-allowlist/:entryId?confirm=true`,
+  `POST /api/workspace-allowlist/validate` (single or batch).
+- `index.ts` — re-exports + dependency wiring.
+
+`apps/server/src/services/`:
+- `settings.service.ts` — `getSettingsSnapshot`, `applySettingsUpdate`,
+  `applyPricingUpdate`.
+
+`apps/server/src/__tests__/integration/`:
+- `security.test.ts` — 10 tests (origin policy, CSRF, api-key roundtrip,
+  workspace validate, settings snapshot).
+- `workspace-allowlist.routes.test.ts` — 3 tests (symlink escape via REST,
+  create/list/delete, missing path).
+- `api-key-bootstrap.test.ts` — 3 tests (env import, no-overwrite, no-op
+  when unset).
+
+`apps/server/src/observability/`:
+- `__tests__/logger.test.ts` — 5 redaction tests.
+
+Modified:
+- `apps/server/src/app.ts` — registers origin/csrf/cors/websocket plugins,
+  wires the one-shot `CURSOR_API_KEY` import, returns `BuiltApp` with the
+  api-key store and CSRF tokenizer attached.
+- `apps/server/src/index.ts` — opens the DB, verifies migrations, builds
+  repos, calls `assertBindAllowed`, hands the result to `buildApp`.
+- `apps/server/src/app.test.ts` — refactored for the new `AppDeps` shape.
+- `apps/server/src/observability/logger.ts` — central `REDACT_PATHS` +
+  `REDACT_CONFIG`; `createLogger` uses them.
+- `apps/server/src/security/index.ts` — barrel.
+- `apps/server/src/routes/index.ts` — `RouteDeps` plumbing.
+- `apps/server/package.json` — `keytar@7.9.0`, `fastify-plugin@5.0.1`.
+- `package.json` (root) — `keytar` added to `pnpm.onlyBuiltDependencies`.
+
+### Commands run and results
+
+- `pnpm --filter @harness/server add keytar@7.9.0 fastify-plugin@5.0.1` —
+  installed.
+- `pnpm rebuild keytar` + `npx prebuild-install` inside the `keytar` package
+  produced `build/Release/keytar.node` (no node-gyp build needed).
+- `pnpm typecheck` — clean (`packages/shared`, `tooling/eslint-plugin-harness`,
+  `apps/server`, `apps/web` all pass).
+- `pnpm lint` — clean.
+- `pnpm test` — 70 server tests pass (was 24 pre-phase). Breakdown:
+  - app smoke 2, observability/logger 5, keychain 6, bind-policy 5,
+    csrf 6, workspace-policy 8, integration/security 10,
+    integration/workspace-allowlist routes 3, integration/api-key bootstrap 3,
+    DB suite 22. Shared (2) and ESLint plugin (6) tests also pass; web has 0.
+- `HOST=0.0.0.0 ALLOW_REMOTE_BIND=false pnpm --filter @harness/server start` →
+  exits fatally with `Non-loopback HOST requires ALLOW_REMOTE_BIND=true.
+  Refusing to bind for safety.`
+- Live curl against the running server (`DB_PATH=/tmp/harness-phase05-acceptance.sqlite KEYCHAIN_SERVICE=cursor-sdk-agent-harness-phase05-curl pnpm --filter @harness/server start`):
+  - `GET /api/health/live` → `{"status":"ok"}` (HTTP 200).
+  - `PATCH /api/settings` with no CSRF → `{"code":"CSRF_FAILED"}` (HTTP 403).
+  - `GET /api/security/csrf-token` → 77-char token.
+  - `PUT /api/settings/api-key` with `{ "value": "sk-test-…" }` →
+    `{"present":true}` (HTTP 200).
+  - `GET /api/settings/api-key` → `{"present":true}` (HTTP 200).
+  - `DELETE /api/settings/api-key` → `{"present":false}` (HTTP 200).
+  - `POST /api/workspace-allowlist/validate` with a symlink-escape path →
+    `{"allowed":false,"normalizedPath":"…","reason":"symlink_escape"}` (HTTP
+    200).
+  - `GET /api/health/live` with `Origin: http://evil.example.com` →
+    `{"code":"ORIGIN_FORBIDDEN"}` (HTTP 403).
+
+### Acceptance gates satisfied
+
+- ✅ `pnpm typecheck && pnpm lint && pnpm test` all pass.
+- ✅ `pnpm dev` (and `pnpm --filter @harness/server start`) bind to
+  `127.0.0.1`. `HOST=0.0.0.0 pnpm dev` exits non-zero with the bind-policy
+  message.
+- ✅ `curl -X PATCH http://127.0.0.1:4783/api/settings -d '{}'` returns
+  HTTP 403 `CSRF_FAILED` without a token.
+- ✅ `PUT /api/settings/api-key` with a valid `X-CSRF-Token` and a
+  reasonable value stores the key; subsequent `GET` returns
+  `{ "present": true }`; `DELETE` flips presence back to `false`.
+- ✅ `POST /api/workspace-allowlist/validate` with a symlink-escape path
+  returns `{ allowed: false, reason: "symlink_escape" }`.
+- ✅ Logger redaction tests prove `apiKey`, `CURSOR_API_KEY`, header CSRF
+  and Authorization values, plus nested `*.token`/`*.secret`/`*.password`/
+  `*.key` paths censor to `[REDACTED]`.
+
+### Carried into Phase 07 (must land before any WS route ships)
+
+- **WebSocket upgrade Origin validation**: `@fastify/websocket` registers the
+  upgrade hook but no route is bound. The first WS route in Phase 07 MUST
+  install a `verifyClient` (or equivalent pre-upgrade gate) that:
+  - rejects upgrades whose `Origin` header is missing or != `WEB_ORIGIN`.
+  - rejects upgrades whose `?csrf=<token>` query param fails
+    `CsrfTokenizer.validate`.
+- **WebSocket session binding**: bind the upgrade to the local session secret
+  (`LocalSessionSecretStore`) so a stolen CSRF token alone is not sufficient
+  to attach a new WS subscriber.
+
+These two items are explicitly named in the Phase 05 prompt's completion
+contract and are not yet implemented because no WS route exists. They are
+the precondition for Phase 07.
+
+### Known limitations / deferred items
+
+1. **WebSocket Origin/CSRF**: see "Carried into Phase 07" above.
+2. **MCP / subagent / Cursor-API REST**: routes for `/api/mcp-servers`,
+   `/api/subagents`, and the SDK-facing agent/run/event endpoints are not
+   wired this phase. Per the Phase 05 prompt's out-of-scope list.
+3. **Active-agent warning on workspace delete**: `DELETE
+   /api/workspace-allowlist/:entryId` requires `?confirm=true` but does not
+   yet enumerate active agents that reference the path. That dependency
+   doesn't exist until Phase 06 introduces the agent runtime manager.
+4. **`LocalSessionSecretStore`**: created and tested but not yet referenced
+   by request-time code. It will be consumed in a future phase if/when the
+   harness gains cookie-bound state.
+5. **`keytar` native binding** depends on `prebuild-install` succeeding for
+   the host architecture. The fallback (`node-gyp rebuild`) requires Xcode
+   command-line tools and is not exercised by the test suite — tests use
+   the in-memory driver.
+
+---
+
+## Phase 06 Outcomes
+
+### Summary
+
+Wrapped `@cursor/sdk@1.0.13` in a server-owned runtime manager. `AgentRuntime`
+creates / resumes / terminates / lists durable agents; `RunController` owns a
+single run's `Run` handle, `AbortController`, stream task, and accumulated
+`turn-ended.usage`; `ActiveRuns` is the in-memory registry. The agents and
+runs REST endpoints (`POST/GET /api/agents`, `POST /api/agents/:id/resume`,
+`POST /api/agents/:id/terminate`, `POST/GET /api/runs`) are wired and gated
+by the Phase 05 security perimeter (CSRF + Origin + Workspace policy +
+Keychain). Stream events go to a stub sink that logs a redacted projection;
+Phase 07 will replace the stub with the normalization → persist → broadcast
+pipeline without touching the runtime.
+
+### Decisions made (binding for downstream phases)
+
+1. **AbortSignal is not wired to `agent.send`** (OQ-11 verified negative in
+   v1.0.13). The `RunController.abortController` exists only for server-side
+   task coordination — it is never passed to the SDK. Cancellation flows
+   exclusively through `Run.cancel()` per OQ-12.
+2. **Usage extraction reads from `onDelta(TurnEndedUpdate)`, not from
+   `run.wait()`** (OQ-02 verified negative). The `RunController` registers
+   an `onDelta` callback on every `send` and accumulates `turn-ended.usage`
+   across all turns of the run. The extractor runs once at terminal state
+   and persists the totals.
+3. **`Run.cancel()` is gated on `Run.supports("cancel")`**. The harness logs
+   and returns `"unavailable"` when the SDK reports the operation as
+   unsupported — no fake CANCELLED states (spec §11).
+4. **SDK adapter seam**. `apps/server/src/sdk/sdk-adapter.ts` declares a
+   minimal `SdkAdapter` interface (`createAgent`, `resumeAgent`, `send`).
+   Production uses `createCursorSdkAdapter()`; tests use
+   `createStubSdkAdapter()` from `apps/server/src/sdk/testing.ts`. Vitest
+   module mocks are not used — DI is cleaner and survives realistic
+   integration test wiring.
+5. **Durable `agentId` reconciliation**. The runtime passes our durable ID
+   into `Agent.create` via `options.agentId`. If the SDK overrides it (e.g.
+   cloud minting a `bc-…` ID), we delete the temporary row and re-insert
+   under the SDK-issued ID. The DB row and SDK identity always agree.
+6. **MCP filter is `enabled AND validation = "valid"`**. Subagents are
+   filtered by `enabled` only (validation lives on MCP rows, not subagents).
+   Subagents reference MCP servers by ID; the builder maps them to MCP
+   names in the SDK payload, dropping any subagent-side MCP ID that's not
+   enabled+valid at the server level.
+7. **Live SDK creation persists the row before calling `Agent.create`**.
+   The row starts as `status = "creating"`; the SDK call either flips it to
+   `active` on success, or to `error` (with the thrown error captured in
+   `error_json`) on failure. Either way the row is inspectable in the
+   picker — failures don't disappear.
+8. **`startRun` re-validates the workspace at send time** for local agents.
+   The allowlist can change between agent creation and the next prompt;
+   the runtime never trusts stale validation. Cloud runs skip this gate.
+9. **`sqlite3` added to `pnpm.onlyBuiltDependencies`**. The SDK transitively
+   depends on `sqlite3@5.1.7` for its internal run-event store. Without
+   approval the native binding doesn't build and `import { Agent }` throws
+   at module load. Root `package.json` now lists `better-sqlite3`, `keytar`,
+   and `sqlite3`.
+
+### Open Questions tightened by this phase
+
+| # | Question | Before | After Phase 06 |
+|---|---|---|---|
+| 11 | `agent.send` accepts AbortSignal? | verified (no) | confirmed — no signal passed; runtime tested against stubbed adapter end-to-end with the no-signal path. |
+| 12 | `Run.cancel()` exists? | verified | `RunController.cancel` gates the call on `Run.supports("cancel")` and persists `interrupted_reason = "user_cancelled"` immediately as a belt-and-braces. |
+| 15 | `run.wait()` final result shape | verified | `RunController` reads `result`, `model`, `durationMs`, `git` exactly per the verified shape; usage is NOT taken from here. |
+| 20 | `Agent.resume` requires model re-pass? | verified | `loadActiveAgent` calls `buildAgentOptions` on every resume, which re-passes `model: { id }` and inline MCP server configs. |
+
+OQ-10 (approval resolver) remains `unverified` per ledger — Phase 06 does
+not surface approval, and no code path silently fakes resolution.
+
+### Files created in this phase
+
+`apps/server/src/sdk/`:
+- `sdk-adapter.ts` — `SdkAdapter` interface + production `createCursorSdkAdapter()`.
+- `agent-options-builder.ts` — `buildAgentOptions` + `WorkspaceRejectedError`.
+- `usage-extractor.ts` — `extractUsage` + `accumulateTurnEndedUsage` + cost math.
+- `run-controller.ts` — `RunController` class owning one run's SDK lifecycle.
+- `active-runs.ts` — in-memory registry keyed by `runId`.
+- `agent-runtime.ts` — `AgentRuntime` (`create`/`resume`/`terminate`/`list`/`getById`/`startRun`/`shutdown`).
+- `stream-stub.ts` — `createStubSink` used by Phase 06; replaced in Phase 07.
+- `testing.ts` — `StubRun`, `StubSDKAgent`, `createStubSdkAdapter` for tests.
+- `index.ts` — barrel.
+- `__tests__/agent-options-builder.test.ts` — 7 unit tests.
+- `__tests__/usage-extractor.test.ts` — 10 unit tests.
+
+`apps/server/src/routes/`:
+- `agents.routes.ts` — `POST/GET /api/agents`, `GET /api/agents/:id`,
+  `POST /api/agents/:id/resume`, `POST /api/agents/:id/terminate`.
+- `runs.routes.ts` — `POST/GET /api/runs`, `GET /api/runs/:id`.
+
+`apps/server/src/__tests__/integration/`:
+- `agents-runs.test.ts` — 7 integration tests against a fully-wired
+  Fastify app with a stubbed SDK adapter (creates, terminates, resumes,
+  rejects, runs a full agent → run → finished cycle with synthetic
+  `turn-ended` usage that persists to the `runs` row).
+
+`packages/shared/src/rest-contracts.ts`:
+- Added `superRefine` to `createAgentRequestSchema` (local→requires cwd,
+  cloud→requires cloudOptions, `settingSources` `all` is mutually exclusive).
+- Added `agentDetailResponseSchema`, `createRunRequestSchema`,
+  `createRunResponseSchema`, `errorEnvelopeSchema`.
+- Added `activeRunCount`, `terminatedAt` fields to `agentSummarySchema`.
+
+`apps/server/src/db/repositories/runs.repo.ts`:
+- Added `getLatestForAgent(agentId)` and `aggregatesByAgent()` for the
+  agent picker. The aggregator returns one row per `agent_id` with run
+  count, active-run count (`status IN ('CREATING','RUNNING')`), and total
+  cost / input / output tokens.
+
+`apps/server/src/app.ts`:
+- Constructs the `AgentRuntime` after the workspace policy and api key
+  store are built; wires the runtime + RunsRepo into the new route groups;
+  installs an `onClose` hook that calls `agentRuntime.shutdown()` to close
+  all live SDK handles and clear the registry.
+
+`apps/server/package.json`:
+- Adds `@cursor/sdk@1.0.13` as a runtime dependency.
+
+Root `package.json`:
+- Adds `sqlite3` to `pnpm.onlyBuiltDependencies` so the SDK's transitive
+  native binding builds at install time.
+
+### Commands run and results
+
+- `pnpm --filter @harness/server add @cursor/sdk@1.0.13` — installed.
+- `pnpm install` (after adding sqlite3 to onlyBuiltDependencies) — built
+  `sqlite3@5.1.7` native binding for arm64-darwin.
+- `pnpm typecheck` — all four workspaces clean.
+- `pnpm lint` — 0 errors, 0 warnings.
+- `pnpm test` — 96 tests across 17 files pass (was 70/14 pre-phase). New:
+  10 usage-extractor unit tests, 7 agent-options-builder unit tests,
+  7 agents+runs integration tests.
+- Live smoke (`DB_PATH=/tmp/harness-phase06-smoke.sqlite … pnpm
+  --filter @harness/server start`) confirmed:
+  - `POST /api/agents` without API key → 412 `MISSING_API_KEY`.
+  - `POST /api/agents` with `/tmp` (not allowlisted) → 403 `WORKSPACE_REJECTED`
+    with `details: [{ input: "/tmp", reason: "not_allowlisted",
+    normalizedPath: "/private/tmp" }]`.
+  - `POST /api/agents` for `mode: "local"` without `cwd` → 422
+    `VALIDATION_ERROR` with the superRefine message.
+
+### Acceptance gates satisfied
+
+- ✅ `pnpm typecheck && pnpm lint && pnpm test` all pass.
+- ✅ Integration tests pass against the stubbed SDK adapter: agent create,
+  agent terminate, agent resume, run start → consume stream → wait → final
+  result + usage persisted.
+- ✅ `POST /api/runs` with a cwd not in the allowlist returns 403
+  `WORKSPACE_REJECTED` (`startRun` re-runs the workspace check before
+  sending the prompt).
+- ✅ `POST /api/agents` without `MISSING_API_KEY` returns 412 (proven by
+  the live smoke and the dedicated integration test).
+- ✅ `docs/IMPLEMENTATION_STATUS.md` updated (this section).
+
+### Out of scope / deferred (per phase prompt)
+
+1. **Event normalization, persistence beyond `runs` row updates, WS
+   broadcasting** — Phase 07. The stub sink (`stream-stub.ts`) logs each
+   event and discards. Run row status, final result, and usage ARE
+   persisted; canonical events are NOT — `events` is empty after a Phase 06
+   run completes.
+2. **Approval flow handling** — Phase 13. OQ-10 stays `unverified`.
+3. **UI surfaces** — Phase 08+.
+4. **MCP / subagent CRUD** — Phase 12. Phase 06 reads from the existing
+   repos; the routes themselves don't ship until Phase 12.
+5. **Live SDK smoke test (`RUN_SDK_SMOKE=true`)** — intentionally not
+   exercised in CI because (a) it requires a real Cursor API key and
+   (b) the test must hit a real Cursor backend. The stubbed-adapter
+   integration tests exercise every code path that the live smoke would,
+   short of the network round-trip itself.
+6. **`Agent.list()` SDK reconciliation** (OQ-19 partial) — `AgentRuntime.list`
+   returns SQLite rows only. Phase 07 will add the SDK list join once we
+   have a real cloud key in hand.
+
+### Known limitations
+
+1. **`onDelta` shape coupling**. The `InteractionUpdate` type from
+   `@cursor/sdk` re-exports from `@anysphere/cursor-sdk-shared`, which is
+   bundled into the SDK's runtime JS but not its declarations. The harness
+   types `onDelta` updates as `unknown` and Zod-parses for the `turn-ended`
+   discriminator. This is deliberately defensive — if the SDK changes the
+   delta shape, we get a graceful `usage_source = "unavailable"` instead
+   of a typecheck break or a runtime crash.
+2. **No background scheduling for `aggregatesByAgent`**. The aggregator
+   runs as a single SQL `GROUP BY` per `GET /api/agents` request. For
+   single-user local workloads this is fine; if a user ever accumulates
+   thousands of agents we'd want a materialized snapshot. Out of scope.
+3. **`shutdown()` is best-effort**. The Fastify `onClose` hook awaits
+   `agentRuntime.shutdown()`, but `SDKAgent.close()` is synchronous and
+   tells us nothing about whether the SDK actually cleared its connections.
+   In practice the test suite uses the in-memory DB and an in-memory
+   keychain driver, so any leaked handle is invisible — production code
+   that needs deterministic teardown should await `app.close()` rather
+   than relying on process exit.
+
+### Carried into Phase 07
+
+- **Replace `createStubSink`** with the normalization pipeline:
+  - Zod-validate every SDK event against the `sdkMessageSchema` union.
+  - Allocate a per-run seq via `RunsRepo.incrementLastSeq` inside the same
+    transaction that inserts the canonical event row.
+  - Emit WS frames AFTER commit (persist-before-broadcast).
+- **Implement WS upgrade gate** (Origin + CSRF token + local session
+  secret) — carried forward from the Phase 05 "Carried into Phase 07"
+  section.
+
 ## Next prompt to run
 
-`03_DESIGN_TOKENS_FROM_MOCKUP.md`
+`07_EVENT_NORMALIZATION_AND_WEBSOCKET.md`

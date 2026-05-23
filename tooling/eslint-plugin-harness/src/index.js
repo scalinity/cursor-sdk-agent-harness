@@ -1,4 +1,5 @@
 import noUseEffectInComponents from "./rules/no-use-effect-in-components.js";
+import noHardcodedVisuals from "./rules/no-hardcoded-visuals.js";
 
 const plugin = {
   meta: {
@@ -7,6 +8,7 @@ const plugin = {
   },
   rules: {
     "no-use-effect-in-components": noUseEffectInComponents,
+    "no-hardcoded-visuals": noHardcodedVisuals,
   },
 };
 

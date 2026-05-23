@@ -61,6 +61,7 @@ export default [
     plugins: { harness },
     rules: {
       "harness/no-use-effect-in-components": "error",
+      "harness/no-hardcoded-visuals": "error",
     },
   },
   {

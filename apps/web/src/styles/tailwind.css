@@ -1,2 +1,130 @@
-@import "tailwindcss";
+/*
+ * Cursor SDK Agent Harness — Tailwind v4 theme wiring.
+ *
+ * Order matters:
+ *   1. tokens.css declares the OKLCH/typography/spacing/radius/motion
+ *      tokens as CSS custom properties on :root.
+ *   2. tailwindcss provides the utility generator.
+ *   3. @theme inline registers each token as a Tailwind theme key without
+ *      re-declaring the :root variable (avoids circular vars). The
+ *      resulting utilities (bg-surface-1, rounded-md, duration-fast, ...)
+ *      compile to var(--token-name) so a single source of truth wins.
+ */
 @import "./tokens.css";
+@import "tailwindcss";
+
+@theme inline {
+  /* ---- Color: Surface ---- */
+  --color-background:        var(--color-background);
+  --color-surface-1:         var(--color-surface-1);
+  --color-surface-2:         var(--color-surface-2);
+  --color-surface-3:         var(--color-surface-3);
+
+  /* ---- Color: Text ---- */
+  --color-text-primary:      var(--color-text-primary);
+  --color-text-secondary:    var(--color-text-secondary);
+  --color-text-tertiary:     var(--color-text-tertiary);
+  --color-text-quaternary:   var(--color-text-quaternary);
+  --color-text-inverse:      var(--color-text-inverse);
+
+  /* ---- Color: Border ---- */
+  --color-border-subtle:     var(--color-border-subtle);
+  --color-border-default:    var(--color-border-default);
+  --color-border-strong:     var(--color-border-strong);
+
+  /* ---- Color: Accent ---- */
+  --color-accent-primary:         var(--color-accent-primary);
+  --color-accent-primary-hover:   var(--color-accent-primary-hover);
+  --color-accent-primary-pressed: var(--color-accent-primary-pressed);
+  --color-accent-soft:            var(--color-accent-soft);
+  --color-accent-bg:              var(--color-accent-bg);
+
+  /* ---- Color: Semantic ---- */
+  --color-success:           var(--color-success);
+  --color-success-bg:        var(--color-success-bg);
+  --color-danger:            var(--color-danger);
+  --color-danger-bg:         var(--color-danger-bg);
+  --color-info:              var(--color-info);
+  --color-violet:            var(--color-violet);
+  --color-warning:           var(--color-warning);
+  --color-warning-bg:        var(--color-warning-bg);
+
+  /* ---- Typography (font families + sizes + line heights + tracking) ---- */
+  --font-sans: var(--font-family-sans);
+  --font-mono: var(--font-family-mono);
+
+  --text-2xs:  var(--font-size-2xs);
+  --text-xs:   var(--font-size-xs);
+  --text-sm:   var(--font-size-sm);
+  --text-md:   var(--font-size-md);
+  --text-base: var(--font-size-base);
+  --text-lg:   var(--font-size-lg);
+  --text-xl:   var(--font-size-xl);
+  --text-2xl:  var(--font-size-2xl);
+  --text-3xl:  var(--font-size-3xl);
+
+  --leading-tight:   var(--line-height-tight);
+  --leading-snug:    var(--line-height-snug);
+  --leading-normal:  var(--line-height-normal);
+  --leading-relaxed: var(--line-height-relaxed);
+
+  --tracking-uppercase: var(--letter-spacing-uppercase);
+  --tracking-tight:     var(--letter-spacing-tight);
+  --tracking-normal:    var(--letter-spacing-normal);
+
+  --font-weight-regular:  var(--font-weight-regular);
+  --font-weight-medium:   var(--font-weight-medium);
+  --font-weight-semibold: var(--font-weight-semibold);
+  --font-weight-bold:     var(--font-weight-bold);
+
+  /* ---- Radius (overrides TW defaults to match mockup 4/5/7/12px) ---- */
+  --radius-none: var(--radius-none);
+  --radius-sm:   var(--radius-sm);
+  --radius-md:   var(--radius-md);
+  --radius-lg:   var(--radius-lg);
+  --radius-xl:   var(--radius-xl);
+  --radius-full: var(--radius-full);
+
+  /* ---- Control heights — expose `h-control-sm/md/lg` utilities ---- */
+  --spacing-control-sm: var(--height-control-sm);
+  --spacing-control-md: var(--height-control-md);
+  --spacing-control-lg: var(--height-control-lg);
+
+  /* ---- Motion ---- */
+  --duration-instant: var(--duration-instant);
+  --duration-fast:    var(--duration-fast);
+  --duration-normal:  var(--duration-normal);
+  --duration-slow:    var(--duration-slow);
+
+  --ease-standard:   var(--ease-standard);
+  --ease-accelerate: var(--ease-accelerate);
+  --ease-decelerate: var(--ease-decelerate);
+  --ease-spring:     var(--ease-spring);
+
+  /* ---- Elevation ---- */
+  --shadow-0: var(--shadow-0);
+  --shadow-1: var(--shadow-1);
+  --shadow-2: var(--shadow-2);
+  --shadow-3: var(--shadow-3);
+  --shadow-4: var(--shadow-4);
+}
+
+/* ---- Base layer: body defaults + monospace helper ---- */
+@layer base {
+  html,
+  body {
+    background: var(--color-background);
+    color: var(--color-text-primary);
+    font-family: var(--font-family-sans);
+    font-size: var(--font-size-base);
+    line-height: var(--line-height-normal);
+    font-feature-settings: var(--font-feature-default);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  .mono {
+    font-family: var(--font-family-mono);
+    font-feature-settings: var(--font-feature-mono);
+  }
+}

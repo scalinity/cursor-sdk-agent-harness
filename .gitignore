@@ -43,6 +43,7 @@ pnpm-debug.log*
 screenshots/
 playwright-report/
 test-results/
+phase*-*.png
 
 # Temporary
 .tmp/
