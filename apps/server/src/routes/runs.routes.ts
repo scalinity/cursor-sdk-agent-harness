@@ -1,6 +1,7 @@
 import {
   createRunRequestSchema,
   createRunResponseSchema,
+  listRunsQuerySchema,
   listRunsResponseSchema,
   runSummarySchema,
 } from "@harness/shared";
@@ -40,7 +41,8 @@ function sendRuntimeError(reply: FastifyReply, err: AgentRuntimeError) {
       return reply.code(502).send({ code: err.code, message: err.message });
     default: {
       const _exhaustive: never = err.code;
-      return reply.code(500).send({ code: "INTERNAL", message: err.message, _: _exhaustive });
+      void _exhaustive;
+      return reply.code(500).send({ code: "INTERNAL", message: err.message });
     }
   }
 }
@@ -49,33 +51,35 @@ export async function registerRunsRoutes(
   app: FastifyInstance,
   deps: RunsRoutesDeps,
 ): Promise<void> {
-  app.get<{
-    Querystring: { agentId?: string; limit?: string; offset?: string };
-  }>("/api/runs", async (req) => {
-    const limit = req.query.limit ? Number.parseInt(req.query.limit, 10) : 50;
-    const offset = req.query.offset ? Number.parseInt(req.query.offset, 10) : 0;
-    const rows = req.query.agentId
-      ? deps.runsRepo.list({ agentId: req.query.agentId, limit, offset })
-      : deps.runsRepo.list({ limit, offset });
-    const items = rows.map((r) =>
-      runSummarySchema.parse({
-        id: r.id,
-        agentId: r.agentId,
-        status: r.status,
-        promptPreview: r.promptPreview,
-        modelId: r.modelId,
-        startedAt: r.startedAt,
-        finishedAt: r.finishedAt,
-        durationMs: r.durationMs,
-        inputTokens: r.inputTokens,
-        outputTokens: r.outputTokens,
-        cachedInputTokens: r.cachedInputTokens,
-        reasoningTokens: r.reasoningTokens,
-        costUsdMicros: r.costUsdMicros,
-        usageSource: r.usageSource,
-      }),
+  app.get("/api/runs", async (req, reply) => {
+    const parsed = listRunsQuerySchema.safeParse(req.query);
+    if (!parsed.success) return send422(reply, parsed.error);
+    const { limit, offset, agentId } = parsed.data;
+    const listOpts: { agentId?: string; limit: number; offset: number } = {
+      limit,
+      offset,
+    };
+    if (agentId !== undefined) listOpts.agentId = agentId;
+    const items = deps.runsRepo.list(listOpts).map((r) => ({
+      id: r.id,
+      agentId: r.agentId,
+      status: r.status,
+      promptPreview: r.promptPreview,
+      modelId: r.modelId,
+      startedAt: r.startedAt,
+      finishedAt: r.finishedAt,
+      durationMs: r.durationMs,
+      inputTokens: r.inputTokens,
+      outputTokens: r.outputTokens,
+      cachedInputTokens: r.cachedInputTokens,
+      reasoningTokens: r.reasoningTokens,
+      costUsdMicros: r.costUsdMicros,
+      usageSource: r.usageSource,
+    }));
+    const total = deps.runsRepo.count(
+      agentId !== undefined ? { agentId } : {},
     );
-    return listRunsResponseSchema.parse({ items, total: items.length });
+    return listRunsResponseSchema.parse({ items, total });
   });
 
   app.get<{ Params: { runId: string } }>(

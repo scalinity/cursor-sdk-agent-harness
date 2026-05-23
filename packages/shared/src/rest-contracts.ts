@@ -157,18 +157,26 @@ export type ErrorEnvelope = z.infer<typeof errorEnvelopeSchema>;
 // Runs — TODO: implement routes in Phase 07 / Phase 11
 // ============================================================================
 
+// Query-string variants. Use z.coerce.number() because Fastify query
+// params arrive as strings; the schema accepts `?limit=50` and coerces
+// to a number, rejecting NaN/non-numeric strings with a Zod issue.
 export const listRunsQuerySchema = z.object({
   agentId: z.string().optional(),
-  status: sdkRunStatusSchema.optional(),
-  modelId: z.string().optional(),
-  usageSource: usageSourceSchema.optional(),
-  hasCost: z.boolean().optional(),
-  startedAfter: isoDateTimeSchema.optional(),
-  startedBefore: isoDateTimeSchema.optional(),
-  limit: z.number().int().min(1).max(500).default(50),
-  offset: z.number().int().nonnegative().default(0),
+  // The Phase 11 implementation will add the rest of these filters
+  // (status / modelId / usageSource / hasCost / startedAfter /
+  // startedBefore). Until then the API contract advertises only what the
+  // route actually applies, so clients can't be misled by silently-
+  // ignored filter values. See SDK_VERIFICATION_LEDGER OQ-19.
+  limit: z.coerce.number().int().min(1).max(500).default(50),
+  offset: z.coerce.number().int().nonnegative().default(0),
 });
 export type ListRunsQuery = z.infer<typeof listRunsQuerySchema>;
+
+export const listAgentsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+  offset: z.coerce.number().int().nonnegative().default(0),
+});
+export type ListAgentsQuery = z.infer<typeof listAgentsQuerySchema>;
 
 export const runSummarySchema = z.object({
   id: z.string(),

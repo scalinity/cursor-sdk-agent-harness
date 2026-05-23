@@ -1,7 +1,7 @@
 import {
   agentDetailResponseSchema,
-  agentSummarySchema,
   createAgentRequestSchema,
+  listAgentsQuerySchema,
   listAgentsResponseSchema,
 } from "@harness/shared";
 import type { FastifyInstance, FastifyReply } from "fastify";
@@ -38,7 +38,8 @@ function sendRuntimeError(reply: FastifyReply, err: AgentRuntimeError) {
       return reply.code(502).send({ code: err.code, message: err.message });
     default: {
       const _exhaustive: never = err.code;
-      return reply.code(500).send({ code: "INTERNAL", message: err.message, _: _exhaustive });
+      void _exhaustive;
+      return reply.code(500).send({ code: "INTERNAL", message: err.message });
     }
   }
 }
@@ -59,8 +60,12 @@ export async function registerAgentsRoutes(
   app: FastifyInstance,
   deps: AgentsRoutesDeps,
 ): Promise<void> {
-  app.get("/api/agents", async () => {
-    const items = deps.runtime.list().map((s) => agentSummarySchema.parse(s));
+  app.get("/api/agents", async (req, reply) => {
+    const parsed = listAgentsQuerySchema.safeParse(req.query);
+    if (!parsed.success) return send422(reply, parsed.error);
+    const { limit, offset } = parsed.data;
+    const all = deps.runtime.list();
+    const items = all.slice(offset, offset + limit);
     return listAgentsResponseSchema.parse({ items });
   });
 

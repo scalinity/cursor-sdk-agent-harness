@@ -120,6 +120,25 @@ export class RunsRepo {
     return row ? rowToDomain(row) : null;
   }
 
+  /**
+   * Total row count matching the same optional `agentId` filter as `list`.
+   * Used by `GET /api/runs` to populate the pagination total — `list`
+   * returns the current page, this returns the matching size of the
+   * underlying set. Cheap (`COUNT(*)` over the runs PK index).
+   */
+  count(opts: { agentId?: string } = {}): number {
+    if (opts.agentId !== undefined) {
+      const row = this.raw
+        .prepare("SELECT COUNT(*) AS n FROM runs WHERE agent_id = ?")
+        .get(opts.agentId) as { n: number };
+      return row.n;
+    }
+    const row = this.raw
+      .prepare("SELECT COUNT(*) AS n FROM runs")
+      .get() as { n: number };
+    return row.n;
+  }
+
   list(opts: { agentId?: string; limit?: number; offset?: number } = {}): RunRow[] {
     const limit = opts.limit ?? 100;
     const offset = opts.offset ?? 0;
