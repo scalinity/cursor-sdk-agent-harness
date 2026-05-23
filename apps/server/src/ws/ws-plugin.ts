@@ -211,8 +211,17 @@ function createConnection(
   log: FastifyBaseLogger,
   opts: WsPluginOptions,
 ): ConnectionState {
-  const pingMs = opts.heartbeatIntervalMs ?? DEFAULT_PING_INTERVAL_MS;
-  const missedMs = opts.missedPongTimeoutMs ?? DEFAULT_MISSED_PONG_TIMEOUT_MS;
+  // Clamp ping interval to a sane floor — a 0 or negative value would
+  // turn setInterval(fn, 0) into a busy loop. 50ms is the lowest
+  // anyone could plausibly want for an integration test; production
+  // defaults to 15s. Same lower bound on the missed-pong timeout
+  // because a too-tight value would close every connection
+  // immediately after the first heartbeat round-trip.
+  const pingMs = Math.max(50, opts.heartbeatIntervalMs ?? DEFAULT_PING_INTERVAL_MS);
+  const missedMs = Math.max(
+    pingMs * 2,
+    opts.missedPongTimeoutMs ?? DEFAULT_MISSED_PONG_TIMEOUT_MS,
+  );
   const state: ConnectionState = {
     socket,
     log,
