@@ -174,10 +174,19 @@ async function startRun(h: Harness, csrf: string, agentId: string): Promise<stri
   return body.runId;
 }
 
+/**
+ * Default timeout is 4s — deliberately below vitest's 5s `it()`
+ * default. This guarantees the helper's diagnostic stderr print fires
+ * BEFORE vitest kills the test, so the failure reason is visible.
+ * Bumping this to >= 5000 will re-introduce the silent-timeout failure
+ * mode that ate ~30 minutes of P14-W6 debugging.
+ */
+const WAIT_FOR_FRAME_DEFAULT_TIMEOUT_MS = 4_000;
+
 function waitForFrame<T extends { type: string }>(
   ws: WebSocket,
   matcher: (frame: T) => boolean,
-  timeoutMs = 5_000,
+  timeoutMs = WAIT_FOR_FRAME_DEFAULT_TIMEOUT_MS,
 ): Promise<T> {
   const seen: unknown[] = [];
   return new Promise((resolve, reject) => {
@@ -195,10 +204,42 @@ function waitForFrame<T extends { type: string }>(
         clearTimeout(timer);
         ws.removeListener("message", listener);
         resolve(frame);
+        return;
+      }
+      // Fast-fail on server-side validation errors that signal the
+      // wait will never succeed. A matcher that DOES expect an error
+      // (e.g. APPROVAL_NOT_PENDING tests) matches first and resolves
+      // above; only unrelated errors land here.
+      const errFrame = frame as unknown as {
+        type: string;
+        code?: string;
+        message?: string;
+      };
+      if (errFrame.type === "error" && errFrame.code === "VALIDATION_ERROR") {
+        clearTimeout(timer);
+        ws.removeListener("message", listener);
+        reject(
+          new Error(
+            `server replied VALIDATION_ERROR while waiting for a different frame: ${errFrame.message ?? "no message"}. Most common cause: frame id below min(8). Saw: ${JSON.stringify(seen, null, 2)}`,
+          ),
+        );
       }
     };
     ws.on("message", listener);
   });
+}
+
+/**
+ * Build a client frame id that satisfies frameIdSchema.min(8).max(128).
+ * Centralized so individual test authors can't accidentally craft a
+ * <8-char id and watch their test hang waiting for a server reply that
+ * (correctly) refuses to honor a malformed frame — the silent-failure
+ * trap P14-W6 fell into.
+ */
+function makeFrameId(prefix: string): string {
+  const padded = `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
+  // Belt-and-braces: guarantee min(8) even if prefix is empty.
+  return padded.padEnd(8, "x");
 }
 
 describe("approval and cancellation integration", () => {
@@ -346,7 +387,7 @@ describe("approval and cancellation integration", () => {
     const ws = await h.openSocket(csrf);
     ws.send(
       JSON.stringify({
-        id: "sub-w6-frame",
+        id: makeFrameId("sub-w6"),
         type: "subscribe_run",
         sent_at: new Date().toISOString(),
         run_id: runId,
@@ -361,7 +402,7 @@ describe("approval and cancellation integration", () => {
 
     ws.send(
       JSON.stringify({
-        id: "approve-w6-frame",
+        id: makeFrameId("approve-w6"),
         type: "approval_response",
         sent_at: new Date().toISOString(),
         run_id: runId,

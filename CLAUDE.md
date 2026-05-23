@@ -139,6 +139,17 @@ If a code path could log a secret, write the test that proves it can't, then wir
 - **Update the status ledger every session.** `docs/IMPLEMENTATION_STATUS.md` records what changed, what ran, what passed, what didn't, and the exact next prompt filename. This is how chains of sessions stay coherent.
 - **Phase dependencies are real.** Phase 09 (streaming surfaces) cannot run before Phase 0.5 (tokens) and Phase 5 (chat shell). The dependency map at the prompts folder's `PHASE_DEPENDENCY_MAP.md` is authoritative.
 
+## Review / address tracking convention
+
+This repo does **not** use a Linear project for review-findings tracking. `/review`, `/review-2`, `/review-orchestrator`, and `/address` all run against in-conversation `TaskCreate` lists, not Linear issues. When `/address` asks for the "respective Linear Project labeled in CLAUDE.md," the correct answer is: there isn't one. Skip Linear entirely; use Conventional Commits with a finding-id prefix to track work in git history instead.
+
+Existing prefix conventions in this repo's history (from `git log --oneline`):
+- `RV2-C#` / `RV2-W#` / `RV2-S#` — review #2 critical / warning / suggestion (Phase 13)
+- `REVIEW-C#` / `REVIEW-W#` / `REVIEW-S#` — review #1 (Phase 12)
+- `P14-W#` / `P14-S#` — Phase 14 review findings
+
+When addressing a new review pass, pick a prefix that's collision-free against the above and document it once in the commit body so future readers can map prefix → review session.
+
 ## Things to never do in this repo
 
 | Anti-pattern | Why |
