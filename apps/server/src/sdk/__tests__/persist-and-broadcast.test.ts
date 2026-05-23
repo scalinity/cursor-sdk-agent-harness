@@ -211,6 +211,34 @@ describe("persist-and-broadcast pipeline", () => {
     expect(pipeline.bufferCount()).toBe(2);
   });
 
+  it("persists unknown SDK shapes as system.unknown_sdk_message without broadcasting", async () => {
+    const pipeline = createPersistAndBroadcast({ events, bus, logger: silentLogger });
+    const seen: EventRow[] = [];
+    bus.subscribe(runId, (e) => seen.push(e));
+
+    pipeline.ingestUnknownSDKMessage({
+      raw: { type: "future_event_type_not_in_union", weird_field: 42 },
+      runId,
+      agentId,
+      parseError: new Error("test parse error"),
+    });
+
+    const rows = events.getByRunIdAfterSeq(runId, 0, 100);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.kind).toBe("system.unknown_sdk_message");
+    expect(rows[0]?.sdkType).toBe("system");
+    expect(rows[0]?.raw).toEqual({
+      type: "future_event_type_not_in_union",
+      weird_field: 42,
+    });
+
+    // No live broadcast for unknown kinds — frame-builder returns null
+    // and persist-and-broadcast doesn't publish from this path. Subscribers
+    // get nothing.
+    await new Promise((r) => setImmediate(r));
+    expect(seen).toHaveLength(0);
+  });
+
   it("dropRun forgets the text buffer so a recycled runId starts fresh", () => {
     const pipeline = createPersistAndBroadcast({ events, bus, logger: silentLogger });
     pipeline.ingestSDKMessage({

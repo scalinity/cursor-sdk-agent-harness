@@ -404,10 +404,14 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
 
 /**
  * Build the per-run stream sink that hands every SDK event to the
- * persist-then-broadcast pipeline. Events that fail Zod validation against
- * `sdkMessageSchema` are logged and dropped — the SDK shouldn't produce
- * unknown discriminants, but if it does we'd rather skip than crash the
- * consume loop. Validation failures DO NOT advance the per-run sequence.
+ * persist-then-broadcast pipeline. Events that fail Zod validation
+ * against `sdkMessageSchema` get persisted as
+ * `system.unknown_sdk_message` so Phase 14 observability can see SDK
+ * shape drift — the row carries the offending raw payload and is
+ * inspectable, but the frame-builder returns null for that kind so
+ * live UIs are protected from unknown shapes. Validation failures do
+ * NOT advance the run's text-buffer cursor (the unknown shape is not
+ * an assistant/thinking event by construction).
  */
 function createPipelineSink(args: {
   runId: string;
@@ -426,8 +430,14 @@ function createPipelineSink(args: {
           sdkType: (event as { type?: unknown })?.type,
           errors: parsed.error.flatten(),
         },
-        "pipeline-sink: SDK event failed sdkMessageSchema; skipping persist+broadcast",
+        "pipeline-sink: SDK event failed sdkMessageSchema; persisting as system.unknown_sdk_message",
       );
+      args.pipeline.ingestUnknownSDKMessage({
+        raw: event,
+        runId: args.runId,
+        agentId: args.agentId,
+        parseError: parsed.error,
+      });
       return;
     }
     const raw: SDKMessage = parsed.data;

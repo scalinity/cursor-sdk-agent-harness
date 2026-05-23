@@ -44,6 +44,23 @@ interface RunBufferState {
 
 export interface PersistAndBroadcastPipeline {
   ingestSDKMessage(args: IngestArgs): void;
+  /**
+   * Record an SDK event that failed `sdkMessageSchema` validation. We
+   * persist a synthetic canonical event with `kind =
+   * "system.unknown_sdk_message"` and the offending shape in
+   * `raw_json` so an inspector can diagnose SDK shape drift after the
+   * fact. The frame-builder returns null for this kind so it is NOT
+   * broadcast over WS — replay UIs are protected from unknown shapes
+   * while the durable record survives for forensics.
+   */
+  ingestUnknownSDKMessage(args: {
+    raw: unknown;
+    runId: string;
+    agentId: string;
+    parseError: unknown;
+    receivedAt?: string;
+    occurredAt?: string;
+  }): void;
   /** Discard the in-memory text buffer for a run that's about to terminate. */
   dropRun(runId: string): void;
   /** Test/teardown hook: clear ALL per-run buffers. */
@@ -190,6 +207,48 @@ export function createPersistAndBroadcast(
       // path may call bus.publish() for canonical events.
       for (const row of persisted) {
         deps.bus.publish(args.runId, row);
+      }
+    },
+
+    ingestUnknownSDKMessage(args): void {
+      const receivedAt = args.receivedAt ?? new Date().toISOString();
+      const occurredAt = args.occurredAt ?? receivedAt;
+      const sdkType = typeof (args.raw as { type?: unknown })?.type === "string"
+        ? ((args.raw as { type: string }).type)
+        : "<unknown>";
+      try {
+        deps.events.appendCanonicalEvent({
+          runId: args.runId,
+          agentId: args.agentId,
+          // Use `system` so the CHECK constraint on events.sdk_type
+          // (limited to the spec's eight discriminants) accepts the row.
+          // The `kind` carries the real intent and the frame-builder's
+          // switch returns null for it, suppressing broadcast.
+          sdkType: "system",
+          kind: "system.unknown_sdk_message",
+          callId: null,
+          requestId: null,
+          status: null,
+          payload: {
+            // Be defensive — the offending shape might be anything.
+            sdk_type: sdkType,
+            parse_error:
+              args.parseError instanceof Error
+                ? { message: args.parseError.message, name: args.parseError.name }
+                : String(args.parseError),
+          },
+          raw: args.raw,
+          occurredAt,
+          receivedAt,
+        });
+      } catch (err) {
+        // If even the synthetic record can't land (e.g. JSON.stringify
+        // fails on a circular value), log and drop — we never let the
+        // forensic capture path crash the consume loop.
+        deps.logger.error(
+          { err, runId: args.runId, sdkType },
+          "persist-and-broadcast: failed to persist unknown SDK shape; dropping forensic record",
+        );
       }
     },
 
