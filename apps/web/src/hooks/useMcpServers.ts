@@ -6,7 +6,7 @@
  *
  * Spec §5 MCP Server CRUD; phase 12.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   listMcpServersResponseSchema,
   mcpServerRevealResponseSchema,
@@ -19,6 +19,7 @@ import {
 import { httpRequest, mutatingRequest } from "../lib/http-client.js";
 import { useUiStore } from "../state/ui-store.js";
 import { useCsrfToken } from "./useCsrfToken.js";
+import { useMountEffect } from "./useMountEffect.js";
 
 export interface UseMcpServersResult {
   servers: McpServerSummary[];
@@ -142,12 +143,11 @@ export function useMcpServers(): UseMcpServersResult {
     [],
   );
 
-  // Mount-only hydration. Subsequent edits go through the helpers above.
-  // The hook is exempt from the no-useEffect rule per the project's
-  // ESLint config (hooks/** is allowed).
-  useEffect(() => {
+  // REVIEW-S7: explicit mount-only hydration via useMountEffect wrapper.
+  // Subsequent edits go through the helpers above.
+  useMountEffect(() => {
     void reload();
-  }, [reload]);
+  });
 
   return {
     servers,

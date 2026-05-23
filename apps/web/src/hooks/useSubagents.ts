@@ -4,7 +4,7 @@
  *
  * Spec §5 Subagent CRUD; phase 12.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   listSubagentsResponseSchema,
   subagentSummarySchema,
@@ -16,6 +16,7 @@ import {
 import { httpRequest, mutatingRequest } from "../lib/http-client.js";
 import { useUiStore } from "../state/ui-store.js";
 import { useCsrfToken } from "./useCsrfToken.js";
+import { useMountEffect } from "./useMountEffect.js";
 
 export interface UseSubagentsResult {
   subagents: SubagentSummary[];
@@ -112,9 +113,10 @@ export function useSubagents(): UseSubagentsResult {
     [refreshCsrfToken],
   );
 
-  useEffect(() => {
+  // REVIEW-S7: explicit mount-only hydration via useMountEffect wrapper.
+  useMountEffect(() => {
     void reload();
-  }, [reload]);
+  });
 
   return {
     subagents,

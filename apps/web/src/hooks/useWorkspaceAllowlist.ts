@@ -3,7 +3,7 @@
  * Phase 12 needs the inline quick-add hook for the NewAgentDialog cwd
  * input; the broader settings UI lands in a later phase.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { z } from "zod";
 import {
   validateWorkspacePathResponseSchema,
@@ -14,6 +14,7 @@ import {
 import { httpRequest, mutatingRequest } from "../lib/http-client.js";
 import { useUiStore } from "../state/ui-store.js";
 import { useCsrfToken } from "./useCsrfToken.js";
+import { useMountEffect } from "./useMountEffect.js";
 
 const listResponseSchema = z.object({
   items: z.array(workspaceAllowlistRowSchema),
@@ -92,9 +93,10 @@ export function useWorkspaceAllowlist(): UseWorkspaceAllowlistResult {
     [refreshCsrfToken],
   );
 
-  useEffect(() => {
+  // REVIEW-S7: explicit mount-only hydration via useMountEffect wrapper.
+  useMountEffect(() => {
     void reload();
-  }, [reload]);
+  });
 
   return { entries, loading, error, reload, add, validateMany };
 }
