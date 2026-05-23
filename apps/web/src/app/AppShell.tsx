@@ -53,8 +53,12 @@ export function AppShell() {
           handler: () => toggleCodeHidden(),
         },
         {
+          // ⌘K must still focus the rail search even when an editable
+          // element is focused (the user invokes it from anywhere, including
+          // inside the Composer textarea).
           key: "k",
           meta: true,
+          allowInEditing: true,
           handler: () => {
             const el = document.querySelector<HTMLInputElement>(
               'input[data-rail-search="true"]',

@@ -13,6 +13,16 @@ export interface ShortcutBinding {
   handler: (event: KeyboardEvent) => void;
   /** If true, calls preventDefault when the binding matches. Defaults to true. */
   preventDefault?: boolean;
+  /**
+   * If true, the binding fires even when the user is typing inside an editable
+   * element (input, textarea, contentEditable). Default false — without this
+   * flag a global ⌘. would cancel runs mid-prompt while the user typed a
+   * period, and ⌘J would swallow keystrokes inside form fields.
+   *
+   * Set true for shortcuts that explicitly target editable surfaces (e.g. ⌘K
+   * to focus a search input — the user expects it to work regardless of focus).
+   */
+  allowInEditing?: boolean;
 }
 
 function matches(event: KeyboardEvent, binding: ShortcutBinding): boolean {
@@ -25,16 +35,26 @@ function matches(event: KeyboardEvent, binding: ShortcutBinding): boolean {
   return true;
 }
 
+function isEditingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  return target.isContentEditable;
+}
+
 export function useKeyboardShortcuts(bindings: ShortcutBinding[]): void {
   const bindingsRef = useRef(bindings);
   bindingsRef.current = bindings;
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      const editing = isEditingTarget(event.target);
       for (const binding of bindingsRef.current) {
         if (!matches(event, binding)) continue;
-        // ⌘/Ctrl combos on Mac and Windows: treat meta or ctrl interchangeably
-        // when `meta` is true but only meta-key was specified.
+        // Skip shortcuts while the user is typing into a field unless the
+        // binding explicitly opts in. Prevents ⌘. from cancelling live runs
+        // when a user holds Cmd and types a period inside the Composer.
+        if (editing && !binding.allowInEditing) continue;
         if (binding.preventDefault !== false) event.preventDefault();
         binding.handler(event);
         break;
