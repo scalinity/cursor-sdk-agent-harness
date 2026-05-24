@@ -8,6 +8,11 @@ build/
 out/
 coverage/
 *.tsbuildinfo
+# Desktop build resources (icons, entitlements) are app config, not build output.
+!apps/desktop/build
+!apps/desktop/build/**
+# electron-builder output
+apps/desktop/dist-electron/
 
 # Secrets and environment
 .env

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, type BrowserWindowConstructorOptions } from "electron";
+import { app, BrowserWindow, nativeImage, type BrowserWindowConstructorOptions } from "electron";
 import { join } from "node:path";
 import { registerDialogHandlers } from "./dialogs";
 import { buildAppMenu } from "./menu";
@@ -94,6 +94,13 @@ async function onReady(): Promise<void> {
     : join((process as NodeJS.Process & { resourcesPath: string }).resourcesPath, "renderer");
   registerAppProtocol(rendererRoot);
   registerDialogHandlers();
+
+  if (isDev && process.platform === "darwin" && app.dock) {
+    // Packaged builds get the dock icon from the bundle's .icns; in dev we
+    // run unpackaged so the dock would otherwise show Electron's default.
+    const devIcon = nativeImage.createFromPath(join(__dirname, "..", "build", "icon.png"));
+    if (!devIcon.isEmpty()) app.dock.setIcon(devIcon);
+  }
 
   await startEmbeddedServerSafe();
 
