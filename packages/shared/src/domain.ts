@@ -83,6 +83,10 @@ export type RunRow = z.infer<typeof runRowSchema>;
  * mime type. Both forms carry an optional pixel dimension. The harness sends
  * these through `agent.send(SDKUserMessage{ text, images })` (verified —
  * agent.d.ts `send(message: string | SDKUserMessage, ...)`).
+ *
+ * KEEP IN SYNC with `@cursor/sdk` `SDKImage`: `sdk-adapter.send` casts harness
+ * `SdkImage` to the SDK type, so a new/renamed SDK field will NOT surface as a
+ * type error here — drift is silent. Re-check this union on SDK upgrades.
  */
 export const sdkImageDimensionSchema = z.object({
   width: z.number().int().positive(),
