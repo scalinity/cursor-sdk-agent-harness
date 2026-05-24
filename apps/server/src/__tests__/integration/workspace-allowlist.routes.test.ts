@@ -165,6 +165,53 @@ describe("workspace-allowlist routes", () => {
     expect(res.json()).toMatchObject({ code: "PATH_MISSING" });
   });
 
+  // Regression — re-POSTing an already-allowlisted path used to fail with
+  // SQLITE_CONSTRAINT_UNIQUE (500), which short-circuited the picker before
+  // `setActive` fired and left the titlebar stuck on "Pick workspace…".
+  // Now the route is idempotent on path: existing rows return 200 with the
+  // canonical entry, and the picker can proceed to `setActive`.
+  it("POST is idempotent on path: existing row returns 200 with same id", async () => {
+    h = await build();
+    const dir = path.join(h.tmpRoot, "reused");
+    await fs.mkdir(dir);
+
+    const first = await h.app.inject({
+      method: "POST",
+      url: "/api/workspace-allowlist",
+      payload: { path: dir, recursive: true },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": h.csrfToken,
+        "content-type": "application/json",
+      },
+    });
+    expect(first.statusCode).toBe(201);
+    const firstRow = first.json() as { id: string; path: string };
+
+    const second = await h.app.inject({
+      method: "POST",
+      url: "/api/workspace-allowlist",
+      payload: { path: dir, recursive: true },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": h.csrfToken,
+        "content-type": "application/json",
+      },
+    });
+    expect(second.statusCode).toBe(200);
+    const secondRow = second.json() as { id: string; path: string };
+    expect(secondRow.id).toBe(firstRow.id);
+    expect(secondRow.path).toBe(firstRow.path);
+
+    // And there's still only one row in the table.
+    const list = await h.app.inject({
+      method: "GET",
+      url: "/api/workspace-allowlist",
+      headers: { origin: "http://127.0.0.1:5173" },
+    });
+    expect((list.json() as { items: unknown[] }).items).toHaveLength(1);
+  });
+
   it("active workspace: GET defaults to null, PUT sets, PUT null clears", async () => {
     h = await build();
 

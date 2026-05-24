@@ -117,6 +117,18 @@ export async function registerWorkspaceAllowlistRoutes(
     // not_allowlisted is the expected branch when adding a new entry — we still
     // resolved a realpath, so use that as the canonical path.
     const realpathToStore = decision.normalizedPath;
+    // Idempotent: if a row already exists with this exact path, return it
+    // with 200 instead of trying to INSERT (which would fail the UNIQUE
+    // constraint on workspace_allowlist.path). The picker can hit this
+    // route for a path its local `entries` snapshot doesn't yet contain —
+    // its useState cache is captured in a closure across the native folder
+    // dialog's await, so it races with the allowlist reload. We compare
+    // paths exactly so a recursive ancestor row doesn't shadow a
+    // legitimate new child path.
+    const existing = deps.allowlist.findMatching(realpathToStore);
+    if (existing && existing.path === realpathToStore) {
+      return reply.code(200).send(workspaceAllowlistRowSchema.parse(existing));
+    }
     const row = deps.allowlist.create({
       path: realpathToStore,
       label: parsed.data.label ?? null,
