@@ -1,9 +1,27 @@
-import { app, BrowserWindow, nativeImage, type BrowserWindowConstructorOptions } from "electron";
+import { app, BrowserWindow, nativeImage, protocol, type BrowserWindowConstructorOptions } from "electron";
 import { join } from "node:path";
 import { registerDialogHandlers } from "./dialogs.js";
 import { buildAppMenu } from "./menu.js";
 import { registerAppProtocol } from "./app-protocol.js";
 import { loadWindowState, saveWindowState } from "./window-state.js";
+
+// Register `app://` as a STANDARD, secure, fetch/CORS-capable scheme BEFORE
+// app ready. Without `standard: true`, Chromium serializes the renderer's
+// origin as the opaque string "null" — so the cross-origin API requests to
+// the embedded server arrive with `Origin: null`, which the server's origin
+// policy rejects (403). Marking it standard gives the renderer a real
+// `app://harness` origin, which the server allowlists in desktop mode.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "app",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+    },
+  },
+]);
 
 let mainWindow: BrowserWindow | null = null;
 let serverClose: (() => Promise<void>) | null = null;
