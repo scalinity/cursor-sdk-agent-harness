@@ -1,8 +1,41 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunSummary } from "@harness/shared";
 import { SessionsRail } from "./SessionsRail.js";
 import { useRunStore } from "../../state/run-store.js";
+
+// SessionsRail reads the workspace allowlist + active workspace via hooks that
+// fetch on mount; stub them so grouping is deterministic in jsdom.
+vi.mock("../../hooks/useWorkspaceAllowlist.js", () => ({
+  useWorkspaceAllowlist: () => ({
+    entries: [
+      {
+        id: "ws-1",
+        path: "/projects/alpha",
+        label: "Alpha",
+        recursive: true,
+        createdAt: "2026-05-24T10:00:00.000Z",
+        updatedAt: "2026-05-24T10:00:00.000Z",
+        lastUsedAt: null,
+      },
+    ],
+    loading: false,
+    error: null,
+    reload: vi.fn(),
+    add: vi.fn(),
+    validateMany: vi.fn(),
+  }),
+}));
+vi.mock("../../hooks/useActiveWorkspace.js", () => ({
+  useActiveWorkspace: () => ({
+    workspace: null,
+    activeWorkspaceId: "ws-1",
+    loading: false,
+    error: null,
+    reload: vi.fn(),
+    setActive: vi.fn(),
+  }),
+}));
 
 function fixtureRun(overrides: Partial<RunSummary> = {}): RunSummary {
   return {
@@ -96,5 +129,33 @@ describe("SessionsRail", () => {
     );
     fireEvent.click(screen.getByLabelText("New session"));
     expect(onNewSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("R17-W5: groups chats under their workspace; unknown/null fall to Unassigned", () => {
+    render(
+      <SessionsRail
+        runs={[
+          fixtureRun({ id: "r-known", workspaceId: "ws-1", promptPreview: "alpha task" }),
+          fixtureRun({ id: "r-ghost", workspaceId: "deleted-ws", promptPreview: "orphan task" }),
+          fixtureRun({ id: "r-null", workspaceId: null, promptPreview: "loose task" }),
+        ]}
+        activeRunId={null}
+        onSelectRun={vi.fn()}
+      />,
+    );
+
+    const alphaGroup = screen.getByText("Alpha").closest(".ws-group") as HTMLElement;
+    expect(alphaGroup).not.toBeNull();
+    // The known-workspace run sits under its workspace, not under Unassigned.
+    expect(within(alphaGroup).getByText("alpha task")).toBeTruthy();
+    expect(within(alphaGroup).queryByText("orphan task")).toBeNull();
+    expect(within(alphaGroup).queryByText("loose task")).toBeNull();
+
+    const unassigned = screen.getByText("Unassigned").closest(".ws-group") as HTMLElement;
+    expect(unassigned).not.toBeNull();
+    // Unknown/dangling id AND null both fall into Unassigned.
+    expect(within(unassigned).getByText("orphan task")).toBeTruthy();
+    expect(within(unassigned).getByText("loose task")).toBeTruthy();
+    expect(within(unassigned).queryByText("alpha task")).toBeNull();
   });
 });
