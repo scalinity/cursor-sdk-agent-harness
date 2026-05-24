@@ -4,10 +4,40 @@ import {
   MODEL_LABELS,
   modelIdSchema,
   type AgentSummary,
-  type ModelId,
 } from "@harness/shared";
 import { useUiStore } from "../../state/ui-store.js";
 import { useErrorReporter } from "../../hooks/useErrorReporter.js";
+
+/**
+ * Render-rule for the model pill. Exported for `Composer.test.tsx`. See the
+ * inline comment at the call site for the three branches; the unknown-id
+ * branch is the load-bearing one — the pill must surface the agent's real
+ * model id even when the harness MODEL_LABELS map lacks an entry, so that
+ * "looks wrong" prompts a MODEL_LABELS update instead of silent misreporting.
+ */
+export function describeModel(
+  activeAgent: AgentSummary | null,
+): { modelLabel: string; modelTitle: string } {
+  if (!activeAgent) {
+    const label = MODEL_LABELS[DEFAULT_MODEL_ID];
+    return {
+      modelLabel: label,
+      modelTitle: `Default model: ${label}. Models are configured per agent in the New Agent dialog.`,
+    };
+  }
+  const parsed = modelIdSchema.safeParse(activeAgent.modelId);
+  if (parsed.success) {
+    const label = MODEL_LABELS[parsed.data];
+    return {
+      modelLabel: label,
+      modelTitle: `Model: ${label} (set on agent ${activeAgent.name})`,
+    };
+  }
+  return {
+    modelLabel: `${activeAgent.modelId} (unknown)`,
+    modelTitle: `Unknown model id "${activeAgent.modelId}" set on agent ${activeAgent.name}. Update the harness MODEL_LABELS map to render a friendly name.`,
+  };
+}
 
 export interface ComposerProps {
   activeAgent: AgentSummary | null;
@@ -31,7 +61,15 @@ export function Composer({ activeAgent, onSubmit }: ComposerProps) {
     // captured closure value — protects against programmatic updates
     // (Phase 12 templates / /commands) racing the captured snapshot.
     const trimmed = useUiStore.getState().composerDraft.trim();
-    if (!trimmed || !activeAgent || busy) return;
+    if (!trimmed || busy) return;
+    if (!activeAgent) {
+      // Textarea is enabled without an agent so users can draft, but Send
+      // still needs an agent. The Send button surfaces this with a tooltip;
+      // keyboard users hitting Enter would otherwise get no feedback, so
+      // toast the same hint so the action isn't silent.
+      report("Create or select an agent to send.", { severity: "info" });
+      return;
+    }
     setBusy(true);
     try {
       await onSubmit({ prompt: trimmed, agentId: activeAgent.id });
@@ -61,21 +99,17 @@ export function Composer({ activeAgent, onSubmit }: ComposerProps) {
     ? `Send a prompt to ${activeAgent.name}…`
     : "Type a prompt — create or select an agent to send.";
 
-  // The model that *will* be used: the active agent's, or a sensible default
-  // when nothing is selected yet so the user sees a real label instead of a
-  // "no model" stub. The composer doesn't pick a model — agent creation does.
-  // AgentSummary.modelId is typed as `string` at the wire boundary (it can
-  // carry an unknown id from an older agent row), so narrow through the Zod
-  // enum before indexing MODEL_LABELS — falls back to the default label if
-  // the persisted id isn't one the harness currently knows about.
-  const parsedModelId = modelIdSchema.safeParse(activeAgent?.modelId);
-  const displayedModelId: ModelId = parsedModelId.success
-    ? parsedModelId.data
-    : DEFAULT_MODEL_ID;
-  const modelLabel = MODEL_LABELS[displayedModelId];
-  const modelTitle = activeAgent
-    ? `Model: ${modelLabel} (set on agent ${activeAgent.name})`
-    : `Default model: ${modelLabel}. Models are configured per agent in the New Agent dialog.`;
+  // The model that *will* be used. Three cases, kept explicit because
+  // collapsing them through a single safeParse fallback silently mislabels
+  // an agent that's running on a model the harness enum hasn't been
+  // updated for:
+  //   - no agent           → DEFAULT_MODEL_ID's label ("Composer 2.5 Fast")
+  //   - agent, known model → MODEL_LABELS[modelId]
+  //   - agent, unknown id  → raw id + "(unknown)". Never fabricate a
+  //     different model's name — the user must see what their agent is
+  //     actually running, so that "looks wrong" leads to a MODEL_LABELS
+  //     update rather than silent misreporting.
+  const { modelLabel, modelTitle } = describeModel(activeAgent);
 
   // Reasoning effort knob intentionally absent. The Cursor SDK exposes
   // per-model parameters via `Cursor.models.list()[…].parameters` and the
@@ -103,6 +137,7 @@ export function Composer({ activeAgent, onSubmit }: ComposerProps) {
           <span
             className="inline-flex h-control-md items-center gap-1.5 rounded-md border border-border-subtle bg-surface-2 px-2 text-md font-medium text-text-primary"
             title={modelTitle}
+            aria-label={modelTitle}
           >
             <span className="size-2 rounded-full bg-accent-primary" aria-hidden="true" />
             <span>{modelLabel}</span>
