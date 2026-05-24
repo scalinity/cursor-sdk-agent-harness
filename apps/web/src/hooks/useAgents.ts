@@ -38,6 +38,7 @@ export interface UseAgentsResult {
   reload: () => Promise<void>;
   selectAgent: (agentId: string | null) => void;
   createAgent: (request: CreateAgentRequest) => Promise<AgentSummary>;
+  updateAgentModel: (agentId: string, modelId: string) => Promise<AgentSummary>;
   terminateAgent: (agentId: string) => Promise<void>;
 }
 
@@ -122,6 +123,24 @@ export function useAgents(): UseAgentsResult {
     [refreshCsrfToken, upsertAgent],
   );
 
+  const updateAgentModel = useCallback(
+    async (agentId: string, modelId: string): Promise<AgentSummary> => {
+      const updated = await mutatingRequest(
+        `/api/agents/${encodeURIComponent(agentId)}`,
+        {
+          method: "PATCH",
+          body: { modelId },
+          getCsrfToken: () => useUiStore.getState().csrfToken,
+          refreshCsrfToken,
+          responseSchema: agentSummarySchema,
+        },
+      );
+      upsertAgent(updated);
+      return updated;
+    },
+    [refreshCsrfToken, upsertAgent],
+  );
+
   const terminateAgent = useCallback(
     async (agentId: string) => {
       await mutatingRequest(`/api/agents/${encodeURIComponent(agentId)}/terminate`, {
@@ -158,6 +177,7 @@ export function useAgents(): UseAgentsResult {
     reload,
     selectAgent: setActiveAgentId,
     createAgent,
+    updateAgentModel,
     terminateAgent,
   };
 }

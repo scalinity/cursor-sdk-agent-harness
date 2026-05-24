@@ -1,4 +1,4 @@
-import type { AgentSummary, RunSummary, SdkImage } from "@harness/shared";
+import type { AgentSummary, ContextMention, RunSummary, SdkImage } from "@harness/shared";
 import { useRunStore } from "../../state/run-store.js";
 import { useUiStore } from "../../state/ui-store.js";
 import { EventTimeline } from "./EventTimeline.js";
@@ -14,7 +14,13 @@ export interface CenterPaneProps {
   activeRun: RunSummary | null;
   activeRunId: string | null;
   connectionState: ConnectionState;
-  onSubmit: (input: { prompt: string; agentId: string; images?: SdkImage[] }) => Promise<string>;
+  onSubmit: (input: {
+    prompt: string;
+    agentId: string;
+    images?: SdkImage[];
+    mentions?: ContextMention[];
+  }) => Promise<string>;
+  onModelChange?: ((modelId: string) => Promise<void>) | undefined;
   /**
    * Phase 13 — resolve an approval prompt by sending the
    * `approval_response` WS frame. Wired down to ApprovalPrompt via
@@ -36,6 +42,7 @@ export function CenterPane({
   activeRunId,
   connectionState,
   onSubmit,
+  onModelChange,
   onApprovalResolve,
   cancelUnavailable,
 }: CenterPaneProps) {
@@ -55,7 +62,12 @@ export function CenterPane({
     return (
       <main className="center-pane">
         <div className="center-hero">
-          <Composer activeAgent={activeAgent} onSubmit={onSubmit} heroMode />
+          <Composer
+            activeAgent={activeAgent}
+            onSubmit={onSubmit}
+            onModelChange={onModelChange}
+            heroMode
+          />
         </div>
       </main>
     );
@@ -95,7 +107,11 @@ export function CenterPane({
           />
         </StreamingSurfaceBoundary>
       </div>
-      <Composer activeAgent={activeAgent} onSubmit={onSubmit} />
+      <Composer
+        activeAgent={activeAgent}
+        onSubmit={onSubmit}
+        onModelChange={onModelChange}
+      />
     </main>
   );
 }

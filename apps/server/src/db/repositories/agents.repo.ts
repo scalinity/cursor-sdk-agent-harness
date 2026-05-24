@@ -175,6 +175,17 @@ export class AgentsRepo {
       .run(executionMode, isoNow(), id);
   }
 
+  updateModel(id: string, modelId: string): void {
+    this.raw
+      .prepare(
+        `UPDATE agents
+            SET model_id = ?,
+                updated_at = ?
+          WHERE id = ?`,
+      )
+      .run(modelId, isoNow(), id);
+  }
+
   terminate(id: string): void {
     const now = isoNow();
     this.raw

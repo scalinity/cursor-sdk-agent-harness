@@ -36,6 +36,8 @@ function sendRuntimeError(reply: FastifyReply, err: AgentRuntimeError) {
       return reply.code(404).send({ code: err.code, message: err.message });
     case "AGENT_TERMINATED":
       return reply.code(409).send({ code: err.code, message: err.message });
+    case "AGENT_BUSY":
+      return reply.code(409).send({ code: err.code, message: err.message });
     case "SDK_CREATE_FAILED":
     case "SDK_RESUME_FAILED":
     case "SDK_SEND_FAILED":
@@ -146,20 +148,35 @@ export async function registerAgentsRoutes(
     },
   );
 
-  // Phase 19: Update agent (name, executionMode)
+  // Phase 19 / model switcher: Update agent execution mode and/or model.
   app.patch<{ Params: { agentId: string } }>(
     "/api/agents/:agentId",
     async (req, reply) => {
       const parsed = updateAgentRequestSchema.safeParse(req.body);
       if (!parsed.success) return send422(reply, parsed.error);
+      if (
+        parsed.data.executionMode === undefined &&
+        parsed.data.modelId === undefined
+      ) {
+        return reply.code(422).send({
+          code: "VALIDATION_ERROR",
+          message: "executionMode or modelId is required",
+        });
+      }
       const existing = deps.agentsRepo.getById(req.params.agentId);
       if (!existing) {
-        return reply.code(404).send({ code: "AGENT_NOT_FOUND", message: `Agent ${req.params.agentId} not found.` });
-      }
-      if (parsed.data.executionMode !== undefined) {
-        deps.agentsRepo.updateExecutionMode(req.params.agentId, parsed.data.executionMode);
+        return reply.code(404).send({
+          code: "AGENT_NOT_FOUND",
+          message: `Agent ${req.params.agentId} not found.`,
+        });
       }
       try {
+        if (parsed.data.modelId !== undefined) {
+          deps.runtime.updateModel(req.params.agentId, parsed.data.modelId);
+        }
+        if (parsed.data.executionMode !== undefined) {
+          deps.agentsRepo.updateExecutionMode(req.params.agentId, parsed.data.executionMode);
+        }
         const detail = deps.runtime.getById(req.params.agentId);
         return agentDetailResponseSchema.parse(detail);
       } catch (err) {

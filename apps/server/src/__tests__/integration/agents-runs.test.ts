@@ -446,6 +446,99 @@ describe("agents + runs REST routes", () => {
     expect((resume.json() as { status: string }).status).toBe("active");
   });
 
+  it("PATCH /api/agents/:id switches the agent model and persists it", async () => {
+    h = await buildHarness();
+    const token = await h.csrfToken();
+    const create = await h.app.inject({
+      method: "POST",
+      url: "/api/agents",
+      payload: {
+        name: "model-switch",
+        mode: "local",
+        modelId: "composer-2-5-fast",
+        cwd: [h.allowedDir],
+        mcpServerIds: [],
+        subagentDefinitionIds: [],
+      },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": token,
+        "content-type": "application/json",
+      },
+    });
+    const agentId = (create.json() as { id: string }).id;
+
+    const patch = await h.app.inject({
+      method: "PATCH",
+      url: `/api/agents/${agentId}`,
+      payload: { modelId: "composer-2-5" },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": token,
+        "content-type": "application/json",
+      },
+    });
+    expect(patch.statusCode).toBe(200);
+    expect((patch.json() as { modelId: string }).modelId).toBe("composer-2-5");
+
+    const detail = await h.app.inject({
+      method: "GET",
+      url: `/api/agents/${agentId}`,
+      headers: { origin: "http://127.0.0.1:5173" },
+    });
+    expect((detail.json() as { modelId: string }).modelId).toBe("composer-2-5");
+  });
+
+  it("PATCH /api/agents/:id returns 422 when no supported update is provided", async () => {
+    h = await buildHarness();
+    const token = await h.csrfToken();
+    const create = await h.app.inject({
+      method: "POST",
+      url: "/api/agents",
+      payload: {
+        name: "no-model-patch",
+        mode: "local",
+        modelId: "composer-2-5-fast",
+        cwd: [h.allowedDir],
+        mcpServerIds: [],
+        subagentDefinitionIds: [],
+      },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": token,
+        "content-type": "application/json",
+      },
+    });
+    const agentId = (create.json() as { id: string }).id;
+    const patch = await h.app.inject({
+      method: "PATCH",
+      url: `/api/agents/${agentId}`,
+      payload: {},
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": token,
+        "content-type": "application/json",
+      },
+    });
+    expect(patch.statusCode).toBe(422);
+  });
+
+  it("PATCH /api/agents/:id returns 404 for an unknown agent", async () => {
+    h = await buildHarness();
+    const token = await h.csrfToken();
+    const patch = await h.app.inject({
+      method: "PATCH",
+      url: "/api/agents/does-not-exist",
+      payload: { modelId: "composer-2-5" },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": token,
+        "content-type": "application/json",
+      },
+    });
+    expect(patch.statusCode).toBe(404);
+  });
+
   it("thinking-delta from onDelta is persisted and visible in events", async () => {
     h = await buildHarness({
       sdkOverride: createStubSdkAdapter({

@@ -102,6 +102,7 @@ export type CreateAgentRequest = z.infer<typeof createAgentRequestSchema>;
 export const updateAgentRequestSchema = z.object({
   name: z.string().min(1).max(256).optional(),
   executionMode: executionModeSchema.optional(),
+  modelId: unifiedModelIdSchema.optional(),
 });
 export type UpdateAgentRequest = z.infer<typeof updateAgentRequestSchema>;
 

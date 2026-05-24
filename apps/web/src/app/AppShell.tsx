@@ -37,7 +37,13 @@ export function AppShell() {
   const csrf = useCsrfToken();
   useSettings();
   useToastSweeper();
-  const { agents, activeAgent, selectAgent, createAgent } = useAgents();
+  const {
+    agents,
+    activeAgent,
+    selectAgent,
+    createAgent,
+    updateAgentModel,
+  } = useAgents();
   const { runs, deleteRun, reload: reloadRuns } = useRunHistory();
   const [newAgentOpen, setNewAgentOpen] = useState(false);
   const activeRunId = useRunStore((s) => s.activeRunId);
@@ -135,6 +141,14 @@ export function AppShell() {
       return runId;
     },
     [submitUserInput, setActiveRunId],
+  );
+
+  const onModelChange = useCallback(
+    async (modelId: string) => {
+      if (!activeAgent || activeAgent.modelId === modelId) return;
+      await updateAgentModel(activeAgent.id, modelId);
+    },
+    [activeAgent, updateAgentModel],
   );
 
   const activeRun = useMemo(
@@ -237,6 +251,7 @@ export function AppShell() {
           activeRunId={activeRunId}
           connectionState={connectionState}
           onSubmit={onSubmit}
+          onModelChange={onModelChange}
           onApprovalResolve={onApprovalResolve}
           cancelUnavailable={cancelUnavailable}
         />

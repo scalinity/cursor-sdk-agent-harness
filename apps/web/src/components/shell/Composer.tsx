@@ -29,7 +29,13 @@ import {
 
 export interface ComposerProps {
   activeAgent: AgentSummary | null;
-  onSubmit: (input: { prompt: string; agentId: string; images?: SdkImage[]; mentions?: ContextMention[] }) => Promise<string>;
+  onSubmit: (input: {
+    prompt: string;
+    agentId: string;
+    images?: SdkImage[];
+    mentions?: ContextMention[];
+  }) => Promise<string>;
+  onModelChange?: ((modelId: string) => Promise<void>) | undefined;
   /** Centered "new session" presentation when the chat is empty and the right pane is collapsed. */
   heroMode?: boolean;
 }
@@ -39,13 +45,19 @@ export interface ComposerProps {
  * Submits via the agent-stream hook; on submit the parent's `onSubmit`
  * is responsible for setting the active run id (it returns the runId).
  */
-export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerProps) {
+export function Composer({
+  activeAgent,
+  onSubmit,
+  onModelChange,
+  heroMode = false,
+}: ComposerProps) {
   const draft = useUiStore((s) => s.composerDraft);
   const setDraft = useUiStore((s) => s.setComposerDraft);
   const selectedModelId = useUiStore((s) => s.selectedModelId);
   const setSelectedModelId = useUiStore((s) => s.setSelectedModelId);
   const { models } = useModels();
   const [busy, setBusy] = useState(false);
+  const [modelBusy, setModelBusy] = useState(false);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -146,6 +158,22 @@ export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerPr
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
   }, []);
+
+  const handleModelChange = useCallback(
+    async (modelId: string) => {
+      setSelectedModelId(modelId);
+      if (!onModelChange || !activeAgent || activeAgent.modelId === modelId) return;
+      setModelBusy(true);
+      try {
+        await onModelChange(modelId);
+      } catch (e) {
+        report(e);
+      } finally {
+        setModelBusy(false);
+      }
+    },
+    [activeAgent, onModelChange, report, setSelectedModelId],
+  );
 
   const submit = useCallback(async () => {
     // Read the latest draft from the store at submit time rather than the
@@ -301,8 +329,10 @@ export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerPr
           <Select<string>
             value={selectedModelId}
             options={modelOptions}
-            onChange={setSelectedModelId}
-            disabled={busy}
+            onChange={(modelId) => {
+              void handleModelChange(modelId);
+            }}
+            disabled={busy || modelBusy}
             placement="top"
             ariaLabel="Model"
             title="Model used for new runs. Switching it re-targets the coding agent."

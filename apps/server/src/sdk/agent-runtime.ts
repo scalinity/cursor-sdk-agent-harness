@@ -55,6 +55,7 @@ export class AgentRuntimeError extends Error {
       | "AGENT_NOT_FOUND"
       | "AGENT_TERMINATED"
       | "RUN_NOT_FOUND"
+      | "AGENT_BUSY"
       | "SDK_CREATE_FAILED"
       | "SDK_RESUME_FAILED"
       | "SDK_SEND_FAILED",
@@ -108,6 +109,7 @@ export interface AgentRuntime {
   terminate(agentId: string): Promise<void>;
   list(): AgentSummary[];
   getById(agentId: string): AgentDetailResponse;
+  updateModel(agentId: string, modelId: string): AgentSummary;
   startRun(input: CreateRunRequest): Promise<CreateRunResponse>;
   /**
    * Test/teardown hook: synchronously close all open SDK handles and clear
@@ -380,6 +382,42 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
         latestRunId: latest?.id ?? null,
         latestRunStatus: latest?.status ?? null,
       };
+    },
+
+    updateModel(agentId: string, modelId: string): AgentSummary {
+      const row = deps.agentsRepo.getById(agentId);
+      if (!row) {
+        throw new AgentRuntimeError("AGENT_NOT_FOUND", `Agent ${agentId} not found`);
+      }
+      if (row.status === "terminated") {
+        throw new AgentRuntimeError(
+          "AGENT_TERMINATED",
+          `Agent ${agentId} is terminated. Resume it first.`,
+        );
+      }
+      if (row.modelId !== modelId) {
+        if (activeRuns.forAgent(agentId).length > 0) {
+          throw new AgentRuntimeError(
+            "AGENT_BUSY",
+            `Agent ${agentId} has an active run. Finish or cancel it before switching models.`,
+          );
+        }
+        deps.agentsRepo.updateModel(agentId, modelId);
+        const handle = liveAgents.get(agentId);
+        if (handle) {
+          try {
+            handle.close();
+          } catch (err) {
+            deps.logger.warn({ err, agentId }, "agent updateModel: handle.close threw");
+          }
+          liveAgents.delete(agentId);
+        }
+      }
+      const updated = deps.agentsRepo.getById(agentId);
+      if (!updated) {
+        throw new AgentRuntimeError("AGENT_NOT_FOUND", `Agent ${agentId} vanished`);
+      }
+      return buildSummary(updated, deps.runsRepo.aggregatesByAgent().get(agentId));
     },
 
     async startRun(input: CreateRunRequest): Promise<CreateRunResponse> {

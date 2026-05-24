@@ -49,6 +49,8 @@ function sendRuntimeError(reply: FastifyReply, err: AgentRuntimeError) {
       return reply.code(404).send({ code: err.code, message: err.message });
     case "AGENT_TERMINATED":
       return reply.code(409).send({ code: err.code, message: err.message });
+    case "AGENT_BUSY":
+      return reply.code(409).send({ code: err.code, message: err.message });
     case "SDK_CREATE_FAILED":
     case "SDK_RESUME_FAILED":
     case "SDK_SEND_FAILED":
