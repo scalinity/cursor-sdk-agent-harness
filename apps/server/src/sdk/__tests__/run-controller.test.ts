@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { pino } from "pino";
 import type { FastifyBaseLogger } from "fastify";
-import type { SettingsSnapshot } from "@harness/shared";
+import type { AgentMode, SettingsSnapshot } from "@harness/shared";
 import { openTestDb } from "../../db/__tests__/helpers.js";
 import { AgentsRepo } from "../../db/repositories/agents.repo.js";
 import { RunsRepo } from "../../db/repositories/runs.repo.js";
 import { RunController, newRunId } from "../run-controller.js";
-import { createStubSdkAdapter, type StubSDKAgent } from "../testing.js";
+import type { SdkAdapter, SendOptions } from "../sdk-adapter.js";
+import { createStubSdkAdapter, StubRun, StubSDKAgent } from "../testing.js";
 
 const pricing: SettingsSnapshot["pricing"] = {
   composer25Fast: {
@@ -64,8 +65,8 @@ describe("RunController", () => {
   });
 
   async function startController(
-    sdk: ReturnType<typeof createStubSdkAdapter>,
-    overrides: { runId?: string } = {},
+    sdk: SdkAdapter,
+    overrides: { runId?: string; mode?: AgentMode } = {},
   ): Promise<{ controller: RunController; runId: string }> {
     const runId = overrides.runId ?? newRunId();
     f.runs.create({
@@ -81,6 +82,7 @@ describe("RunController", () => {
         runId,
         agentId: f.agentId,
         modelId: "composer-2-5-fast",
+        mode: overrides.mode ?? "local",
         prompt: "hello",
         agent: stubAgent as StubSDKAgent,
         sdk,
@@ -93,6 +95,43 @@ describe("RunController", () => {
     );
     await controller.start();
     return { controller, runId };
+  }
+
+  /**
+   * Adapter whose first `send` rejects exactly like the SDK does when the
+   * agent's persisted `active_run_id` is wedged (`already has active run`),
+   * then succeeds on the second call. `sends` records the SendOptions of
+   * every attempt so a test can assert whether `local.force` was supplied.
+   */
+  function wedgedThenOkAdapter(agentId: string): {
+    adapter: SdkAdapter;
+    sends: SendOptions[];
+  } {
+    const sends: SendOptions[] = [];
+    const adapter: SdkAdapter = {
+      async createAgent() {
+        return new StubSDKAgent(agentId);
+      },
+      async resumeAgent() {
+        return new StubSDKAgent(agentId);
+      },
+      async send(_agent, _message, sendOptions) {
+        sends.push(sendOptions);
+        if (sends.length === 1) {
+          throw new Error(`Agent ${agentId} already has active run`);
+        }
+        return new StubRun(
+          {
+            runId: sendOptions.idempotencyKey ?? "stub",
+            agentId,
+            events: [],
+            finalResult: { status: "finished", durationMs: 5 },
+          },
+          sendOptions.onDelta,
+        );
+      },
+    };
+    return { adapter, sends };
   }
 
   it("cancel() writes CANCELLED, not ERROR (FIX-A regression)", async () => {
@@ -171,6 +210,7 @@ describe("RunController", () => {
         runId,
         agentId: f.agentId,
         modelId: "composer-2-5-fast",
+        mode: "local",
         prompt: "hello",
         agent: stubAgent as StubSDKAgent,
         sdk,
@@ -240,5 +280,49 @@ describe("RunController", () => {
     // Original row should still exist — transaction rolled back the DELETE.
     expect(f.agents.getById("to-rotate")).not.toBeNull();
     expect(f.agents.getById("collide")?.name).toBe("existing");
+  });
+
+  it("start() recovers a wedged persisted run by retrying once with local.force (R-W)", async () => {
+    // Reproduces the "Agent <id> already has active run" toast on a fresh
+    // app: the SDK's durable active_run_id (in ~/.cursor) is left wedged
+    // after a crash/kill mid-run. A local agent should self-heal by
+    // expire-and-retrying via SendOptions.local.force.
+    const { adapter, sends } = wedgedThenOkAdapter(f.agentId);
+    const { controller, runId } = await startController(adapter);
+    await controller.awaitSettled();
+    expect(sends).toHaveLength(2);
+    expect(sends[0]?.local?.force).toBeUndefined();
+    expect(sends[1]?.local?.force).toBe(true);
+    expect(f.runs.getById(runId)?.status).toBe("FINISHED");
+  });
+
+  it("start() does NOT force-retry a wedged run for cloud agents (R-W)", async () => {
+    // Cloud enforces its own busy-run check (409 agent_busy); a still-
+    // running cloud run must never be expired out from under the user.
+    const { adapter, sends } = wedgedThenOkAdapter(f.agentId);
+    await expect(startController(adapter, { mode: "cloud" })).rejects.toThrow(
+      /already has active run/,
+    );
+    expect(sends).toHaveLength(1);
+  });
+
+  it("start() does NOT retry on a non-wedged send failure (R-W)", async () => {
+    // Only the specific wedged-run error triggers the force recovery; any
+    // other failure must surface unchanged after a single attempt.
+    const sends: SendOptions[] = [];
+    const adapter: SdkAdapter = {
+      async createAgent() {
+        return new StubSDKAgent(f.agentId);
+      },
+      async resumeAgent() {
+        return new StubSDKAgent(f.agentId);
+      },
+      async send(_agent, _message, sendOptions) {
+        sends.push(sendOptions);
+        throw new Error("boom: unrelated network failure");
+      },
+    };
+    await expect(startController(adapter)).rejects.toThrow(/boom/);
+    expect(sends).toHaveLength(1);
   });
 });

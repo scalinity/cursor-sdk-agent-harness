@@ -1,13 +1,14 @@
 import type { FastifyBaseLogger } from "fastify";
 import { randomUUID } from "node:crypto";
 import type {
+  AgentMode,
   RunInterruptedReason,
   SdkImage,
   SdkRunStatus,
   SettingsSnapshot,
 } from "@harness/shared";
 import type { RunsRepo } from "../db/repositories/runs.repo.js";
-import type { Run, SDKAgent, SdkAdapter } from "./sdk-adapter.js";
+import type { Run, SDKAgent, SdkAdapter, SendOptions } from "./sdk-adapter.js";
 import {
   accumulateTurnEndedUsage,
   extractUsage,
@@ -41,6 +42,7 @@ export interface RunControllerInit {
   runId: string;
   agentId: string;
   modelId: string;
+  mode: AgentMode;
   prompt: string;
   images?: SdkImage[];
   agent: SDKAgent;
@@ -98,23 +100,52 @@ export class RunController {
    * RunController unregisters itself after the run's terminal status.
    */
   async start(): Promise<void> {
-    // OQ-11: `agent.send` does NOT accept AbortSignal in v1.0.13. The
-    // controller never passes one — see `sdk-adapter.send`.
-    const sendOptions = {
-      onDelta: (args: { update: unknown }) => this.onDelta(args.update),
-      idempotencyKey: this.runId,
-    };
-    this.runHandle = await this.init.sdk.send(
-      this.init.agent,
-      this.init.images && this.init.images.length > 0
-        ? { text: this.init.prompt, images: this.init.images }
-        : this.init.prompt,
-      sendOptions,
-    );
+    this.runHandle = await this.send();
     this.setStatus("RUNNING");
     // Consume in the background; the controller's onTerminate fires when
     // the stream/wait pipeline resolves.
     this.finalisePromise = this.consumeAndFinalise();
+  }
+
+  /**
+   * Issue the SDK `agent.send`, transparently recovering from a wedged
+   * persisted run.
+   *
+   * The SDK keeps its OWN durable run state (in ~/.cursor), separate from
+   * the harness `runs` table. If the process was killed mid-run, the SDK's
+   * `agents.active_run_id` is left pointing at a non-terminal run and the
+   * next send throws `Agent <id> already has active run` — even though our
+   * startup recovery (spec §11) already terminalized the matching row in
+   * OUR db. The SDK documents `SendOptions.local.force` as the expire-and-
+   * retry hatch for exactly this "local agent left wedged after a crashed
+   * CLI process" case. We retry once with `force` only for LOCAL agents —
+   * cloud enforces a busy-run check server-side (409 agent_busy) and a
+   * still-running cloud run must not be expired out from under the user.
+   */
+  private async send(): Promise<Run> {
+    // OQ-11: `agent.send` does NOT accept AbortSignal in v1.0.13. The
+    // controller never passes one — see `sdk-adapter.send`.
+    const message =
+      this.init.images && this.init.images.length > 0
+        ? { text: this.init.prompt, images: this.init.images }
+        : this.init.prompt;
+    const sendOptions: SendOptions = {
+      onDelta: (args: { update: unknown }) => this.onDelta(args.update),
+      idempotencyKey: this.runId,
+    };
+    try {
+      return await this.init.sdk.send(this.init.agent, message, sendOptions);
+    } catch (err) {
+      if (this.init.mode !== "local" || !isAgentWedgedError(err)) throw err;
+      this.init.logger.warn(
+        { err, runId: this.runId, agentId: this.agentId },
+        "send rejected by a wedged persisted run; retrying once with local.force to expire it",
+      );
+      return await this.init.sdk.send(this.init.agent, message, {
+        ...sendOptions,
+        local: { force: true },
+      });
+    }
   }
 
   /**
@@ -368,6 +399,16 @@ function isTerminalStatus(status: SdkRunStatus): boolean {
 
 export function newRunId(): string {
   return randomUUID();
+}
+
+/**
+ * True when the SDK rejected a send because the agent's persisted
+ * `active_run_id` still points at a non-terminal run (see
+ * `RunController.send`). Matched on the SDK error text since v1.0.13
+ * exposes no machine-readable error code for this case.
+ */
+function isAgentWedgedError(err: unknown): boolean {
+  return err instanceof Error && /already has active run/i.test(err.message);
 }
 
 const RUN_WAIT_TIMEOUT_MS = 30_000;
