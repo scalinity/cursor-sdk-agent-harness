@@ -38,12 +38,16 @@ if (env.backends?.onnx?.wasm) {
 // download the model" error: the weights downloaded fine; *loading* them threw.
 // fp32 has no quantized matmuls, so the session always builds.
 //
-// Why tiny, not base: dictation re-transcribes the whole growing buffer on a
-// ~1s cadence so text lands in the composer live (see useSpeechToText). tiny.en
-// keeps each pass fast enough on single-thread WASM to feel live and holds the
-// one-time fp32 download to ~150 MB. Bump to "Xenova/whisper-base.en" to trade
-// a ~290 MB download and slower passes for higher accuracy.
-const MODEL_ID = "Xenova/whisper-tiny.en";
+// `base.en` (not tiny): a clear accuracy jump for dictation — tiny.en's output
+// was too rough to be useful. The cost is a larger one-time fp32 download
+// (~290 MB) and heavier passes, which is why we prefer the WebGPU backend below
+// (≈10x WASM): on WebGPU, base stays fast enough for the live ~1s re-transcribe
+// cadence (see useSpeechToText). Without WebGPU it falls back to WASM (slower
+// interim passes, but the on-stop final pass is still accurate).
+const MODEL_ID = "Xenova/whisper-base.en";
+
+// Prefer WebGPU when the renderer exposes it; the WASM backend is the fallback.
+const PREFER_WEBGPU = typeof navigator !== "undefined" && "gpu" in navigator;
 
 /** Main thread → worker. */
 export interface WhisperTranscribeRequest {
@@ -68,10 +72,10 @@ export type WhisperResponse =
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
-let asrPromise: Promise<AutomaticSpeechRecognitionPipeline> | null = null;
-function loadAsr(): Promise<AutomaticSpeechRecognitionPipeline> {
-  asrPromise ??= pipeline("automatic-speech-recognition", MODEL_ID, {
+function buildPipeline(device: "webgpu" | "wasm"): Promise<AutomaticSpeechRecognitionPipeline> {
+  return pipeline("automatic-speech-recognition", MODEL_ID, {
     dtype: "fp32",
+    device,
     progress_callback: (info: unknown) => {
       const progress = (info as { progress?: number }).progress;
       if (typeof progress === "number" && Number.isFinite(progress)) {
@@ -79,6 +83,18 @@ function loadAsr(): Promise<AutomaticSpeechRecognitionPipeline> {
       }
     },
   });
+}
+
+let asrPromise: Promise<AutomaticSpeechRecognitionPipeline> | null = null;
+function loadAsr(): Promise<AutomaticSpeechRecognitionPipeline> {
+  asrPromise ??= PREFER_WEBGPU
+    ? buildPipeline("webgpu").catch((err: unknown) => {
+        // WebGPU is present but unusable (driver/adapter failure): fall back to
+        // the always-available WASM backend rather than failing dictation.
+        console.warn("[whisper] WebGPU load failed; falling back to WASM:", err);
+        return buildPipeline("wasm");
+      })
+    : buildPipeline("wasm");
   return asrPromise;
 }
 
