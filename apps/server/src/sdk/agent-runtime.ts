@@ -24,6 +24,7 @@ import {
 } from "./persist-and-broadcast.js";
 import { RunController, newRunId } from "./run-controller.js";
 import type { SDKAgent, SdkAdapter } from "./sdk-adapter.js";
+import { ACTIVE_WORKSPACE_SETTING_KEY } from "../config/settings-keys.js";
 
 /**
  * Application-layer error codes surfaced to REST routes. Routes map these
@@ -321,11 +322,11 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
       const snapshot = getSettingsSnapshot(deps.settingsRepo);
       const runId = newRunId();
       // Tag the run with the workspace active at creation time so the
-      // sessions rail can group chats per workspace. Mirrors the guard in
-      // workspace-allowlist.routes.ts (ACTIVE_WORKSPACE_SETTING_KEY); inlined
-      // here to avoid a routes→sdk import.
+      // sessions rail can group chats per workspace. Reads the shared
+      // ACTIVE_WORKSPACE_SETTING_KEY (see config/settings-keys.ts); guards for
+      // the non-empty-string shape like the workspace-allowlist route does.
       const rawActiveWorkspaceId = deps.settingsRepo.get<string | null>(
-        "app.activeWorkspaceId",
+        ACTIVE_WORKSPACE_SETTING_KEY,
       );
       const activeWorkspaceId =
         typeof rawActiveWorkspaceId === "string" && rawActiveWorkspaceId.length > 0

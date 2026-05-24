@@ -10,8 +10,8 @@ import { z } from "zod";
 import type { SettingsRepo } from "../db/repositories/settings.repo.js";
 import type { WorkspaceAllowlistRepo } from "../db/repositories/workspace-allowlist.repo.js";
 import type { WorkspacePolicy } from "../security/workspace-policy.js";
-
-export const ACTIVE_WORKSPACE_SETTING_KEY = "app.activeWorkspaceId";
+import { ACTIVE_WORKSPACE_SETTING_KEY } from "../config/settings-keys.js";
+export { ACTIVE_WORKSPACE_SETTING_KEY };
 
 export interface WorkspaceAllowlistRoutesDeps {
   allowlist: WorkspaceAllowlistRepo;
