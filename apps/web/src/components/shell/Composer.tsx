@@ -1,8 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import {
-  DEFAULT_MODEL_ID,
   MODEL_LABELS,
-  modelIdSchema,
   type AgentSummary,
   type ModelId,
   type SdkImage,
@@ -24,37 +22,6 @@ import {
 const MODEL_OPTIONS: ReadonlyArray<SelectOption<ModelId>> = (
   Object.keys(MODEL_LABELS) as ModelId[]
 ).map((id) => ({ value: id, label: MODEL_LABELS[id] }));
-
-/**
- * Render-rule for the model pill. Exported for `Composer.test.tsx`. See the
- * inline comment at the call site for the three branches; the unknown-id
- * branch is the load-bearing one — the pill must surface the agent's real
- * model id even when the harness MODEL_LABELS map lacks an entry, so that
- * "looks wrong" prompts a MODEL_LABELS update instead of silent misreporting.
- */
-export function describeModel(
-  activeAgent: AgentSummary | null,
-): { modelLabel: string; modelTitle: string } {
-  if (!activeAgent) {
-    const label = MODEL_LABELS[DEFAULT_MODEL_ID];
-    return {
-      modelLabel: label,
-      modelTitle: `Default model: ${label}. Models are configured per agent in the New Agent dialog.`,
-    };
-  }
-  const parsed = modelIdSchema.safeParse(activeAgent.modelId);
-  if (parsed.success) {
-    const label = MODEL_LABELS[parsed.data];
-    return {
-      modelLabel: label,
-      modelTitle: `Model: ${label} (set on agent ${activeAgent.name})`,
-    };
-  }
-  return {
-    modelLabel: `${activeAgent.modelId} (unknown)`,
-    modelTitle: `Unknown model id "${activeAgent.modelId}" set on agent ${activeAgent.name}. Update the harness MODEL_LABELS map to render a friendly name.`,
-  };
-}
 
 export interface ComposerProps {
   activeAgent: AgentSummary | null;

@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSummary } from "@harness/shared";
-import { Composer, describeModel } from "./Composer.js";
+import { Composer } from "./Composer.js";
+import { describeModel } from "../../lib/model-label.js";
 import { useUiStore } from "../../state/ui-store.js";
 
 function fixtureAgent(overrides: Partial<AgentSummary> = {}): AgentSummary {
