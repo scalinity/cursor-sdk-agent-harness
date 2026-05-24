@@ -1,15 +1,21 @@
 /**
- * useSpeechToText — push-to-talk dictation for the composer, transcribed
- * fully on-device by a Whisper model running in `whisper-worker.ts`.
+ * useSpeechToText — live, on-device dictation for the composer. A Whisper model
+ * in `whisper-worker.ts` transcribes the microphone as the user speaks: the
+ * take is re-transcribed on a short cadence so words land in the composer live,
+ * then a final pass on stop commits the authoritative transcript.
  *
- * Why a hook (and not inline in the component): it owns three pieces of
- * imperative, non-React state — a `MediaStream`, a `MediaRecorder`, and the
- * Whisper `Worker` — plus their teardown. Per the repo's effects policy those
- * belong in a hook, where a single `useMountEffect` cleanup tears everything
- * down on unmount.
+ * Why a hook (and not inline in the component): it owns four pieces of
+ * imperative, non-React state — a `MediaStream`, a `MediaRecorder`, the Whisper
+ * `Worker`, and the recorded chunks — plus their teardown. Per the repo's
+ * effects policy those belong in a hook, where a single `useMountEffect`
+ * cleanup tears everything down on unmount.
  *
- * The pipeline, on stop: MediaRecorder chunks → Blob → decode + resample to
- * mono 16 kHz Float32 (what Whisper wants) → transfer to the worker → text.
+ * The pipeline, per pass: MediaRecorder chunks (a timeslice flushes one every
+ * INTERIM_MS) → cumulative Blob → decode + resample to mono 16 kHz Float32 →
+ * transfer to the worker → streamed partial text + a final transcript. Each
+ * pass re-transcribes the whole take from the start, so a result *replaces* the
+ * dictation region rather than appending — `onInterimTranscript` always carries
+ * the latest full take.
  *
  * Feature detection (`supported`) is deliberate: in the packaged Electron app
  * `getUserMedia`/`MediaRecorder`/`Worker` all exist, but under jsdom (tests)
@@ -31,8 +37,14 @@ export type SpeechToTextStatus =
   | "transcribing";
 
 export interface UseSpeechToTextOptions {
-  /** Called once per completed transcription with the recognized text. */
-  onTranscript: (text: string) => void;
+  /**
+   * Latest transcript of the in-progress take — fired repeatedly while
+   * recording (and during the final pass). Replaces the dictation region, since
+   * each pass re-transcribes from the start.
+   */
+  onInterimTranscript: (text: string) => void;
+  /** Authoritative transcript once recording stops; commits the dictation. */
+  onFinalTranscript: (text: string) => void;
 }
 
 export interface SpeechToText {
@@ -42,9 +54,17 @@ export interface SpeechToText {
   readonly isRecording: boolean;
   /** 0–100 while the model downloads on first use; null otherwise. */
   readonly modelProgress: number | null;
-  /** Start recording when idle, stop+transcribe when recording. */
+  /** Start recording when idle, stop+finalize when recording. */
   readonly toggle: () => void;
 }
+
+// MediaRecorder timeslice: flush a chunk (and kick an interim transcription)
+// roughly once a second. Fast enough to feel live without spamming the worker —
+// and the worker coalesces anything that piles up while a pass is running.
+const INTERIM_MS = 1000;
+
+// Ignore sub-0.1s audio (an accidental tap) — nothing meaningful to transcribe.
+const MIN_SAMPLES = 1600;
 
 function detectSupport(): boolean {
   return (
@@ -70,20 +90,37 @@ async function decodeToMono16k(blob: Blob): Promise<Float32Array> {
   }
 }
 
-export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): SpeechToText {
+/** Map a worker error (which may be raw ONNX Runtime noise) to friendly text. */
+function friendlyError(message: string): string {
+  if (message.startsWith("model-load:")) {
+    return "Couldn't load the voice model — check your connection and try again.";
+  }
+  return `Dictation failed: ${message}`;
+}
+
+export function useSpeechToText({
+  onInterimTranscript,
+  onFinalTranscript,
+}: UseSpeechToTextOptions): SpeechToText {
   const supported = detectSupport();
   const [status, setStatus] = useState<SpeechToTextStatus>("idle");
   const [modelProgress, setModelProgress] = useState<number | null>(null);
   const { report } = useErrorReporter("speech-to-text");
 
-  // Keep the latest callback without re-subscribing the worker each render.
-  const onTranscriptRef = useRef(onTranscript);
-  onTranscriptRef.current = onTranscript;
+  // Keep the latest callbacks without re-subscribing the worker each render.
+  const onInterimRef = useRef(onInterimTranscript);
+  onInterimRef.current = onInterimTranscript;
+  const onFinalRef = useRef(onFinalTranscript);
+  onFinalRef.current = onFinalTranscript;
 
   const workerRef = useRef<Worker | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  // Guards against overlapping interim decodes (decode is async). The worker
+  // already coalesces requests, so skipping a tick here is harmless — the next
+  // dataavailable, or the final pass, covers the dropped window.
+  const interimDecodingRef = useRef(false);
 
   const ensureWorker = useCallback((): Worker => {
     if (workerRef.current) return workerRef.current;
@@ -92,17 +129,29 @@ export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): Speec
     });
     worker.addEventListener("message", (event: MessageEvent<WhisperResponse>) => {
       const msg = event.data;
-      if (msg.type === "progress") {
-        setModelProgress(Math.round(msg.progress));
-        return;
-      }
-      setModelProgress(null);
-      setStatus("idle");
-      if (msg.type === "result") {
-        const text = msg.text.trim();
-        if (text.length > 0) onTranscriptRef.current(text);
-      } else {
-        report(`Transcription failed: ${msg.message}`, { severity: "warn" });
+      switch (msg.type) {
+        case "progress":
+          setModelProgress(Math.round(msg.progress));
+          return;
+        case "partial":
+          // Streamed words for the current pass — surface them live.
+          onInterimRef.current(msg.text);
+          return;
+        case "result":
+          setModelProgress(null);
+          if (msg.final) {
+            setStatus("idle");
+            if (msg.text.length > 0) onFinalRef.current(msg.text);
+          } else {
+            // An interim pass settled; recording is still in progress.
+            onInterimRef.current(msg.text);
+          }
+          return;
+        case "error":
+          setModelProgress(null);
+          if (msg.final) setStatus("idle");
+          report(friendlyError(msg.message), { severity: "warn" });
+          return;
       }
     });
     workerRef.current = worker;
@@ -113,6 +162,29 @@ export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): Speec
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
   }, []);
+
+  // Re-transcribe the take so far so partial text lands in the composer live.
+  const runInterimPass = useCallback(async (): Promise<void> => {
+    if (interimDecodingRef.current) return;
+    const chunks = chunksRef.current;
+    if (chunks.length === 0) return;
+    interimDecodingRef.current = true;
+    try {
+      const type = chunks[0]?.type ?? "audio/webm";
+      const audio = await decodeToMono16k(new Blob(chunks, { type }));
+      if (audio.length >= MIN_SAMPLES) {
+        ensureWorker().postMessage(
+          { type: "transcribe", audio, final: false } satisfies WhisperTranscribeRequest,
+          [audio.buffer],
+        );
+      }
+    } catch {
+      // A cumulative webm blob can fail to decode on a half-written trailing
+      // frame; the next tick or the final pass recovers. Don't toast the noise.
+    } finally {
+      interimDecodingRef.current = false;
+    }
+  }, [ensureWorker]);
 
   const finalize = useCallback(async (): Promise<void> => {
     stopTracks();
@@ -127,13 +199,12 @@ export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): Speec
     try {
       const type = chunks[0]?.type ?? "audio/webm";
       const audio = await decodeToMono16k(new Blob(chunks, { type }));
-      // Ignore sub-0.1s blips (accidental tap) — nothing meaningful to send.
-      if (audio.length < 1600) {
+      if (audio.length < MIN_SAMPLES) {
         setStatus("idle");
         return;
       }
       ensureWorker().postMessage(
-        { type: "transcribe", audio } satisfies WhisperTranscribeRequest,
+        { type: "transcribe", audio, final: true } satisfies WhisperTranscribeRequest,
         [audio.buffer],
       );
     } catch (err) {
@@ -156,15 +227,25 @@ export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): Speec
     }
     streamRef.current = stream;
     chunksRef.current = [];
+    interimDecodingRef.current = false;
     const recorder = new MediaRecorder(stream);
     recorderRef.current = recorder;
     recorder.addEventListener("dataavailable", (event) => {
-      if (event.data.size > 0) chunksRef.current.push(event.data);
+      if (event.data.size === 0) return;
+      chunksRef.current.push(event.data);
+      // Transcribe everything captured so far — but only while recording. The
+      // flush that stop() emits arrives with state "inactive"; finalize() owns
+      // that buffer so we don't race it with an interim pass.
+      if (recorder.state === "recording") void runInterimPass();
     });
     recorder.addEventListener("stop", () => void finalize());
-    recorder.start();
+    // A timeslice flushes a chunk every INTERIM_MS, driving the live passes.
+    recorder.start(INTERIM_MS);
+    // Construct the worker now so its heavy transformers chunk is fetched and
+    // parsed while the user speaks; the model itself loads lazily on pass one.
+    ensureWorker();
     setStatus("recording");
-  }, [finalize, report]);
+  }, [ensureWorker, finalize, report, runInterimPass]);
 
   const toggle = useCallback((): void => {
     if (!supported) return;

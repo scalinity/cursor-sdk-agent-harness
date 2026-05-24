@@ -48,19 +48,31 @@ export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerPr
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { report } = useErrorReporter("composer");
 
-  // Voice dictation. The transcript is appended to whatever the user has
-  // already typed (read from the store at completion time, not from a stale
-  // closure) so dictating mid-draft never clobbers existing text.
+  // Voice dictation lands in the composer live as the user speaks. Each pass
+  // re-transcribes the whole take, so `applyTranscript` *replaces* the dictated
+  // region: `dictationBaseRef` snapshots whatever was already typed when
+  // recording started, and the transcript is appended after it.
+  const dictationBaseRef = useRef("");
+  const applyTranscript = useCallback(
+    (text: string) => {
+      const base = dictationBaseRef.current;
+      const next =
+        base.length > 0 && text.length > 0 ? `${base} ${text}` : base.length > 0 ? base : text;
+      setDraft(next);
+    },
+    [setDraft],
+  );
   const speech = useSpeechToText({
-    onTranscript: useCallback(
-      (text: string) => {
-        const current = useUiStore.getState().composerDraft;
-        const next = current.trim().length > 0 ? `${current.trimEnd()} ${text}` : text;
-        setDraft(next);
-      },
-      [setDraft],
-    ),
+    onInterimTranscript: applyTranscript,
+    onFinalTranscript: applyTranscript,
   });
+  // Snapshot the existing draft at the moment recording begins, then toggle.
+  const handleMicToggle = useCallback(() => {
+    if (speech.status === "idle") {
+      dictationBaseRef.current = useUiStore.getState().composerDraft.trimEnd();
+    }
+    speech.toggle();
+  }, [speech]);
 
   // The coding agent is auto-provisioned for the active workspace + selected
   // model (see useEnsureDefaultAgent). "Ready" means that provisioning has
@@ -258,16 +270,18 @@ export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerPr
             leading={<SparkIcon className="size-3.5 shrink-0" />}
           />
           <div className="ml-auto flex items-center gap-2">
-            {speech.status !== "idle" && speech.status !== "recording" ? (
+            {speech.modelProgress !== null ? (
               <span className="composer-stt-status" aria-live="polite">
-                {speech.modelProgress !== null
-                  ? `Loading voice model… ${speech.modelProgress}%`
-                  : "Transcribing…"}
+                Loading voice model… {speech.modelProgress}%
+              </span>
+            ) : speech.status === "transcribing" ? (
+              <span className="composer-stt-status" aria-live="polite">
+                Transcribing…
               </span>
             ) : null}
             <button
               type="button"
-              onClick={speech.toggle}
+              onClick={handleMicToggle}
               disabled={
                 busy ||
                 !speech.supported ||
