@@ -22,6 +22,7 @@ import { CenterPane } from "../components/shell/CenterPane.js";
 import { RightPane } from "../components/shell/RightPane.js";
 import { Statusbar } from "../components/shell/Statusbar.js";
 import { BootstrapBanner } from "../components/shell/BootstrapBanner.js";
+import { Toaster } from "../components/shell/Toaster.js";
 import { NewAgentDialog } from "../components/agents/NewAgentDialog.js";
 import { WorkspaceRequiredModal } from "../components/workspace/WorkspaceRequiredModal.js";
 import { cn } from "../lib/cn.js";
@@ -174,6 +175,7 @@ export function AppShell() {
         />
       </div>
       {showWorkspaceModal ? <WorkspaceRequiredModal /> : null}
+      <Toaster />
     </>
   );
 }
