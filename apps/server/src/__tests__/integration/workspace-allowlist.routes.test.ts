@@ -295,4 +295,55 @@ describe("workspace-allowlist routes", () => {
     expect(res.statusCode).toBe(404);
     expect(res.json()).toMatchObject({ code: "NOT_FOUND" });
   });
+
+  it("R17-W2: deleting the active workspace clears the active pointer", async () => {
+    h = await build();
+
+    const dir = path.join(h.tmpRoot, "to-delete-proj");
+    await fs.mkdir(dir);
+    const created = await h.app.inject({
+      method: "POST",
+      url: "/api/workspace-allowlist",
+      payload: { path: dir, recursive: true },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": h.csrfToken,
+        "content-type": "application/json",
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const { id } = created.json() as { id: string };
+
+    const setActive = await h.app.inject({
+      method: "PUT",
+      url: "/api/workspace-allowlist/active",
+      payload: { id },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": h.csrfToken,
+        "content-type": "application/json",
+      },
+    });
+    expect(setActive.statusCode).toBe(200);
+
+    // Delete the active entry.
+    const del = await h.app.inject({
+      method: "DELETE",
+      url: `/api/workspace-allowlist/${id}?confirm=true`,
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": h.csrfToken,
+      },
+    });
+    expect(del.statusCode).toBe(204);
+
+    // The active pointer must NOT dangle at the deleted id.
+    const after = await h.app.inject({
+      method: "GET",
+      url: "/api/workspace-allowlist/active",
+      headers: { origin: "http://127.0.0.1:5173" },
+    });
+    expect(after.statusCode).toBe(200);
+    expect(after.json()).toMatchObject({ activeWorkspaceId: null, workspace: null });
+  });
 });

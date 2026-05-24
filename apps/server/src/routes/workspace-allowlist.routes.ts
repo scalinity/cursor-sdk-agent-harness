@@ -159,6 +159,14 @@ export async function registerWorkspaceAllowlistRoutes(
           entry,
         });
       }
+      // R17-W2: clear the active-workspace pointer FIRST (safe ordering — if
+      // anything throws mid-delete the pointer is already null, never
+      // dangling). runs.workspace_id has no FK, so a stale pointer would
+      // otherwise reference a deleted row and could suppress the
+      // workspace-required modal in the shell.
+      if (deps.settings.get<string | null>(ACTIVE_WORKSPACE_SETTING_KEY) === req.params.entryId) {
+        deps.settings.set(ACTIVE_WORKSPACE_SETTING_KEY, null);
+      }
       deps.allowlist.delete(req.params.entryId);
       return reply.code(204).send();
     },
