@@ -17,6 +17,7 @@ export interface CreateRunInput {
   promptPreview?: string;
   modelId?: string | null;
   mode?: AgentMode | null;
+  workspaceId?: string | null;
 }
 
 export interface SetFinalResultInput {
@@ -33,6 +34,7 @@ interface RunDbRow {
   prompt_preview: string;
   model_id: string | null;
   mode: string | null;
+  workspace_id: string | null;
   started_at: string;
   finished_at: string | null;
   duration_ms: number | null;
@@ -230,6 +232,7 @@ function rowToDomain(row: RunDbRow): RunRow {
     promptPreview: row.prompt_preview,
     modelId: row.model_id,
     mode: row.mode === null ? null : (row.mode as AgentMode),
+    workspaceId: row.workspace_id,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     durationMs: row.duration_ms,
@@ -260,10 +263,10 @@ export class RunsRepo {
       .prepare(
         `INSERT INTO runs (
             id, agent_id, status, prompt_preview, model_id, mode,
-            started_at, last_seq, created_at, updated_at
+            started_at, last_seq, created_at, updated_at, workspace_id
           ) VALUES (
             @id, @agent_id, @status, @prompt_preview, @model_id, @mode,
-            @started_at, 0, @created_at, @updated_at
+            @started_at, 0, @created_at, @updated_at, @workspace_id
           )`,
       )
       .run({
@@ -276,6 +279,7 @@ export class RunsRepo {
         started_at: now,
         created_at: now,
         updated_at: now,
+        workspace_id: input.workspaceId ?? null,
       });
     const row = this.getById(id);
     if (!row) {

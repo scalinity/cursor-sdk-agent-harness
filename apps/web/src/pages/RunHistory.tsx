@@ -8,6 +8,7 @@ import { useSettings } from "../hooks/useSettings.js";
 import { dateRangeForPreset, formatDuration, formatMicros, formatRelativeTime, formatTokens, isoDateInput, tokenTotal } from "../lib/format.js";
 import { RunHistoryRow } from "../components/history/RunHistoryRow.js";
 import { RunStatusPill } from "../components/streaming/RunStatusPill.js";
+import { Select } from "../components/ui/Select.js";
 
 const STATUSES: SdkRunStatus[] = ["CREATING", "RUNNING", "FINISHED", "ERROR", "CANCELLED", "EXPIRED"];
 const SORTS: Array<{ value: RunHistorySort; label: string }> = [
@@ -194,12 +195,20 @@ export function RunHistory() {
             ))}
             <input className="h-control-md rounded-sm border border-border-subtle bg-background px-2 text-sm" type="date" value={isoDateInput(new Date(from))} onChange={(event) => updateParams((next) => { next.set("range", "custom"); next.set("from", `${event.currentTarget.value}T00:00:00.000Z`); })} />
             <input className="h-control-md rounded-sm border border-border-subtle bg-background px-2 text-sm" type="date" value={isoDateInput(new Date(to))} onChange={(event) => updateParams((next) => { next.set("range", "custom"); next.set("to", `${event.currentTarget.value}T23:59:59.999Z`); })} />
-            <select className="h-control-md rounded-sm border border-border-subtle bg-background px-2 text-sm text-text-secondary" value={sort} onChange={(event) => updateParams((next) => next.set("sort", event.currentTarget.value))}>
-              {SORTS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-            <select className="h-control-md rounded-sm border border-border-subtle bg-background px-2 text-sm text-text-secondary" value={cost} onChange={(event) => updateParams((next) => next.set("hasCost", event.currentTarget.value))}>
-              {COST_FILTERS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
+            <Select
+              value={sort}
+              options={SORTS}
+              onChange={(value) => updateParams((next) => next.set("sort", value))}
+              ariaLabel="Sort runs"
+              className="h-control-md rounded-sm border border-border-subtle bg-background px-2 text-sm text-text-secondary"
+            />
+            <Select
+              value={cost}
+              options={COST_FILTERS}
+              onChange={(value) => updateParams((next) => next.set("hasCost", value))}
+              ariaLabel="Cost filter"
+              className="h-control-md rounded-sm border border-border-subtle bg-background px-2 text-sm text-text-secondary"
+            />
           </div>
 
           <div className="flex flex-wrap gap-2">

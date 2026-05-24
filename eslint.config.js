@@ -15,6 +15,7 @@ export default [
       "**/coverage/**",
       "**/node_modules/**",
       "**/.pnpm-store/**",
+      "**/.claude/**",
       "docs/mockup-rendered.html",
       "docs/mockup-design-dna.html",
     ],

@@ -1,8 +1,10 @@
 import type { ModelSelection } from "@cursor/sdk";
+import type { SdkImage } from "@harness/shared";
 import type {
   AgentOptions,
   Run,
   SDKAgent,
+  SdkUserMessageInput,
   SdkAdapter,
 } from "./sdk-adapter.js";
 
@@ -174,6 +176,7 @@ export interface StubSdkAdapterOptions {
   onSend?: (input: {
     agent: StubSDKAgent;
     prompt: string;
+    images?: SdkImage[];
     onDelta?: (args: { update: unknown }) => void | Promise<void>;
     idempotencyKey?: string;
   }) => StubRunInit | Promise<StubRunInit>;
@@ -188,11 +191,14 @@ export function createStubSdkAdapter(opts: StubSdkAdapterOptions = {}): SdkAdapt
     async resumeAgent(agentId) {
       return new StubSDKAgent(agentId);
     },
-    async send(agent, prompt, sendOptions) {
+    async send(agent, message: string | SdkUserMessageInput, sendOptions) {
+      const prompt = typeof message === "string" ? message : message.text;
+      const images = typeof message === "string" ? undefined : message.images;
       const init = opts.onSend
         ? await opts.onSend({
             agent: agent as StubSDKAgent,
             prompt,
+            ...(images !== undefined ? { images } : {}),
             ...(sendOptions.onDelta !== undefined ? { onDelta: sendOptions.onDelta } : {}),
             ...(sendOptions.idempotencyKey !== undefined
               ? { idempotencyKey: sendOptions.idempotencyKey }

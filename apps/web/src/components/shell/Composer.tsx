@@ -1,12 +1,29 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   DEFAULT_MODEL_ID,
   MODEL_LABELS,
   modelIdSchema,
   type AgentSummary,
+  type ModelId,
+  type SdkImage,
 } from "@harness/shared";
 import { useUiStore } from "../../state/ui-store.js";
 import { useErrorReporter } from "../../hooks/useErrorReporter.js";
+import { cn } from "../../lib/cn.js";
+import { Select, type SelectOption } from "../ui/Select.js";
+import { PlusIcon, XIcon } from "./ToolbarIcons.js";
+import {
+  attachmentImages,
+  fileReferenceText,
+  fileToAttachment,
+  MAX_IMAGE_ATTACHMENTS,
+  type ComposerAttachment,
+} from "../../lib/attachments.js";
+
+/** Known models, presented Fast-first in the dropdown. */
+const MODEL_OPTIONS: ReadonlyArray<SelectOption<ModelId>> = (
+  Object.keys(MODEL_LABELS) as ModelId[]
+).map((id) => ({ value: id, label: MODEL_LABELS[id] }));
 
 /**
  * Render-rule for the model pill. Exported for `Composer.test.tsx`. See the
@@ -41,53 +58,99 @@ export function describeModel(
 
 export interface ComposerProps {
   activeAgent: AgentSummary | null;
-  onSubmit: (input: { prompt: string; agentId: string }) => Promise<string>;
+  onSubmit: (input: { prompt: string; agentId: string; images?: SdkImage[] }) => Promise<string>;
+  /** Centered "new session" presentation when the chat is empty and the right pane is collapsed. */
+  heroMode?: boolean;
 }
 
 /**
- * Composer — input textarea + model picker placeholder + Send button.
+ * Composer — input textarea + attachments + model picker + Send button.
  * Submits via the agent-stream hook; on submit the parent's `onSubmit`
  * is responsible for setting the active run id (it returns the runId).
  */
-export function Composer({ activeAgent, onSubmit }: ComposerProps) {
+export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerProps) {
   const draft = useUiStore((s) => s.composerDraft);
   const setDraft = useUiStore((s) => s.setComposerDraft);
+  const selectedModelId = useUiStore((s) => s.selectedModelId);
+  const setSelectedModelId = useUiStore((s) => s.setSelectedModelId);
   const [busy, setBusy] = useState(false);
-  const [focused, setFocused] = useState(false);
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { report } = useErrorReporter("composer");
+
+  // The coding agent is auto-provisioned for the active workspace + selected
+  // model (see useEnsureDefaultAgent). "Ready" means that provisioning has
+  // landed and the active agent actually runs the model the user picked — only
+  // then is it safe to send, so a model switch never runs on the old model.
+  const ready = activeAgent !== null && activeAgent.modelId === selectedModelId;
+
+  const addFiles = useCallback(
+    async (files: FileList | File[]) => {
+      const list = Array.from(files);
+      if (list.length === 0) return;
+      const converted = await Promise.all(list.map(fileToAttachment));
+      setAttachments((prev) => {
+        const merged = [...prev, ...converted];
+        // Cap image attachments at the SDK-aligned max; file refs are unbounded.
+        let images = 0;
+        const capped = merged.filter((a) =>
+          a.kind !== "image" ? true : ++images <= MAX_IMAGE_ATTACHMENTS,
+        );
+        if (capped.length < merged.length) {
+          report(`At most ${MAX_IMAGE_ATTACHMENTS} images per message.`, { severity: "warn" });
+        }
+        return capped;
+      });
+    },
+    [report],
+  );
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
 
   const submit = useCallback(async () => {
     // Read the latest draft from the store at submit time rather than the
-    // captured closure value — protects against programmatic updates
-    // (Phase 12 templates / /commands) racing the captured snapshot.
+    // captured closure value — protects against programmatic updates racing
+    // the captured snapshot.
     const trimmed = useUiStore.getState().composerDraft.trim();
-    if (!trimmed || busy) return;
-    if (!activeAgent) {
-      // Textarea is enabled without an agent so users can draft, but Send
-      // still needs an agent. The Send button surfaces this with a tooltip;
-      // keyboard users hitting Enter would otherwise get no feedback, so
-      // toast the same hint so the action isn't silent.
-      report("Create or select an agent to send.", { severity: "info" });
+    const current = attachments;
+    if ((trimmed.length === 0 && current.length === 0) || busy) return;
+    if (!activeAgent || activeAgent.modelId !== selectedModelId) {
+      // The default agent is still provisioning (or switching models). The
+      // Send button is disabled in this state; keyboard users hitting Enter
+      // would otherwise get no feedback, so toast the same hint.
+      report("Preparing the coding agent — try again in a moment.", { severity: "info" });
       return;
     }
+    const images = attachmentImages(current);
+    const promptText = `${trimmed}${fileReferenceText(current)}`.trim();
+    // POST /api/runs requires a non-empty prompt (min length 1); if the user
+    // attached only an image, synthesize a minimal instruction.
+    const finalPrompt = promptText.length > 0 ? promptText : "(see attached image)";
     setBusy(true);
     try {
-      await onSubmit({ prompt: trimmed, agentId: activeAgent.id });
+      await onSubmit({
+        prompt: finalPrompt,
+        agentId: activeAgent.id,
+        ...(images.length > 0 ? { images } : {}),
+      });
       setDraft("");
+      setAttachments([]);
     } catch (e) {
       report(e);
     } finally {
       setBusy(false);
     }
-  }, [activeAgent, busy, onSubmit, setDraft, report]);
+  }, [activeAgent, selectedModelId, busy, onSubmit, setDraft, report, attachments]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Guard against IME composition: during CJK/Korean candidate selection
     // browsers dispatch a keydown with key="Enter" AND isComposing=true to
     // commit the candidate; submitting here would burn API budget on the
     // half-finished prompt. keyCode 229 is the legacy fallback some older
-    // mobile WebViews still emit during composition; TS flags it as
-    // deprecated but the property is what these clients actually surface.
+    // mobile WebViews still emit during composition.
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -95,59 +158,112 @@ export function Composer({ activeAgent, onSubmit }: ComposerProps) {
     }
   };
 
-  const placeholder = activeAgent
-    ? `Send a prompt to ${activeAgent.name}…`
-    : "Type a prompt — create or select an agent to send.";
+  const onFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) void addFiles(e.target.files);
+    // Reset so picking the same file again re-fires change.
+    e.target.value = "";
+  };
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    if (e.dataTransfer.files?.length) void addFiles(e.dataTransfer.files);
+  };
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!dragging) setDragging(true);
+  };
+  const onDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+  };
 
-  // The model that *will* be used. Three cases, kept explicit because
-  // collapsing them through a single safeParse fallback silently mislabels
-  // an agent that's running on a model the harness enum hasn't been
-  // updated for:
-  //   - no agent           → DEFAULT_MODEL_ID's label ("Composer 2.5 Fast")
-  //   - agent, known model → MODEL_LABELS[modelId]
-  //   - agent, unknown id  → raw id + "(unknown)". Never fabricate a
-  //     different model's name — the user must see what their agent is
-  //     actually running, so that "looks wrong" leads to a MODEL_LABELS
-  //     update rather than silent misreporting.
-  const { modelLabel, modelTitle } = describeModel(activeAgent);
+  const placeholder = heroMode
+    ? "Plan, Build, / for commands, @ for context"
+    : "Send a prompt to the coding agent…";
+
+  const canSend = ready && !busy && (draft.trim().length > 0 || attachments.length > 0);
 
   // Reasoning effort knob intentionally absent. The Cursor SDK exposes
   // per-model parameters via `Cursor.models.list()[…].parameters` and the
   // run-time `model.params` field, but the harness has not yet wired model
-  // discovery, so we can't tell whether the active model supports a
-  // reasoning_effort parameter. Per the spec's "honest about the SDK" rule
-  // we render no control rather than a fake / always-disabled one. Re-add
-  // this once a `useSdkModels()` hook surfaces the model's parameters.
+  // discovery, so we render no control rather than a fake / always-disabled
+  // one (spec's "honest about the SDK" rule).
 
   return (
-    <div className="composer">
-      <div className="composer-box">
+    <div className={cn("composer", heroMode && "composer--hero")}>
+      <div
+        className={cn("composer-box", dragging && "composer-box--dragover")}
+        onDrop={onDrop}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={onFileInputChange}
+          tabIndex={-1}
+          aria-hidden="true"
+        />
         <textarea
           className="composer-textarea"
           placeholder={placeholder}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
           onKeyDown={onKeyDown}
           disabled={busy}
         />
-        {focused && draft.length === 0 ? <span className="composer-caret" aria-hidden="true" /> : null}
+        {attachments.length > 0 ? (
+          <div className="composer-attachments">
+            {attachments.map((a) => (
+              <span key={a.id} className="composer-chip" title={a.name}>
+                {a.kind === "image" ? (
+                  <img src={a.previewUrl} alt="" className="composer-chip__thumb" />
+                ) : (
+                  <span className="composer-chip__file mono">{a.name.split(".").pop() ?? "file"}</span>
+                )}
+                <span className="composer-chip__name">{a.name}</span>
+                <button
+                  type="button"
+                  className="composer-chip__remove"
+                  aria-label={`Remove ${a.name}`}
+                  onClick={() => removeAttachment(a.id)}
+                >
+                  <XIcon className="size-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
         <div className="mt-2 flex items-center gap-1.5 text-xs text-text-tertiary">
-          <span
-            className="inline-flex h-control-md items-center gap-1.5 rounded-md border border-border-subtle bg-surface-2 px-2 text-md font-medium text-text-primary"
-            title={modelTitle}
-            aria-label={modelTitle}
+          <button
+            type="button"
+            className="composer-add"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={busy}
+            aria-label="Attach files or images"
+            title="Attach files or images"
           >
-            <span className="size-2 rounded-full bg-accent-primary" aria-hidden="true" />
-            <span>{modelLabel}</span>
-          </span>
+            <PlusIcon className="size-4" />
+          </button>
+          <Select
+            value={selectedModelId}
+            options={MODEL_OPTIONS}
+            onChange={setSelectedModelId}
+            disabled={busy}
+            placement="top"
+            ariaLabel="Model"
+            title="Model used for new runs. Switching it re-targets the coding agent."
+            className="h-control-md rounded-md border border-border-subtle bg-surface-2 px-2 text-md font-medium text-text-primary"
+            leading={<span className="size-2 rounded-full bg-accent-primary" aria-hidden="true" />}
+          />
           <div className="ml-auto">
             <button
               type="button"
               onClick={() => void submit()}
-              disabled={!activeAgent || busy || draft.trim().length === 0}
-              title={activeAgent ? undefined : "Create or select an agent to send"}
+              disabled={!canSend}
+              title={ready ? undefined : "Preparing the coding agent…"}
               className="inline-flex h-control-sm items-center gap-1.5 rounded-sm border-0 bg-accent-primary px-2.5 text-sm font-semibold text-text-inverse disabled:opacity-50"
             >
               {busy ? "Sending…" : "Send"}
@@ -155,6 +271,12 @@ export function Composer({ activeAgent, onSubmit }: ComposerProps) {
           </div>
         </div>
       </div>
+      {heroMode ? (
+        <div className="composer-hero-hint">
+          <span>Plan New Idea</span>
+          <kbd className="composer-kbd">⏎ Tab</kbd>
+        </div>
+      ) : null}
     </div>
   );
 }

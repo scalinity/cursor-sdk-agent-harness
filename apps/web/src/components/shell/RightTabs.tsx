@@ -1,34 +1,47 @@
+import type { ComponentType } from "react";
 import { cn } from "../../lib/cn.js";
+import { useUiStore, type RightPanelTab } from "../../state/ui-store.js";
+import {
+  DiffIcon,
+  FilesIcon,
+  TerminalIcon,
+  GlobeIcon,
+  type IconProps,
+} from "./ToolbarIcons.js";
 
-export interface RightTab {
-  id: string;
+const SURFACES: ReadonlyArray<{
+  tab: RightPanelTab;
   label: string;
-  agentEditing?: boolean;
-  active?: boolean;
-}
+  Icon: ComponentType<IconProps>;
+}> = [
+  { tab: "diff", label: "Diff", Icon: DiffIcon },
+  { tab: "files", label: "Files", Icon: FilesIcon },
+  { tab: "terminal", label: "Terminal", Icon: TerminalIcon },
+  { tab: "browser", label: "Browser", Icon: GlobeIcon },
+];
 
-export interface RightTabsProps {
-  tabs: RightTab[];
-}
-
-export function RightTabs({ tabs }: RightTabsProps) {
-  const hasTabs = tabs.length > 0;
+/**
+ * RightPaneTabs — the right pane's surface selector. Mirrors the titlebar's
+ * Diff/Files/Terminal/Browser toggles; clicking switches `rightPanelTab`.
+ * Only Diff is backed by a real surface today.
+ */
+export function RightPaneTabs() {
+  const rightPanelTab = useUiStore((s) => s.rightPanelTab);
+  const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   return (
     <div className="tabs">
-      {hasTabs ? (
-        tabs.map((t) => (
-          <div key={t.id} className={cn("tab", t.active && "tab--active")}>
-            <span>{t.label}</span>
-            {t.agentEditing ? (
-              <span className="tab__agent-mark" title="Agent editing" aria-hidden="true" />
-            ) : null}
-          </div>
-        ))
-      ) : (
-        <div className="flex items-center px-2.5 text-xs text-text-tertiary">
-          <span className="mono">No open files</span>
-        </div>
-      )}
+      {SURFACES.map(({ tab, label, Icon }) => (
+        <button
+          key={tab}
+          type="button"
+          onClick={() => setRightPanelTab(tab)}
+          aria-pressed={rightPanelTab === tab}
+          className={cn("tab", rightPanelTab === tab && "tab--active")}
+        >
+          <Icon className="size-3.5" />
+          <span>{label}</span>
+        </button>
+      ))}
     </div>
   );
 }

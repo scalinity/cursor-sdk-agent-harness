@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
+import type { SdkImage } from "@harness/shared";
 import { buildApp } from "../../app.js";
 import { loadEnv } from "../../config/env.js";
 import { openTestDb } from "../../db/__tests__/helpers.js";
@@ -30,6 +31,7 @@ interface Harness {
   allowedDir: string;
   tmpDir: string;
   csrfToken: () => Promise<string>;
+  sends: Array<{ prompt: string; images?: SdkImage[] }>;
 }
 
 async function buildHarness(): Promise<Harness> {
@@ -48,12 +50,14 @@ async function buildHarness(): Promise<Harness> {
   const apiKeyStore = new CursorApiKeyStore({ service: env.KEYCHAIN_SERVICE });
   await apiKeyStore.setApiKey("sk-test-12345678");
 
+  const sends: Array<{ prompt: string; images?: SdkImage[] }> = [];
   const sdk = createStubSdkAdapter({
-    onSend: ({ agent, prompt, idempotencyKey }) => {
+    onSend: ({ agent, prompt, images, idempotencyKey }) => {
       // Fire a synthetic turn-ended delta so the runtime persists usage.
       // The stub's deltasBeforeEach hook fires through the same onDelta the
       // runtime passed in via SendOptions.
       void prompt;
+      sends.push({ prompt, ...(images ? { images } : {}) });
       return {
         runId: idempotencyKey ?? `stub-${prompt.length}`,
         agentId: agent.agentId,
@@ -98,6 +102,7 @@ async function buildHarness(): Promise<Harness> {
     app,
     allowedDir: realAllowed,
     tmpDir,
+    sends,
     close: async () => {
       await app.close();
       dbClient.raw.close();
@@ -278,6 +283,52 @@ describe("agents + runs REST routes", () => {
     expect(final.inputTokens).toBe(100);
     expect(final.outputTokens).toBe(50);
     expect(final.usageSource).toBe("sdk_final_result");
+  });
+
+  it("POST /api/runs forwards image attachments to agent.send", async () => {
+    h = await buildHarness();
+    const token = await h.csrfToken();
+
+    const create = await h.app.inject({
+      method: "POST",
+      url: "/api/agents",
+      payload: {
+        name: "image-run-test",
+        mode: "local",
+        modelId: "composer-2-5-fast",
+        cwd: [h.allowedDir],
+        mcpServerIds: [],
+        subagentDefinitionIds: [],
+      },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": token,
+        "content-type": "application/json",
+      },
+    });
+    expect(create.statusCode).toBe(201);
+    const agentId = (create.json() as { id: string }).id;
+
+    const image: SdkImage = { data: "aGVsbG8=", mimeType: "image/png" };
+    const runRes = await h.app.inject({
+      method: "POST",
+      url: "/api/runs",
+      payload: { agentId, prompt: "describe this image", images: [image] },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": token,
+        "content-type": "application/json",
+      },
+    });
+    expect(runRes.statusCode).toBe(201);
+
+    // Let the consume loop finish.
+    await new Promise((r) => setTimeout(r, 80));
+
+    // The image attachment reached agent.send as an SDKUserMessage.
+    expect(h.sends.length).toBeGreaterThan(0);
+    expect(h.sends[0]?.prompt).toBe("describe this image");
+    expect(h.sends[0]?.images).toEqual([image]);
   });
 
   it("POST /api/agents/:id/terminate flips the agent status to terminated", async () => {

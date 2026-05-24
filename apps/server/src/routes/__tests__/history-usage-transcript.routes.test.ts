@@ -336,7 +336,7 @@ describe("Phase 11 usage routes", () => {
       totalTokens: 300,
       unavailableCount: 1,
     });
-    expect(summary.pricingFreshness.staleness).toBe("never_verified");
+    expect(summary.pricingFreshness.staleness).toBe("fresh");
 
     const daily = usageDailyResponseSchema.parse(
       (await app.inject({ method: "GET", url: `/api/usage/daily?${query}` })).json(),

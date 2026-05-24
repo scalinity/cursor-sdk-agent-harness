@@ -14,6 +14,8 @@ import { useToastSweeper } from "../hooks/useToastSweeper.js";
 import { useActiveWorkspace } from "../hooks/useActiveWorkspace.js";
 import { useWorkspacePicker } from "../hooks/useWorkspacePicker.js";
 import { useNativeMenuActions } from "../hooks/useNativeMenuActions.js";
+import { useEnsureDefaultAgent } from "../hooks/useEnsureDefaultAgent.js";
+import { useErrorReporter } from "../hooks/useErrorReporter.js";
 import { useUiStore } from "../state/ui-store.js";
 import { useRunStore } from "../state/run-store.js";
 import { Titlebar } from "../components/shell/Titlebar.js";
@@ -26,20 +28,41 @@ import { Toaster } from "../components/shell/Toaster.js";
 import { NewAgentDialog } from "../components/agents/NewAgentDialog.js";
 import { WorkspaceRequiredModal } from "../components/workspace/WorkspaceRequiredModal.js";
 import { cn } from "../lib/cn.js";
+import type { SdkImage } from "@harness/shared";
 
 export function AppShell() {
   const csrf = useCsrfToken();
   useSettings();
   useToastSweeper();
-  const { activeAgent, selectAgent } = useAgents();
-  const { runs } = useRunHistory();
+  const { agents, activeAgent, selectAgent, createAgent } = useAgents();
+  const { runs, deleteRun } = useRunHistory();
   const [newAgentOpen, setNewAgentOpen] = useState(false);
   const activeRunId = useRunStore((s) => s.activeRunId);
   const setActiveRunId = useRunStore((s) => s.setActiveRunId);
+  const activeRunLiveStatus = useRunStore((s) =>
+    activeRunId ? (s.byId[activeRunId]?.status ?? null) : null,
+  );
 
   const activeWorkspace = useActiveWorkspace();
   const workspacePicker = useWorkspacePicker();
   const navigate = useNavigate();
+  const { report } = useErrorReporter("app-shell");
+
+  const selectedModelId = useUiStore((s) => s.selectedModelId);
+  const setComposerDraft = useUiStore((s) => s.setComposerDraft);
+
+  // Auto-provision a universal default "Coding Agent" for the active
+  // workspace + selected model so the user never has to create an agent
+  // before sending a prompt.
+  useEnsureDefaultAgent({
+    activeWorkspaceId: activeWorkspace.activeWorkspaceId,
+    workspacePath: activeWorkspace.workspace?.path ?? null,
+    modelId: selectedModelId,
+    agents,
+    activeAgent,
+    createAgent,
+    selectAgent,
+  });
 
   const {
     connectionState,
@@ -61,6 +84,51 @@ export function AppShell() {
 
   const codeHidden = useUiStore((s) => s.codeHidden);
   const toggleCodeHidden = useUiStore((s) => s.toggleCodeHidden);
+  const railHidden = useUiStore((s) => s.railHidden);
+
+  // Only RUNNING/CREATING runs can actually be cancelled. The server drops
+  // the active run controller once a run terminates, so a cancel on a
+  // finished run replies RUN_NOT_FOUND and looks like a no-op — gate the
+  // affordance instead. Overlay the live run-store status over the REST
+  // summary so a just-finished run loses the button without a reload.
+  const activeRunCancellable = useMemo(() => {
+    const summary = runs.find((r) => r.id === activeRunId) ?? null;
+    const status = activeRunLiveStatus ?? summary?.status ?? null;
+    return status === "RUNNING" || status === "CREATING";
+  }, [runs, activeRunId, activeRunLiveStatus]);
+
+  const newSession = useCallback(() => {
+    setActiveRunId(null);
+    setComposerDraft("");
+  }, [setActiveRunId, setComposerDraft]);
+
+  const onDeleteRun = useCallback(
+    async (runId: string) => {
+      try {
+        // Drop the selection first so the center pane doesn't briefly point
+        // at a row that's about to vanish from the history reload.
+        if (runId === activeRunId) setActiveRunId(null);
+        await deleteRun(runId);
+      } catch (e) {
+        report(e);
+      }
+    },
+    [deleteRun, activeRunId, setActiveRunId, report],
+  );
+
+  const onSubmit = useCallback(
+    async (input: { prompt: string; agentId: string; images?: SdkImage[] }) => {
+      const runId = await submitUserInput(input);
+      setActiveRunId(runId);
+      return runId;
+    },
+    [submitUserInput, setActiveRunId],
+  );
+
+  const activeRun = useMemo(
+    () => runs.find((r) => r.id === activeRunId) ?? null,
+    [runs, activeRunId],
+  );
 
   // Native menu actions — Electron only. Browser mode silently ignores.
   useNativeMenuActions({
@@ -90,26 +158,12 @@ export function AppShell() {
           key: ".",
           meta: true,
           handler: () => {
-            if (activeRunId) cancelRun(activeRunId);
+            if (activeRunId && activeRunCancellable) cancelRun(activeRunId);
           },
         },
       ],
-      [toggleCodeHidden, activeRunId, cancelRun],
+      [toggleCodeHidden, activeRunId, activeRunCancellable, cancelRun],
     ),
-  );
-
-  const onSubmit = useCallback(
-    async (input: { prompt: string; agentId: string }) => {
-      const runId = await submitUserInput(input);
-      setActiveRunId(runId);
-      return runId;
-    },
-    [submitUserInput, setActiveRunId],
-  );
-
-  const activeRun = useMemo(
-    () => runs.find((r) => r.id === activeRunId) ?? null,
-    [runs, activeRunId],
   );
 
   const showBootstrapBanner = csrf.error !== null && csrf.token === null;
@@ -130,6 +184,7 @@ export function AppShell() {
         className={cn(
           "app-grid",
           codeHidden && "app-grid--code-hidden",
+          railHidden && "app-grid--rail-hidden",
           // The modal is rendered as a sibling, not a child, so `blur-sm`
           // (a CSS filter that inherits) and `pointer-events-none` (which
           // cascades) only affect the shell — never the modal itself.
@@ -145,13 +200,19 @@ export function AppShell() {
         ) : null}
         <Titlebar
           onNewAgent={() => setNewAgentOpen(true)}
-          workspace={activeWorkspace.workspace}
-          onPickWorkspace={() => void workspacePicker.pick()}
           {...(activeRunId
             ? { onCancelRun: () => cancelRun(activeRunId) }
             : {})}
         />
-        <SessionsRail runs={runs} activeRunId={activeRunId} onSelectRun={setActiveRunId} />
+        <SessionsRail
+          runs={runs}
+          activeRunId={activeRunId}
+          onSelectRun={setActiveRunId}
+          onNewAgent={() => setNewAgentOpen(true)}
+          onPickWorkspace={() => void workspacePicker.pick()}
+          onNewSession={newSession}
+          onDeleteRun={onDeleteRun}
+        />
         <CenterPane
           activeAgent={activeAgent}
           activeRun={activeRun}

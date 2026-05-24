@@ -8,6 +8,12 @@ import {
   type SubagentSummary,
 } from "@harness/shared";
 import { useSubagents } from "../../hooks/useSubagents.js";
+import { Select, type SelectOption } from "../ui/Select.js";
+
+/** Known models for the override dropdown. */
+const MODEL_OPTIONS: ReadonlyArray<SelectOption<ModelId>> = (
+  Object.keys(MODEL_LABELS) as ModelId[]
+).map((id) => ({ value: id, label: MODEL_LABELS[id] }));
 
 export interface SubagentEditorProps {
   existing: SubagentSummary | null;
@@ -199,24 +205,15 @@ export function SubagentEditor({ existing, open, mcpServers, onClose, onSaved }:
               onChange={() => setState((prev) => ({ ...prev, modelInherit: false }))}
             />
             <span>Override:</span>
-            <select
+            <Select
               disabled={state.modelInherit || state.unknownModelId !== null}
-              className="h-control-md rounded-sm border border-border-subtle bg-surface-2 px-2 text-sm"
               value={state.modelId}
-              onChange={(e) =>
-                setState((prev) => ({
-                  ...prev,
-                  modelId: e.currentTarget.value as ModelId,
-                  unknownModelId: null,
-                }))
+              options={MODEL_OPTIONS}
+              onChange={(modelId) =>
+                setState((prev) => ({ ...prev, modelId, unknownModelId: null }))
               }
-            >
-              {Object.entries(MODEL_LABELS).map(([id, label]) => (
-                <option key={id} value={id}>
-                  {label}
-                </option>
-              ))}
-            </select>
+              className="h-control-md rounded-sm border border-border-subtle bg-surface-2 px-2 text-sm text-text-primary"
+            />
           </label>
           {state.unknownModelId !== null ? (
             <p className="mt-1 text-xs text-warning">

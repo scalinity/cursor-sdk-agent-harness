@@ -5,7 +5,7 @@ import Database, { type Database as BetterSqlite3Database } from "better-sqlite3
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 
 import * as schema from "./schema.js";
-import { seedDefaultSettingsIfEmpty } from "./seed.js";
+import { seedDefaultSettingsIfEmpty, backfillPricingDefaultsIfUnconfigured } from "./seed.js";
 
 export type HarnessDb = BetterSQLite3Database<typeof schema>;
 
@@ -55,6 +55,9 @@ export function openDb(options: OpenDbOptions): DbClient {
   function verifyMigrations(): { applied: number; seeded: boolean } {
     const applied = applyMigrations(raw, migrationsDir);
     const seeded = options.skipSeed === true ? false : seedDefaultSettingsIfEmpty(raw);
+    if (options.skipSeed !== true) {
+      backfillPricingDefaultsIfUnconfigured(raw);
+    }
     return { applied, seeded };
   }
 

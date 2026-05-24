@@ -808,6 +808,32 @@ Phase 01 output — resolves every Open Question from `spec-v1.1.md` Section 14 
 
 ---
 
+## OQ-23: Can `agent.send` carry image attachments? In what shape?
+
+- **Status**: `verified` (2026-05-24, from `@cursor/sdk@1.0.13` `.d.ts`).
+- **Finding**: `agent.send` is overloaded to accept a user message object,
+  not just a string. `agent.d.ts:12` —
+  `send(message: string | SDKUserMessage, options?: SendOptions): Promise<Run>`.
+  `options.d.ts` —
+  - `SDKUserMessage = { text: string; images?: SDKImage[] }`
+  - `SDKImage = { url: string; dimension?: SDKImageDimension }
+                 | { data: string; mimeType: string; dimension?: SDKImageDimension }`
+  - `SDKImageDimension = { width: number; height: number }`
+- **Scope**: Only **images** are first-class attachments. There is no
+  generic file-attachment slot on `SDKUserMessage` or `SendOptions`. Non-image
+  files must be conveyed another way (e.g. embedded as text / `@path`
+  references the agent reads from its cwd).
+- **Harness wiring (Phase 17)**: `POST /api/runs` (`createRunRequestSchema`)
+  accepts an optional `images: SdkImage[]`. The runtime threads it through
+  `startRun → RunController.start`, which builds `{ text, images }` and passes
+  it to `agent.send`. The `submit_user_input` WS frame mirrors the field for
+  protocol parity (the frame itself remains a Phase-08 stub). The harness
+  `SdkImage` is zod-inferred so its `dimension?` widens with `| undefined`;
+  the production `SdkAdapter.send` performs a single SDK-boundary cast to
+  `SDKUserMessage` (zod omits absent keys at runtime, so the shapes match).
+
+---
+
 ## Cross-cutting findings (not in the spec OQ list)
 
 ### F-1: `Run.supports(operation)` is the runtime feature flag

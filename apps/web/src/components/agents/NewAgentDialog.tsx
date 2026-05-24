@@ -22,7 +22,6 @@ import { useCallback, useMemo, useState } from "react";
 import {
   cloudAgentOptionsSchema,
   MODEL_LABELS,
-  modelIdSchema,
   parseJsonWithSchema,
   type AgentMode,
   type CloudAgentOptions,
@@ -32,15 +31,22 @@ import {
   type SettingSource,
   type SubagentSummary,
 } from "@harness/shared";
+import { Select, type SelectOption } from "../ui/Select.js";
 import { useAgents } from "../../hooks/useAgents.js";
 import { useMcpServers } from "../../hooks/useMcpServers.js";
 import { useSubagents } from "../../hooks/useSubagents.js";
+
 import {
   useWorkspaceAllowlist,
   type CwdDecision,
 } from "../../hooks/useWorkspaceAllowlist.js";
 import { CwdAllowlistChecker } from "./CwdAllowlistChecker.js";
 import { StatusBadge } from "../settings/StatusBadge.js";
+
+/** Known models, presented Fast-first in the dropdown. */
+const MODEL_OPTIONS: ReadonlyArray<SelectOption<ModelId>> = (
+  Object.keys(MODEL_LABELS) as ModelId[]
+).map((id) => ({ value: id, label: MODEL_LABELS[id] }));
 
 const SETTING_SOURCES: SettingSource[] = ["project", "user", "team", "mdm", "plugins", "all"];
 
@@ -405,25 +411,15 @@ function BasicsTab({
           <span>Cloud</span>
         </label>
       </fieldset>
-      <label className="flex flex-col gap-1">
+      <div className="flex flex-col gap-1">
         <span className="text-xs text-text-tertiary">Model</span>
-        <select
-          className="h-control-md rounded-sm border border-border-subtle bg-surface-2 px-2 text-sm"
+        <Select
           value={state.modelId}
-          onChange={(e) =>
-            setState((prev) => ({
-              ...prev,
-              modelId: modelIdSchema.parse(e.currentTarget.value),
-            }))
-          }
-        >
-          {Object.entries(MODEL_LABELS).map(([id, label]) => (
-            <option key={id} value={id}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
+          options={MODEL_OPTIONS}
+          onChange={(modelId) => setState((prev) => ({ ...prev, modelId }))}
+          className="h-control-md w-full rounded-sm border border-border-subtle bg-surface-2 px-2 text-sm text-text-primary"
+        />
+      </div>
     </div>
   );
 }

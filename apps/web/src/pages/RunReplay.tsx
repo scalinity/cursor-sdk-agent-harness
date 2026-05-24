@@ -11,8 +11,13 @@ import { RightPane } from "../components/shell/RightPane.js";
 import { Statusbar } from "../components/shell/Statusbar.js";
 import { StreamingSurfaceBoundary } from "../components/streaming/StreamingSurfaceBoundary.js";
 import { RunStatusPill } from "../components/streaming/RunStatusPill.js";
+import { Select, type SelectOption } from "../components/ui/Select.js";
 
 const SPEEDS: ReplaySpeed[] = ["instant", "1x", "2x", "4x"];
+const SPEED_OPTIONS: ReadonlyArray<SelectOption<ReplaySpeed>> = SPEEDS.map((value) => ({
+  value,
+  label: value,
+}));
 
 function eventHasError(event: { kind: string; payload: unknown }): boolean {
   if (event.kind.toLowerCase().includes("error")) return true;
@@ -102,9 +107,13 @@ export function RunReplay() {
           </div>
           <div className="flex items-center gap-2">
             <button className="h-control-md rounded-sm border border-border-subtle px-3 text-sm text-text-secondary" type="button" onClick={() => setPaused((value) => !value)}>{paused ? "Play" : "Pause"}</button>
-            <select className="h-control-md rounded-sm border border-border-subtle bg-background px-2 text-sm text-text-secondary" value={speed} onChange={(event) => setSpeed(event.currentTarget.value as ReplaySpeed)}>
-              {SPEEDS.map((item) => <option key={item} value={item}>{item}</option>)}
-            </select>
+            <Select
+              value={speed}
+              options={SPEED_OPTIONS}
+              onChange={setSpeed}
+              ariaLabel="Replay speed"
+              className="h-control-md rounded-sm border border-border-subtle bg-background px-2 text-sm text-text-secondary"
+            />
           </div>
         </div>
         <div className="border-b border-border-subtle bg-surface-1 p-2">

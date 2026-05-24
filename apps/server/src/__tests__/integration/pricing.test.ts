@@ -155,6 +155,16 @@ describe("Phase 14 pricing settings validation", () => {
 
   it("does NOT stamp lastVerifiedAt when markVerified is omitted (rate-only patch)", async () => {
     const token = await h.csrf();
+    // The boot-time pricing backfill stamps lastVerifiedAt on first verify, so
+    // capture the current value: a rate-only patch must leave it untouched.
+    const before = await h.app.inject({
+      method: "GET",
+      url: "/api/settings",
+      headers: { origin: "http://127.0.0.1:5173" },
+    });
+    const beforeStamp = (
+      before.json() as { pricing: { lastVerifiedAt: string | null } }
+    ).pricing.lastVerifiedAt;
     const res = await h.app.inject({
       method: "PATCH",
       url: "/api/settings/pricing",
@@ -169,7 +179,7 @@ describe("Phase 14 pricing settings validation", () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { pricing: { lastVerifiedAt: string | null } };
-    expect(body.pricing.lastVerifiedAt).toBeNull();
+    expect(body.pricing.lastVerifiedAt).toBe(beforeStamp);
   });
 
 });

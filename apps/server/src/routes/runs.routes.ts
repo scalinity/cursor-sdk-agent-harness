@@ -83,6 +83,7 @@ function toRunSummary(row: {
   status: string;
   promptPreview: string;
   modelId: string | null;
+  workspaceId: string | null;
   startedAt: string;
   finishedAt: string | null;
   durationMs: number | null;
@@ -102,6 +103,7 @@ function toRunSummary(row: {
     status: row.status,
     promptPreview: row.promptPreview,
     modelId: row.modelId,
+    workspaceId: row.workspaceId,
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
     durationMs: row.durationMs,

@@ -26,6 +26,7 @@ function fixtureAgent(overrides: Partial<AgentSummary> = {}): AgentSummary {
 function resetUiStore(): void {
   useUiStore.setState({
     composerDraft: "",
+    selectedModelId: "composer-2-5-fast",
     toasts: [],
     toastCounter: 0,
   });
@@ -51,26 +52,43 @@ describe("Composer", () => {
     expect(screen.getByText("Composer 2.5 Fast")).not.toBeNull();
   });
 
-  it("shows the agent's model label when the model id is known", () => {
-    render(
-      <Composer
-        activeAgent={fixtureAgent({ modelId: "composer-2-5" })}
-        onSubmit={vi.fn()}
-      />,
-    );
+  it("shows the selected model label on the picker", () => {
+    useUiStore.setState({ selectedModelId: "composer-2-5" });
+    render(<Composer activeAgent={fixtureAgent({ modelId: "composer-2-5" })} onSubmit={vi.fn()} />);
     expect(screen.getByText("Composer 2.5")).not.toBeNull();
   });
 
-  it("renders the raw modelId with an (unknown) hint when the harness map lacks an entry", () => {
-    // Regression for the "model pill must surface the real model id" rule:
-    // never fabricate a different model's name when the enum doesn't match.
+  it("renders an accessible model picker exposing both Composer models", () => {
+    render(<Composer activeAgent={fixtureAgent()} onSubmit={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    const optionLabels = screen
+      .getAllByRole("option")
+      .map((o) => o.textContent?.trim());
+    expect(optionLabels).toContain("Composer 2.5 Fast");
+    expect(optionLabels).toContain("Composer 2.5");
+  });
+
+  it("switching the model dropdown updates the selected model in the store", () => {
+    render(<Composer activeAgent={fixtureAgent()} onSubmit={vi.fn()} />);
+    expect(useUiStore.getState().selectedModelId).toBe("composer-2-5-fast");
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    fireEvent.click(screen.getByRole("option", { name: "Composer 2.5" }));
+    expect(useUiStore.getState().selectedModelId).toBe("composer-2-5");
+  });
+
+  it("keeps Send disabled until the active agent matches the selected model", () => {
+    // The user picked composer-2-5 but the active (auto-provisioned) agent is
+    // still on the fast model — sending now would run the wrong model, so the
+    // composer waits for provisioning to land.
+    useUiStore.setState({ composerDraft: "hi", selectedModelId: "composer-2-5" });
     render(
       <Composer
-        activeAgent={fixtureAgent({ modelId: "composer-3-future" })}
+        activeAgent={fixtureAgent({ modelId: "composer-2-5-fast" })}
         onSubmit={vi.fn()}
       />,
     );
-    expect(screen.getByText("composer-3-future (unknown)")).not.toBeNull();
+    const sendButton = screen.getByRole("button", { name: /send/i }) as HTMLButtonElement;
+    expect(sendButton.disabled).toBe(true);
   });
 
   it("pushes an info toast when Enter is pressed without an active agent", () => {
@@ -119,16 +137,6 @@ describe("Composer", () => {
 
     rerender(<Composer activeAgent={fixtureAgent()} onSubmit={vi.fn()} />);
     expect(sendButton().disabled).toBe(false);
-  });
-
-  it("exposes the descriptive model context to assistive tech via aria-label", () => {
-    render(
-      <Composer activeAgent={fixtureAgent({ name: "Sandbox" })} onSubmit={vi.fn()} />,
-    );
-    // The visible text is just the short label; aria-label carries the full
-    // "Model: X (set on agent Y)" sentence so screen readers don't lose context.
-    const pill = screen.getByLabelText(/Model:.*set on agent Sandbox/);
-    expect(pill).not.toBeNull();
   });
 });
 

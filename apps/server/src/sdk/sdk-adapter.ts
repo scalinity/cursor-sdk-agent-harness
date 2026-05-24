@@ -1,4 +1,19 @@
-import { Agent as CursorAgent, type SDKAgent, type Run, type AgentOptions, type SendOptions } from "@cursor/sdk";
+import { Agent as CursorAgent, type SDKAgent, type Run, type AgentOptions, type SendOptions, type SDKUserMessage } from "@cursor/sdk";
+import type { SdkImage } from "@harness/shared";
+
+/**
+ * Harness-side user message passed to {@link SdkAdapter.send}. `images` uses
+ * the harness `SdkImage` (zod-inferred, so `dimension?` is `X | undefined`).
+ * The production adapter casts this to the SDK's `SDKUserMessage` at the
+ * `agent.send` call — the only difference is that zod `.optional()` widens
+ * `dimension` with `| undefined` while the SDK's hand-written `.d.ts` does
+ * not; at runtime zod omits absent keys, so the shapes match. Verified SDK
+ * signature: `send(message: string | SDKUserMessage, options?)` (agent.d.ts).
+ */
+export interface SdkUserMessageInput {
+  text: string;
+  images?: SdkImage[];
+}
 
 /**
  * Minimal seam between the harness's runtime layer and `@cursor/sdk`. The
@@ -32,15 +47,21 @@ export interface SdkAdapter {
    * Send a prompt and obtain a `Run` handle. We pass `idempotencyKey` per
    * F-2 in the ledger so retries are de-duped server-side.
    */
-  send(agent: SDKAgent, prompt: string, sendOptions: SendOptions): Promise<Run>;
+  send(agent: SDKAgent, message: string | SdkUserMessageInput, sendOptions: SendOptions): Promise<Run>;
 }
 
 export function createCursorSdkAdapter(): SdkAdapter {
   return {
     createAgent: (options) => CursorAgent.create(options),
     resumeAgent: (agentId, options) => CursorAgent.resume(agentId, options),
-    send: (agent, prompt, sendOptions) => agent.send(prompt, sendOptions),
+    send: (agent, message, sendOptions) =>
+      agent.send(
+        // SDK-boundary cast: harness SdkImage → SDK SDKImage (see
+        // SdkUserMessageInput doc — zod-optional vs exactOptionalPropertyTypes).
+        typeof message === "string" ? message : (message as SDKUserMessage),
+        sendOptions,
+      ),
   };
 }
 
-export type { SDKAgent, Run, AgentOptions, SendOptions };
+export type { SDKAgent, Run, AgentOptions, SendOptions, SDKUserMessage };

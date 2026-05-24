@@ -54,6 +54,8 @@ export const runRowSchema = z.object({
   promptPreview: z.string(),
   modelId: z.string().nullable(),
   mode: agentModeSchema.nullable(),
+  /** Workspace active when the run was created (null for legacy/untagged runs). */
+  workspaceId: z.string().nullable(),
   startedAt: isoDateTimeSchema,
   finishedAt: isoDateTimeSchema.nullable(),
   durationMs: z.number().int().nonnegative().nullable(),
@@ -73,6 +75,33 @@ export const runRowSchema = z.object({
   updatedAt: isoDateTimeSchema,
 });
 export type RunRow = z.infer<typeof runRowSchema>;
+
+/**
+ * Image attachment shapes, mirroring the verified `@cursor/sdk` `SDKImage`
+ * union (options.d.ts): either a URL reference or inline base64 data with a
+ * mime type. Both forms carry an optional pixel dimension. The harness sends
+ * these through `agent.send(SDKUserMessage{ text, images })` (verified —
+ * agent.d.ts `send(message: string | SDKUserMessage, ...)`).
+ */
+export const sdkImageDimensionSchema = z.object({
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+});
+export type SdkImageDimension = z.infer<typeof sdkImageDimensionSchema>;
+
+export const sdkImageSchema = z.union([
+  z.object({
+    url: z.string().url(),
+    dimension: sdkImageDimensionSchema.optional(),
+  }),
+  z.object({
+    /** base64-encoded image bytes (no data: prefix). */
+    data: z.string().min(1),
+    mimeType: z.string().min(1),
+    dimension: sdkImageDimensionSchema.optional(),
+  }),
+]);
+export type SdkImage = z.infer<typeof sdkImageSchema>;
 
 // Canonical event — the only thing replay reads. Persisted as one row per
 // SDKMessage; payload_json carries the normalized payload, raw_json carries

@@ -5,6 +5,7 @@ import type {
   AgentSummary,
   CreateAgentRequest,
   CreateRunResponse,
+  CreateRunRequest,
 } from "@harness/shared";
 import type { AgentsRepo, CreateAgentInput } from "../db/repositories/agents.repo.js";
 import type { McpServersRepo } from "../db/repositories/mcp-servers.repo.js";
@@ -80,7 +81,7 @@ export interface AgentRuntime {
   terminate(agentId: string): Promise<void>;
   list(): AgentSummary[];
   getById(agentId: string): AgentDetailResponse;
-  startRun(input: { agentId: string; prompt: string }): Promise<CreateRunResponse>;
+  startRun(input: CreateRunRequest): Promise<CreateRunResponse>;
   /**
    * Test/teardown hook: synchronously close all open SDK handles and clear
    * the active-runs registry. Production code does not call this; tests
@@ -290,10 +291,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
       };
     },
 
-    async startRun(input: {
-      agentId: string;
-      prompt: string;
-    }): Promise<CreateRunResponse> {
+    async startRun(input: CreateRunRequest): Promise<CreateRunResponse> {
       const row = deps.agentsRepo.getById(input.agentId);
       if (!row) {
         throw new AgentRuntimeError(
@@ -322,6 +320,17 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
       const handle = await loadActiveAgent(row);
       const snapshot = getSettingsSnapshot(deps.settingsRepo);
       const runId = newRunId();
+      // Tag the run with the workspace active at creation time so the
+      // sessions rail can group chats per workspace. Mirrors the guard in
+      // workspace-allowlist.routes.ts (ACTIVE_WORKSPACE_SETTING_KEY); inlined
+      // here to avoid a routes→sdk import.
+      const rawActiveWorkspaceId = deps.settingsRepo.get<string | null>(
+        "app.activeWorkspaceId",
+      );
+      const activeWorkspaceId =
+        typeof rawActiveWorkspaceId === "string" && rawActiveWorkspaceId.length > 0
+          ? rawActiveWorkspaceId
+          : null;
       const runRow = deps.runsRepo.create({
         id: runId,
         agentId: row.id,
@@ -329,6 +338,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
         promptPreview: input.prompt.slice(0, 256),
         modelId: row.modelId,
         mode: row.mode,
+        workspaceId: activeWorkspaceId,
       });
       const controller = new RunController(
         {
@@ -336,6 +346,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
           agentId: row.id,
           modelId: row.modelId,
           prompt: input.prompt,
+          ...(input.images && input.images.length > 0 ? { images: input.images } : {}),
           agent: handle,
           sdk: deps.sdk,
           runsRepo: deps.runsRepo,

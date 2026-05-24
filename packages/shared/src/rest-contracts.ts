@@ -18,7 +18,7 @@ import {
   subagentModelOverrideSchema,
   tokenUsageSchema,
 } from "./sdk-surface.js";
-import { workspaceAllowlistRowSchema } from "./domain.js";
+import { workspaceAllowlistRowSchema, sdkImageSchema } from "./domain.js";
 
 // REST request/response contracts. Each route block below is paired with the
 // spec §4 REST endpoint list. Routes that have not yet been implemented are
@@ -136,6 +136,7 @@ export type AgentDetailResponse = z.infer<typeof agentDetailResponseSchema>;
 export const createRunRequestSchema = z.object({
   agentId: z.string().min(1),
   prompt: z.string().min(1).max(64_000),
+  images: z.array(sdkImageSchema).max(16).optional(),
 });
 export type CreateRunRequest = z.infer<typeof createRunRequestSchema>;
 
@@ -202,6 +203,7 @@ export const runSummarySchema = z.object({
   status: sdkRunStatusSchema,
   promptPreview: z.string(),
   modelId: z.string().nullable(),
+  workspaceId: z.string().nullable(),
   startedAt: isoDateTimeSchema,
   finishedAt: isoDateTimeSchema.nullable(),
   durationMs: z.number().int().nonnegative().nullable(),

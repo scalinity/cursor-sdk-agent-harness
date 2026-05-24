@@ -8,7 +8,7 @@
  *   - A simple toast queue (used by `useErrorReporter`) with per-toast TTL
  */
 import { create } from "zustand";
-import type { ReplaySpeed, WorkspaceAllowlistRow } from "@harness/shared";
+import { modelIdSchema, type ModelId, type ReplaySpeed, type WorkspaceAllowlistRow } from "@harness/shared";
 
 export type ConnectionState =
   | "idle"
@@ -17,6 +17,14 @@ export type ConnectionState =
   | "reconnecting"
   | "closed"
   | "error";
+
+/**
+ * Right-pane content selector. The titlebar's Diff/Files/Terminal/Browser
+ * buttons drive this. Only `diff` is backed by a real surface today
+ * (CodeEditPreviewPanel); the rest render honest "not yet available"
+ * placeholders.
+ */
+export type RightPanelTab = "diff" | "files" | "terminal" | "browser";
 
 export interface Toast {
   id: string;
@@ -36,9 +44,19 @@ const DEFAULT_TOAST_TTL_MS_BY_SEVERITY: Record<Toast["severity"], number | null>
 
 export interface UiState {
   codeHidden: boolean;
+  /** Left sessions rail collapsed (persisted, mirrors codeHidden). */
+  railHidden: boolean;
+  /** Which surface the right pane shows when expanded. */
+  rightPanelTab: RightPanelTab;
   csrfToken: string | null;
   connectionState: ConnectionState;
   composerDraft: string;
+  /**
+   * The model the composer will run. Drives the default-agent
+   * auto-provisioner (`useEnsureDefaultAgent`): switching it ensures/selects
+   * a default agent configured for that model. Persisted across reloads.
+   */
+  selectedModelId: ModelId;
   replaySpeedByRunId: Record<string, ReplaySpeed>;
   replayPausedByRunId: Record<string, boolean>;
   selectedCodeEditEventByRunId: Record<string, string>;
@@ -62,9 +80,15 @@ export interface UiState {
 
   setCodeHidden: (hidden: boolean) => void;
   toggleCodeHidden: () => void;
+  setRailHidden: (hidden: boolean) => void;
+  toggleRailHidden: () => void;
+  setRightPanelTab: (tab: RightPanelTab) => void;
+  /** Select a tab AND ensure the right pane is visible. */
+  openRightPanel: (tab: RightPanelTab) => void;
   setCsrfToken: (token: string | null) => void;
   setConnectionState: (state: ConnectionState) => void;
   setComposerDraft: (draft: string) => void;
+  setSelectedModelId: (modelId: ModelId) => void;
   setReplaySpeed: (runId: string, speed: ReplaySpeed) => void;
   setReplayPaused: (runId: string, paused: boolean) => void;
   selectCodeEditEvent: (runId: string, eventId: string | null) => void;
@@ -80,6 +104,8 @@ export interface UiState {
 }
 
 const CODE_HIDDEN_STORAGE_KEY = "harness:codeHidden";
+const RAIL_HIDDEN_STORAGE_KEY = "harness:railHidden";
+const SELECTED_MODEL_STORAGE_KEY = "harness:selectedModelId";
 
 function readInitialCodeHidden(): boolean {
   if (typeof window === "undefined") return false;
@@ -99,11 +125,53 @@ function persistCodeHidden(hidden: boolean): void {
   }
 }
 
+function readInitialRailHidden(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(RAIL_HIDDEN_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function persistRailHidden(hidden: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(RAIL_HIDDEN_STORAGE_KEY, hidden ? "1" : "0");
+  } catch {
+    // Storage unavailable (private mode) — silently ignore.
+  }
+}
+
+function readInitialSelectedModel(): ModelId {
+  if (typeof window === "undefined") return "composer-2-5-fast";
+  try {
+    const parsed = modelIdSchema.safeParse(
+      window.localStorage.getItem(SELECTED_MODEL_STORAGE_KEY),
+    );
+    return parsed.success ? parsed.data : "composer-2-5-fast";
+  } catch {
+    return "composer-2-5-fast";
+  }
+}
+
+function persistSelectedModel(modelId: ModelId): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SELECTED_MODEL_STORAGE_KEY, modelId);
+  } catch {
+    // Storage unavailable (private mode) — silently ignore.
+  }
+}
+
 export const useUiStore = create<UiState>((set) => ({
   codeHidden: readInitialCodeHidden(),
+  railHidden: readInitialRailHidden(),
+  rightPanelTab: "diff",
   csrfToken: null,
   connectionState: "idle",
   composerDraft: "",
+  selectedModelId: readInitialSelectedModel(),
   replaySpeedByRunId: {},
   replayPausedByRunId: {},
   selectedCodeEditEventByRunId: {},
@@ -127,9 +195,29 @@ export const useUiStore = create<UiState>((set) => ({
       return { codeHidden: next };
     });
   },
+  setRailHidden: (hidden) => {
+    persistRailHidden(hidden);
+    set({ railHidden: hidden });
+  },
+  toggleRailHidden: () => {
+    set((s) => {
+      const next = !s.railHidden;
+      persistRailHidden(next);
+      return { railHidden: next };
+    });
+  },
+  setRightPanelTab: (tab) => set({ rightPanelTab: tab }),
+  openRightPanel: (tab) => {
+    persistCodeHidden(false);
+    set({ rightPanelTab: tab, codeHidden: false });
+  },
   setCsrfToken: (token) => set({ csrfToken: token }),
   setConnectionState: (state) => set({ connectionState: state }),
   setComposerDraft: (draft) => set({ composerDraft: draft }),
+  setSelectedModelId: (modelId) => {
+    persistSelectedModel(modelId);
+    set({ selectedModelId: modelId });
+  },
   setReplaySpeed: (runId, speed) =>
     set((s) => ({ replaySpeedByRunId: { ...s.replaySpeedByRunId, [runId]: speed } })),
   setReplayPaused: (runId, paused) =>

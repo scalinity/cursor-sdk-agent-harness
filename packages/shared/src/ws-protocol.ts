@@ -9,7 +9,7 @@ import {
   runIdSchema,
 } from "./constants.js";
 import { modelIdSchema, replaySpeedSchema, sdkRunStatusSchema, settingSourceSchema, knownLanguageSchema } from "./models.js";
-import { canonicalEventBaseSchema, runInterruptedReasonSchema } from "./domain.js";
+import { canonicalEventBaseSchema, runInterruptedReasonSchema, sdkImageSchema } from "./domain.js";
 import { tokenUsageSchema } from "./sdk-surface.js";
 
 export const frameBaseSchema = z.object({
@@ -51,6 +51,7 @@ export const submitUserInputFrameSchema = frameBaseSchema.extend({
   type: z.literal("submit_user_input"),
   agent_id: agentIdSchema,
   prompt: z.string().min(1).max(200_000),
+  images: z.array(sdkImageSchema).max(16).optional(),
   client_run_id: z.string().uuid().optional(),
 });
 

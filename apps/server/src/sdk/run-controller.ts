@@ -2,6 +2,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { randomUUID } from "node:crypto";
 import type {
   RunInterruptedReason,
+  SdkImage,
   SdkRunStatus,
   SettingsSnapshot,
 } from "@harness/shared";
@@ -41,6 +42,7 @@ export interface RunControllerInit {
   agentId: string;
   modelId: string;
   prompt: string;
+  images?: SdkImage[];
   agent: SDKAgent;
   sdk: SdkAdapter;
   runsRepo: RunsRepo;
@@ -104,7 +106,9 @@ export class RunController {
     };
     this.runHandle = await this.init.sdk.send(
       this.init.agent,
-      this.init.prompt,
+      this.init.images && this.init.images.length > 0
+        ? { text: this.init.prompt, images: this.init.images }
+        : this.init.prompt,
       sendOptions,
     );
     this.setStatus("RUNNING");
