@@ -1,9 +1,9 @@
 import { app, BrowserWindow, nativeImage, type BrowserWindowConstructorOptions } from "electron";
 import { join } from "node:path";
-import { registerDialogHandlers } from "./dialogs";
-import { buildAppMenu } from "./menu";
-import { registerAppProtocol } from "./app-protocol";
-import { loadWindowState, saveWindowState } from "./window-state";
+import { registerDialogHandlers } from "./dialogs.js";
+import { buildAppMenu } from "./menu.js";
+import { registerAppProtocol } from "./app-protocol.js";
+import { loadWindowState, saveWindowState } from "./window-state.js";
 
 let mainWindow: BrowserWindow | null = null;
 let serverClose: (() => Promise<void>) | null = null;
@@ -12,11 +12,10 @@ const isDev = process.env.HARNESS_DEV === "1";
 const DEV_URL = process.env.HARNESS_DEV_URL ?? "http://127.0.0.1:5173";
 
 async function startEmbeddedServer(): Promise<void> {
-  // Resolved at runtime so the desktop tsconfig doesn't need to typecheck
-  // the entire server tree. `@harness/server` is a workspace dep; in dev
-  // we point at the TS source through tsx, in prod we ship the compiled JS.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const mod = require("@harness/server/dist/programmatic.js") as {
+  // @harness/server emits ESM (`apps/server` has `"type": "module"`); the
+  // desktop main is CJS (`"type": "commonjs"`). Native dynamic `import()`
+  // is the only supported bridge — `require()` of ESM throws ERR_REQUIRE_ESM.
+  const mod = (await import("@harness/server/dist/programmatic.js")) as {
     startServer: (
       opts?: { envOverrides?: NodeJS.ProcessEnv },
     ) => Promise<{ close: () => Promise<void> }>;
