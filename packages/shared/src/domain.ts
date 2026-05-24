@@ -92,7 +92,10 @@ export type SdkImageDimension = z.infer<typeof sdkImageDimensionSchema>;
 
 export const sdkImageSchema = z.union([
   z.object({
-    url: z.string().url(),
+    // Wire-only form (R17-S1): the harness UI only ever produces the base64
+    // `data` form below, but the SDK accepts a URL. Constrain to https to
+    // reduce latent SSRF surface (CWE-918) if the SDK server-fetches it.
+    url: z.string().url().startsWith("https://"),
     dimension: sdkImageDimensionSchema.optional(),
   }),
   z.object({
