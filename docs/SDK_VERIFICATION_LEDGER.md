@@ -874,6 +874,43 @@ Phase 01 output — resolves every Open Question from `spec-v1.1.md` Section 14 
 
 ---
 
+## OQ-24: How does the SDK's MCP client reach a built-in (loopback) MCP server, and how do MCP tool calls surface in the event stream?
+
+- **Status**: partial (high-confidence from the SDK bundle; live `RUN_SDK_SMOKE`
+  confirmation deferred to Phase 18 Milestone 2).
+- **Why it surfaced**: Phase 18 needs a built-in browser MCP server. `McpServerConfig`
+  (OQ-18) accepts only stdio (`command`) or http/sse (`url`) — there is **no
+  in-process object registration** — so the built-in server must be a loopback
+  HTTP MCP server registered as `mcpServers["harness_browser"] = { url: "http://127.0.0.1:<port>/mcp" }`.
+- **Findings from the compiled SDK bundle**
+  (`node_modules/.pnpm/@cursor+sdk@1.0.13/.../dist/esm/*.js`):
+  1. The SDK bundles the official MCP client transports — `StreamableHTTP`
+     (primary), `SSEClientTransport`, `StdioClientTransport` — with
+     `mcp-session-id` headers, `Accept: application/json, text/event-stream`,
+     `tools/list`, `tools/call`, `notifications/initialized`. This is standard
+     `@modelcontextprotocol/sdk` wire behavior. → The built-in server should
+     speak **MCP Streamable HTTP**; build it on the official
+     `@modelcontextprotocol/sdk` `StreamableHTTPServerTransport` for guaranteed
+     compatibility.
+  2. MCP tool names surface in the message stream as **`mcp__<serverName>__<toolName>`**
+     (the bundle contains the literal `t.startsWith("mcp__") … t.split("__")`
+     parser). `normalizer.ts` passes `raw.name` through unchanged, so a browser
+     tool appears as e.g. `mcp__harness_browser__browser_navigate`. The
+     `ToolCallCard` icon regex (`/browser|web/`) already maps it to the globe
+     icon; any action-overlay subscription must match the tool **suffix**, not a
+     `browser_` prefix.
+- **Still needs a live smoke** (`RUN_SDK_SMOKE=true`, real API key) in Milestone 2:
+  - The MCP client actually dials a loopback Streamable-HTTP server registered
+    via `{ type: "http", url }` (vs requiring `sse`, or rejecting `127.0.0.1`).
+  - Tool calls stream as `tool_call` events named `mcp__…` (and whether
+    `running`/`completed` both fire for MCP tools).
+- **Implication**: build Milestone 2 against the high-confidence shape above and
+  gate the end-to-end MCP transport assertion behind `RUN_SDK_SMOKE`; flip this
+  entry to `verified` once the smoke passes.
+
+---
+---
+
 ## Verified runtime commands
 
 | Command | Where it was run | Purpose | Result |
