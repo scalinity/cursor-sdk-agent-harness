@@ -7,6 +7,7 @@ import {
   requestIdSchema,
   runIdSchema,
   SCHEMA_VERSION,
+  MAX_IMAGE_DATA_BYTES,
 } from "./constants.js";
 import {
   agentModeSchema,
@@ -95,9 +96,9 @@ export const sdkImageSchema = z.union([
     dimension: sdkImageDimensionSchema.optional(),
   }),
   z.object({
-    /** base64-encoded image bytes (no data: prefix). */
-    data: z.string().min(1),
-    mimeType: z.string().min(1),
+    /** base64-encoded image bytes (no data: prefix). Capped per R17-W1. */
+    data: z.string().min(1).max(MAX_IMAGE_DATA_BYTES),
+    mimeType: z.string().regex(/^image\/(png|jpeg|webp|gif)$/),
     dimension: sdkImageDimensionSchema.optional(),
   }),
 ]);

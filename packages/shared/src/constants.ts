@@ -5,6 +5,14 @@ export const SCHEMA_VERSION = 1 as const;
 
 export const LARGE_PAYLOAD_THRESHOLD_BYTES = 256 * 1024;
 
+/**
+ * Per-image base64 byte cap for run attachments (R17-W1). ~7 MB of base64 ≈
+ * ~5 MiB decoded — generous for screenshots/diagrams while bounding the
+ * in-memory cost of a `POST /api/runs` body. The server's Fastify `bodyLimit`
+ * is sized from this × MAX_IMAGE_ATTACHMENTS. base64 inflates bytes ~33%.
+ */
+export const MAX_IMAGE_DATA_BYTES = 7_000_000;
+
 export const isoDateTimeSchema = z.string().datetime();
 export const frameIdSchema = z.string().min(8).max(128);
 export const agentIdSchema = z.string().min(1).max(256);

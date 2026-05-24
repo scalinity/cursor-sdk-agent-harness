@@ -26,6 +26,7 @@ import {
   type SdkAdapter,
 } from "./sdk/index.js";
 import { createRunBus, wsPlugin, type RunBus } from "./ws/index.js";
+import { MAX_IMAGE_DATA_BYTES } from "@harness/shared";
 
 export interface AppDeps {
   env: Env;
@@ -134,6 +135,11 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     new WorkspacePolicy({ allowlist: repos.workspaceAllowlist });
 
   const app = Fastify({
+    // Explicit body limit (R17-W1): bound the image-attachment ingress on
+    // POST /api/runs instead of relying on Fastify's silent ~1 MiB default.
+    // Sized for up to 16 images at MAX_IMAGE_DATA_BYTES each + ~4 MiB headroom
+    // for the prompt/JSON envelope.
+    bodyLimit: MAX_IMAGE_DATA_BYTES * 16 + 4 * 1024 * 1024,
     logger: {
       level: env.LOG_LEVEL,
       redact: REDACT_CONFIG,
