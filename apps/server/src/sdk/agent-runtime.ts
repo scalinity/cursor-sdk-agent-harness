@@ -346,6 +346,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
           runId: runRow.id,
           agentId: row.id,
           modelId: row.modelId,
+          mode: row.mode,
           prompt: input.prompt,
           ...(input.images && input.images.length > 0 ? { images: input.images } : {}),
           agent: handle,

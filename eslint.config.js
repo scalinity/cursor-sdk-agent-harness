@@ -11,6 +11,7 @@ export default [
   {
     ignores: [
       "**/dist/**",
+      "**/dist-electron/**",
       "**/build/**",
       "**/coverage/**",
       "**/node_modules/**",

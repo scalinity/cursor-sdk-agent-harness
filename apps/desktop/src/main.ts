@@ -15,6 +15,12 @@ import { loadWindowState, saveWindowState } from "./window-state.js";
 import { BrowserController } from "./browser-controller.js";
 import { registerBrowserIpc } from "./browser-ipc.js";
 
+// On-device Whisper dictation prefers the WebGPU backend (≈10x faster than
+// WASM). Enable it explicitly so `navigator.gpu` is exposed to the renderer and
+// its worker, even if this GPU sits on Chromium's conservative blocklist for
+// the bundled Electron build. Must run before `app.whenReady`.
+app.commandLine.appendSwitch("enable-unsafe-webgpu");
+
 // Register `app://` as a STANDARD, secure, fetch/CORS-capable scheme BEFORE
 // app ready. Without `standard: true`, Chromium serializes the renderer's
 // origin as the opaque string "null" — so the cross-origin API requests to
