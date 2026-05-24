@@ -13,6 +13,13 @@ export const LARGE_PAYLOAD_THRESHOLD_BYTES = 256 * 1024;
  */
 export const MAX_IMAGE_DATA_BYTES = 7_000_000;
 
+/**
+ * Max image attachments per message (R17-S6). Single source of truth for the
+ * server REST/WS `.max()` validation and the web composer's client-side cap,
+ * so the two can't drift.
+ */
+export const MAX_IMAGE_ATTACHMENTS = 16;
+
 export const isoDateTimeSchema = z.string().datetime();
 export const frameIdSchema = z.string().min(8).max(128);
 export const agentIdSchema = z.string().min(1).max(256);

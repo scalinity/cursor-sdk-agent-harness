@@ -1,4 +1,5 @@
 import type { SdkImage } from "@harness/shared";
+export { MAX_IMAGE_ATTACHMENTS } from "@harness/shared";
 
 /**
  * Composer attachments. Images are sent to the agent as base64 `SdkImage`
@@ -8,7 +9,6 @@ import type { SdkImage } from "@harness/shared";
  * Electron a dropped file exposes an absolute `path`; in the browser it does
  * not, so we fall back to the bare filename.
  */
-export const MAX_IMAGE_ATTACHMENTS = 16;
 
 export interface ImageAttachment {
   id: string;

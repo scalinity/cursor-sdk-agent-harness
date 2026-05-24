@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isoDateTimeSchema } from "./constants.js";
+import { isoDateTimeSchema, MAX_IMAGE_ATTACHMENTS } from "./constants.js";
 import { eventSdkTypeSchema } from "./domain.js";
 import {
   agentModeSchema,
@@ -136,7 +136,7 @@ export type AgentDetailResponse = z.infer<typeof agentDetailResponseSchema>;
 export const createRunRequestSchema = z.object({
   agentId: z.string().min(1),
   prompt: z.string().min(1).max(64_000),
-  images: z.array(sdkImageSchema).max(16).optional(),
+  images: z.array(sdkImageSchema).max(MAX_IMAGE_ATTACHMENTS).optional(),
 });
 export type CreateRunRequest = z.infer<typeof createRunRequestSchema>;
 

@@ -9,6 +9,7 @@ export type { ParseJsonOutcome } from "./parse-json-schema.js";
 // Constants & primitives
 export {
   LARGE_PAYLOAD_THRESHOLD_BYTES,
+  MAX_IMAGE_ATTACHMENTS,
   MAX_IMAGE_DATA_BYTES,
   PROTOCOL_VERSION,
   SCHEMA_VERSION,

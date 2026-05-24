@@ -7,6 +7,7 @@ import {
   isoDateTimeSchema,
   requestIdSchema,
   runIdSchema,
+  MAX_IMAGE_ATTACHMENTS,
 } from "./constants.js";
 import { modelIdSchema, replaySpeedSchema, sdkRunStatusSchema, settingSourceSchema, knownLanguageSchema } from "./models.js";
 import { canonicalEventBaseSchema, runInterruptedReasonSchema, sdkImageSchema } from "./domain.js";
@@ -51,7 +52,7 @@ export const submitUserInputFrameSchema = frameBaseSchema.extend({
   type: z.literal("submit_user_input"),
   agent_id: agentIdSchema,
   prompt: z.string().min(1).max(200_000),
-  images: z.array(sdkImageSchema).max(16).optional(),
+  images: z.array(sdkImageSchema).max(MAX_IMAGE_ATTACHMENTS).optional(),
   client_run_id: z.string().uuid().optional(),
 });
 
