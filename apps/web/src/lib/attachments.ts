@@ -16,7 +16,11 @@ export interface ImageAttachment {
   name: string;
   /** Sent to the agent. */
   image: SdkImage;
-  /** Object URL for the chip thumbnail; revoke on removal. */
+  /**
+   * Data URL for the chip thumbnail (from readAsDataURL). GC'd with the
+   * attachment — no URL.revokeObjectURL needed. Note: this holds the image
+   * bytes in memory, bounded by MAX_IMAGE_ATTACHMENTS.
+   */
   previewUrl: string;
 }
 
