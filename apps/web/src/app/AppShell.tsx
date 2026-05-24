@@ -200,7 +200,7 @@ export function AppShell() {
         ) : null}
         <Titlebar
           onNewAgent={() => setNewAgentOpen(true)}
-          {...(activeRunId
+          {...(activeRunId && activeRunCancellable
             ? { onCancelRun: () => cancelRun(activeRunId) }
             : {})}
         />
