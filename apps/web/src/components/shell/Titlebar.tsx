@@ -14,7 +14,7 @@ import {
 } from "./ToolbarIcons.js";
 
 export interface TitlebarProps {
-  onNewAgent?: () => void;
+  onNewSession?: () => void;
   /**
    * Phase 13 — when set, the titlebar shows a "Cancel run" button that
    * forwards the user's intent to `useAgentStream.cancelRun`. Hidden
@@ -35,7 +35,7 @@ const PANEL_TABS: ReadonlyArray<{
   { tab: "browser", label: "Browser", hint: "Browser (not yet available)", Icon: GlobeIcon },
 ];
 
-export function Titlebar({ onNewAgent, onCancelRun }: TitlebarProps = {}) {
+export function Titlebar({ onNewSession, onCancelRun }: TitlebarProps = {}) {
   const codeHidden = useUiStore((s) => s.codeHidden);
   const setCodeHidden = useUiStore((s) => s.setCodeHidden);
   const toggleCodeHidden = useUiStore((s) => s.toggleCodeHidden);
@@ -110,11 +110,11 @@ export function Titlebar({ onNewAgent, onCancelRun }: TitlebarProps = {}) {
         </button>
       ) : null}
 
-      {onNewAgent ? (
+      {onNewSession ? (
         <button
           type="button"
-          onClick={onNewAgent}
-          title="New agent"
+          onClick={onNewSession}
+          title="New chat"
           className="tb-icon-btn"
         >
           <PlusIcon className="size-4" />

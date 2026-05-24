@@ -5,18 +5,21 @@
  * EVERY subagent definition ("universal"), running the model the user picked
  * in the composer.
  *
- * Invariant enforced: the active agent's model always equals the composer's
- * `selectedModelId`. When it doesn't (cold start → no agent, or the user
- * switched the model dropdown), we find-or-create the default agent for that
- * model and select it. Matching `selectedModelId` is what keeps this from
- * fighting the advanced "New agent" dialog: a custom agent on the same model
- * already satisfies the invariant, so we leave it alone.
+ * Invariant enforced: the active agent is the managed default for the active
+ * `(workspaceId, selectedModelId)` pair. When it isn't — cold start (no agent),
+ * the user switched the model dropdown, OR the user switched the active
+ * workspace and the prior workspace's default is still selected — we
+ * find-or-create the default agent for that pair and select it. An explicitly
+ * chosen *custom* agent (one not in the managed-defaults map) running the
+ * selected model is left alone, so this never fights the advanced "New agent"
+ * dialog.
  *
  * Default agents are tracked in a localStorage map keyed by
  * `${workspaceId}::${modelId}` so the choice survives reloads and is scoped
- * per workspace (AgentSummary doesn't expose `cwd`, so we can't match on it).
- * If that mapping is ever lost we simply create a fresh default agent — at
- * worst a harmless duplicate, never a run against the wrong workspace.
+ * per workspace (AgentSummary doesn't expose `cwd`, so we can't match on it);
+ * the map's values are also the set of ids we treat as "managed". If that
+ * mapping is ever lost we simply create a fresh default agent — at worst a
+ * harmless duplicate, never a run against the wrong workspace.
  *
  * Effects live here (not in a component) per the repo's no-useEffect rule.
  */
@@ -111,16 +114,47 @@ export function useEnsureDefaultAgent(input: UseEnsureDefaultAgentInput): void {
 
   useEffect(() => {
     if (!activeWorkspaceId || !workspacePath) return;
-    // The invariant already holds — the active agent runs the selected model.
-    if (activeAgent && activeAgent.modelId === modelId) return;
 
+    // Re-provision when the active agent isn't the managed default for THIS
+    // (workspace, model). Matching on model alone would ignore a workspace
+    // switch — the prior workspace's default still runs the selected model, so
+    // runs would keep executing against its cwd. We bind the invariant to the
+    // (workspace, model) pair via the remembered-defaults map.
     const mapKey = `${activeWorkspaceId}::${modelId}`;
+    const defaultsMap = readDefaultAgentMap();
+    const rememberedForKey = defaultsMap[mapKey];
+    const managedDefaultIds = new Set(Object.values(defaultsMap));
 
-    // Prefer the remembered default agent for this (workspace, model).
-    const remembered = readDefaultAgentMap()[mapKey];
-    const existing = remembered
+    // Invariant holds: the active agent is exactly this (workspace, model)'s
+    // managed default.
+    if (
+      activeAgent &&
+      activeAgent.id === rememberedForKey &&
+      activeAgent.modelId === modelId
+    ) {
+      return;
+    }
+
+    // Respect an explicitly-chosen *custom* agent (one we don't manage — e.g.
+    // from the New Agent dialog) running the selected model: don't yank it out
+    // from under the user when the workspace pointer moves. In private-mode
+    // browsers localStorage is unavailable, so the map is empty and every agent
+    // looks "custom"; workspace-switch re-binding then degrades to the prior
+    // model-only behaviour, which is acceptable for that edge.
+    if (
+      activeAgent &&
+      activeAgent.modelId === modelId &&
+      !managedDefaultIds.has(activeAgent.id)
+    ) {
+      return;
+    }
+
+    // Otherwise — cold start, model switch, or a workspace switch that left a
+    // different workspace's default active — find or create this (workspace,
+    // model)'s default and select it.
+    const existing = rememberedForKey
       ? (agents.find(
-          (a) => a.id === remembered && a.status === "active" && a.modelId === modelId,
+          (a) => a.id === rememberedForKey && a.status === "active" && a.modelId === modelId,
         ) ?? null)
       : null;
     if (existing) {

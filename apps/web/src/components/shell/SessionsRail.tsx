@@ -4,19 +4,18 @@ import { cn } from "../../lib/cn.js";
 import { useRunStore } from "../../state/run-store.js";
 import { useWorkspaceAllowlist } from "../../hooks/useWorkspaceAllowlist.js";
 import { useActiveWorkspace } from "../../hooks/useActiveWorkspace.js";
-import { ChevronDownIcon, FolderIcon, PlusIcon, SparkIcon, XIcon } from "./ToolbarIcons.js";
+import { ChevronDownIcon, FolderIcon, PlusIcon, XIcon } from "./ToolbarIcons.js";
 
 /**
- * SessionsRail — left rail. Top action creates a new agent; below, chats are
- * grouped under the workspace that was active when each run started
- * (`run.workspaceId`). Runs with no/unknown workspace fall into "Unassigned".
- * Clicking a workspace header makes it the active workspace.
+ * SessionsRail — left rail. Top action starts a new chat (a fresh session);
+ * below, chats are grouped under the workspace that was active when each run
+ * started (`run.workspaceId`). Runs with no/unknown workspace fall into
+ * "Unassigned". Clicking a workspace header makes it the active workspace.
  */
 export interface SessionsRailProps {
   runs: RunSummary[];
   activeRunId: string | null;
   onSelectRun: (runId: string) => void;
-  onNewAgent?: () => void;
   onPickWorkspace?: () => void;
   /** Start a fresh session (clears the active run so the composer resets). */
   onNewSession?: () => void;
@@ -47,7 +46,6 @@ export function SessionsRail({
   runs,
   activeRunId,
   onSelectRun,
-  onNewAgent,
   onPickWorkspace,
   onNewSession,
   onDeleteRun,
@@ -112,21 +110,12 @@ export function SessionsRail({
         <button
           type="button"
           className="rail-new-agent"
-          onClick={onNewAgent}
-          disabled={!onNewAgent}
-          title="New agent"
-        >
-          <SparkIcon className="size-4" />
-          <span>New Agent</span>
-        </button>
-        <button
-          type="button"
-          className="rail-new-session"
           onClick={() => onNewSession?.()}
           aria-label="New session"
-          title="New session"
+          title="New chat"
         >
           <PlusIcon className="size-4" />
+          <span>New Chat</span>
         </button>
       </div>
 

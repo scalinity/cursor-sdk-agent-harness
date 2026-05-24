@@ -9,6 +9,7 @@ import { loadEnv, type Env } from "./config/env.js";
 import { openDb } from "./db/client.js";
 import { createRepositories } from "./db/repositories/index.js";
 import { assertBindAllowed } from "./security/bind-policy.js";
+import { ensureDefaultWorkspace } from "./security/default-workspace.js";
 
 export interface StartServerOptions {
   /**
@@ -38,6 +39,14 @@ export async function startServer(
   const dbClient = openDb({ filePath: env.DB_PATH });
   dbClient.verifyMigrations();
   const repos = createRepositories(dbClient.raw);
+
+  // Cursor-style zero-setup default: ensure a workspace is active (falling back
+  // to the user's home dir) before the renderer connects, so the coding agent
+  // can provision and the model works without the user picking a folder first.
+  await ensureDefaultWorkspace({
+    allowlist: repos.workspaceAllowlist,
+    settings: repos.settings,
+  });
 
   const built = await buildApp({ env, repos });
   await built.app.listen({ host: env.HOST, port: env.PORT });

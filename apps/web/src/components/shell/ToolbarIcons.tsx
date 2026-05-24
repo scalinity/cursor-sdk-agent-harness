@@ -128,3 +128,34 @@ export function XIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Home — the default workspace (the user's home directory). */
+export function HomeIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...SVG_PROPS}>
+      <path d="M3 10.5 12 3l9 7.5" />
+      <path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5" />
+      <path d="M9 21v-6h6v6" />
+    </svg>
+  );
+}
+
+/** Check — marks the active item in a menu. */
+export function CheckIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...SVG_PROPS}>
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
+/** Monitor — the "Local" run target indicator. */
+export function MonitorIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...SVG_PROPS}>
+      <rect width="20" height="14" x="2" y="3" rx="2" />
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
+    </svg>
+  );
+}

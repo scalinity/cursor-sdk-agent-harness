@@ -10,6 +10,7 @@ import { useErrorReporter } from "../../hooks/useErrorReporter.js";
 import { cn } from "../../lib/cn.js";
 import { Select, type SelectOption } from "../ui/Select.js";
 import { PlusIcon, XIcon } from "./ToolbarIcons.js";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import {
   attachmentImages,
   fileReferenceText,
@@ -173,6 +174,7 @@ export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerPr
 
   return (
     <div className={cn("composer", heroMode && "composer--hero")}>
+      <WorkspaceSwitcher />
       <div
         className={cn("composer-box", dragging && "composer-box--dragover")}
         onDrop={onDrop}
