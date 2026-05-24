@@ -9,12 +9,18 @@
  * declarations only carry layout primitives.
  */
 
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
 .app-grid {
   display: grid;
   grid-template-columns: 224px minmax(0, 1fr) minmax(0, 1.15fr);
   grid-template-rows: 40px minmax(0, 1fr) 26px;
   height: 100vh;
-  min-height: 900px;
   background: var(--color-background);
   color: var(--color-text-primary);
 }
@@ -38,6 +44,30 @@
   padding-right: 10px;
   white-space: nowrap;
   overflow: hidden;
+  /* Electron: make the whole titlebar a window drag handle so the user can
+     reposition the window from this strip. Interactive children (buttons,
+     links, inputs) opt out below. In the browser these properties are
+     no-ops, so this is safe in dev mode too. */
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.titlebar button,
+.titlebar a,
+.titlebar input,
+.titlebar select,
+.titlebar [role="button"] {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* macOS Electron: titleBarStyle: "hiddenInset" places the native traffic
+   lights inside our titlebar strip (~70px wide). Reserve that footprint so
+   the workspace crumb starts to the right of them instead of drawing
+   underneath. data-platform is set in Titlebar.tsx from desktopBridge.platform,
+   so the rule no-ops in browser mode and on non-darwin Electron. */
+.titlebar[data-platform="darwin"] {
+  padding-left: 80px;
 }
 
 .sessions-rail {

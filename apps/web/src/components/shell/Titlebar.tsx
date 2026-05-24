@@ -1,5 +1,6 @@
 import type { WorkspaceAllowlistRow } from "@harness/shared";
 import { useUiStore } from "../../state/ui-store.js";
+import { desktopBridge } from "../../lib/desktop-bridge.js";
 import { cn } from "../../lib/cn.js";
 
 export interface TitlebarProps {
@@ -38,15 +39,14 @@ export function Titlebar({
 }: TitlebarProps = {}) {
   const codeHidden = useUiStore((s) => s.codeHidden);
   const toggleCodeHidden = useUiStore((s) => s.toggleCodeHidden);
+  // The Electron window uses `titleBarStyle: "hiddenInset"` on macOS, so the
+  // native traffic-light buttons live in the top-left of our titlebar strip.
+  // Tag the root so CSS can reserve their footprint and the workspace crumb
+  // doesn't draw underneath them. In the browser / non-darwin Electron the
+  // attribute is absent and the rule no-ops.
+  const platform = desktopBridge?.platform ?? null;
   return (
-    <div className="titlebar">
-      {/* Traffic lights */}
-      <div className="flex gap-2 px-3.5">
-        <span className="block size-3 rounded-full bg-danger" aria-hidden="true" />
-        <span className="block size-3 rounded-full bg-warning" aria-hidden="true" />
-        <span className="block size-3 rounded-full bg-success" aria-hidden="true" />
-      </div>
-
+    <div className="titlebar" {...(platform ? { "data-platform": platform } : {})}>
       {/* Workspace crumb — Phase 16. Real workspace name, clickable to
           re-open the picker. Before a workspace is selected the
           WorkspaceRequiredModal blocks the shell, so this slot is the

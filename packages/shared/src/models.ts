@@ -5,7 +5,7 @@ export type ModelId = z.infer<typeof modelIdSchema>;
 
 export const MODEL_LABELS: Record<ModelId, string> = {
   "composer-2-5-fast": "Composer 2.5 Fast",
-  "composer-2-5": "Composer 2.5 Standard",
+  "composer-2-5": "Composer 2.5",
 };
 
 export const DEFAULT_MODEL_ID: ModelId = "composer-2-5-fast";
