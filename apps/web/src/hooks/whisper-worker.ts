@@ -27,10 +27,12 @@ if (env.backends?.onnx?.wasm) {
   env.backends.onnx.wasm.numThreads = 1;
 }
 
-// English-only base model, 8-bit quantized (~80 MB). base.en is a clear
-// accuracy step up from tiny.en for dictation while staying small enough for
-// a tolerable one-time download.
-const MODEL_ID = "Xenova/whisper-base.en";
+// English-only tiny model in full precision (~75 MB). fp32 (not a quantized
+// dtype) is deliberate: the q8 Whisper export trips an ONNX Runtime "missing
+// scale" error (TransposeDQWeightsForMatMulNBits) on the WASM backend, whereas
+// fp32 uses plain MatMul and loads reliably. tiny.en keeps the download small
+// and inference fast on the single-threaded WASM backend.
+const MODEL_ID = "Xenova/whisper-tiny.en";
 
 /** Main thread → worker. */
 export interface WhisperTranscribeRequest {
@@ -50,7 +52,7 @@ const ctx = self as unknown as DedicatedWorkerGlobalScope;
 let asrPromise: Promise<AutomaticSpeechRecognitionPipeline> | null = null;
 function loadAsr(): Promise<AutomaticSpeechRecognitionPipeline> {
   asrPromise ??= pipeline("automatic-speech-recognition", MODEL_ID, {
-    dtype: "q8",
+    dtype: "fp32",
     progress_callback: (info: unknown) => {
       const progress = (info as { progress?: number }).progress;
       if (typeof progress === "number" && Number.isFinite(progress)) {
