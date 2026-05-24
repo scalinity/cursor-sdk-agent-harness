@@ -102,10 +102,22 @@ pnpm test             # vitest across server + web + shared
 pnpm migrate          # apply Drizzle migrations to the local DB
 pnpm reset-local-db   # wipe the local SQLite file (destructive)
 pnpm build            # production build of every package
+pnpm build:desktop    # full Electron build — see "Desktop install" rule below
 pnpm format           # prettier
 ```
 
 A phase is not complete until `pnpm typecheck && pnpm lint && pnpm test` all pass.
+
+**Desktop install (rule, not suggestion).** Every time you run `pnpm build:desktop`, immediately follow it by replacing the copy in `/Applications/` so the user can launch from Finder/Dock without re-running a dev command. The `.app` is gitignored and regenerated on each build; the user expects `/Applications/Cursor SDK Agent Harness.app` to be the latest.
+
+```bash
+pnpm build:desktop \
+  && (pkill -f "Cursor SDK Agent Harness" 2>/dev/null; sleep 1) \
+  && rm -rf "/Applications/Cursor SDK Agent Harness.app" \
+  && mv "apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app" /Applications/
+```
+
+The DMG step inside `pnpm build:desktop` may fail with `hdiutil` exit 1 on recent macOS (APFS quirk) — ignore it; the `.app` is the deliverable. Don't propose a "fix" for the DMG failure unless the user asks; the DMG isn't used.
 
 ## SDK ground truth lives in the ledger
 
