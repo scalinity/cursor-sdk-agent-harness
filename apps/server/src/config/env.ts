@@ -22,6 +22,14 @@ const envSchema = z
       .string()
       .transform((v) => v.toLowerCase() === "true")
       .default("false"),
+    // Set to "1" by the Electron main process (via startServer envOverrides).
+    // When true, the server additionally allowlists the `app://harness`
+    // renderer origin for CORS / origin policy / WS upgrades. Read through the
+    // parsed env (not process.env) so the envOverrides path is authoritative.
+    HARNESS_DESKTOP: z
+      .string()
+      .transform((v) => v === "1")
+      .default("0"),
   })
   .superRefine((val, ctx) => {
     if (val.HOST !== "127.0.0.1" && val.HOST !== "localhost" && !val.ALLOW_REMOTE_BIND) {

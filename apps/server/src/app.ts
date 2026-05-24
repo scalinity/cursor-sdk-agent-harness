@@ -113,7 +113,12 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   // (the prod renderer loads from a custom protocol). Browser-only dev
   // continues to ship with the single env.WEB_ORIGIN entry.
   const HARNESS_APP_ORIGIN = "app://harness";
-  const desktopMode = process.env.HARNESS_DESKTOP === "1";
+  // Read from the parsed env, not process.env: the Electron main passes
+  // HARNESS_DESKTOP=1 through startServer's envOverrides, which only reach
+  // loadEnv — never the real process.env. Reading process.env here left
+  // desktopMode false in the packaged app, so app://harness was never
+  // allowlisted and every renderer request 403'd.
+  const desktopMode = env.HARNESS_DESKTOP;
   const allowedOrigins: string[] = desktopMode
     ? [env.WEB_ORIGIN, HARNESS_APP_ORIGIN]
     : [env.WEB_ORIGIN];

@@ -88,6 +88,32 @@ describe("security perimeter", () => {
       expect(res.json()).toEqual({ code: "ORIGIN_FORBIDDEN" });
     });
 
+    it("rejects the app://harness origin when not in desktop mode", async () => {
+      h = await buildHarness();
+      const res = await h.app.inject({
+        method: "GET",
+        url: "/api/health/live",
+        headers: { origin: "app://harness" },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(res.json()).toEqual({ code: "ORIGIN_FORBIDDEN" });
+    });
+
+    // Regression: the packaged renderer loads from app://harness and calls the
+    // embedded server cross-origin. desktopMode must be read from the parsed
+    // env (HARNESS_DESKTOP flows through startServer's envOverrides → loadEnv),
+    // NOT process.env — otherwise the allowlist never includes app://harness
+    // and every renderer request 403s (blank/non-functional desktop app).
+    it("allows the app://harness origin in desktop mode (HARNESS_DESKTOP=1)", async () => {
+      h = await buildHarness({ HARNESS_DESKTOP: "1" });
+      const res = await h.app.inject({
+        method: "GET",
+        url: "/api/health/live",
+        headers: { origin: "app://harness" },
+      });
+      expect(res.statusCode).toBe(200);
+    });
+
     it("allows safe methods with no Origin (curl)", async () => {
       h = await buildHarness();
       const res = await h.app.inject({
