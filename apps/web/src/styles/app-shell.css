@@ -366,6 +366,12 @@ body,
   background: var(--color-surface-3);
   color: var(--color-danger);
 }
+.rail-item__delete--armed,
+.rail-item:hover .rail-item__delete--armed {
+  opacity: 1;
+  background: var(--color-danger);
+  color: var(--color-text-inverse);
+}
 
 /* ---- Center header ---- */
 .center-head {

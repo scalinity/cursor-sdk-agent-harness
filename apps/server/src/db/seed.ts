@@ -152,17 +152,19 @@ export function backfillPricingDefaultsIfUnconfigured(
   }
 
   const upsert = raw.prepare(
-    `INSERT INTO settings (key, value_json, description) VALUES (?, ?, ?)
-     ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json`,
+    `INSERT INTO settings (key, value_json, description, updated_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
   );
+  const ts = now.toISOString();
   const tx = raw.transaction(() => {
     for (const [key, micros] of Object.entries(COMPOSER_PRICING_MICROS)) {
-      upsert.run(key, JSON.stringify(micros), null);
+      upsert.run(key, JSON.stringify(micros), null, ts);
     }
     upsert.run(
       PRICING_SETTING_KEYS.lastVerifiedAt,
       JSON.stringify(now.toISOString()),
       null,
+      ts,
     );
   });
   tx();

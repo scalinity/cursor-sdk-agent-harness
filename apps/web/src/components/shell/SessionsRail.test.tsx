@@ -34,7 +34,7 @@ describe("SessionsRail", () => {
   });
   afterEach(() => cleanup());
 
-  it("shows a delete button on a terminal run and calls onDeleteRun without selecting it", () => {
+  it("requires a confirming second click to delete, and never selects the run", () => {
     const onDeleteRun = vi.fn();
     const onSelectRun = vi.fn();
     render(
@@ -46,9 +46,29 @@ describe("SessionsRail", () => {
       />,
     );
     const del = screen.getByLabelText("Delete conversation");
+    // First click arms only — the irreversible delete must not fire yet.
     fireEvent.click(del);
+    expect(onDeleteRun).not.toHaveBeenCalled();
+    // The same button now confirms on the second click.
+    fireEvent.click(screen.getByLabelText("Click again to confirm delete"));
     expect(onDeleteRun).toHaveBeenCalledWith("run-1");
-    // The delete click must not bubble up to the row's select handler.
+    // Neither click may bubble up to the row's select handler.
+    expect(onSelectRun).not.toHaveBeenCalled();
+  });
+
+  it("keydown on the delete button does not bubble to row selection", () => {
+    const onSelectRun = vi.fn();
+    render(
+      <SessionsRail
+        runs={[fixtureRun()]}
+        activeRunId={null}
+        onSelectRun={onSelectRun}
+        onDeleteRun={vi.fn()}
+      />,
+    );
+    // Without stopPropagation on the button's onKeyDown, Enter here bubbles to
+    // the row's onKeyDown and selects the run being deleted.
+    fireEvent.keyDown(screen.getByLabelText("Delete conversation"), { key: "Enter" });
     expect(onSelectRun).not.toHaveBeenCalled();
   });
 

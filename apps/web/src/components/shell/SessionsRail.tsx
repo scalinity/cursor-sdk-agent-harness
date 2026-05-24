@@ -336,6 +336,11 @@ interface RailItemProps {
 }
 
 function RailItem({ run, isActive, onSelectRun, onDeleteRun }: RailItemProps) {
+  // Deleting a run cascade-deletes all its events (FK ON DELETE CASCADE) and
+  // is irreversible, so require a confirming second click. Disarms when the
+  // pointer leaves the row or the button loses focus — no timer, so the
+  // component stays effect-free per the repo rule.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   return (
     <div
       className={cn("rail-item rail-item--nested", isActive && "rail-item--active")}
@@ -345,6 +350,7 @@ function RailItem({ run, isActive, onSelectRun, onDeleteRun }: RailItemProps) {
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") onSelectRun(run.id);
       }}
+      onMouseLeave={() => setConfirmingDelete(false)}
     >
       <span className={cn("rail-item__dot", dotClass(run.status))} aria-hidden="true" />
       <div className="min-w-0">
@@ -356,13 +362,20 @@ function RailItem({ run, isActive, onSelectRun, onDeleteRun }: RailItemProps) {
       {onDeleteRun && isTerminal(run.status) ? (
         <button
           type="button"
-          className="rail-item__delete"
-          aria-label="Delete conversation"
-          title="Delete conversation"
+          className={cn("rail-item__delete", confirmingDelete && "rail-item__delete--armed")}
+          aria-label={confirmingDelete ? "Click again to confirm delete" : "Delete conversation"}
+          title={confirmingDelete ? "Click again to confirm delete" : "Delete conversation"}
           onClick={(e) => {
             e.stopPropagation();
-            onDeleteRun(run.id);
+            if (confirmingDelete) {
+              setConfirmingDelete(false);
+              onDeleteRun(run.id);
+            } else {
+              setConfirmingDelete(true);
+            }
           }}
+          onKeyDown={(e) => e.stopPropagation()}
+          onBlur={() => setConfirmingDelete(false)}
         >
           <XIcon className="size-3.5" />
         </button>

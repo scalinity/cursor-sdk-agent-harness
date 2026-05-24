@@ -105,10 +105,10 @@ export function AppShell() {
   const onDeleteRun = useCallback(
     async (runId: string) => {
       try {
-        // Drop the selection first so the center pane doesn't briefly point
-        // at a row that's about to vanish from the history reload.
-        if (runId === activeRunId) setActiveRunId(null);
         await deleteRun(runId);
+        // Only drop the selection once the run is actually gone — a failed
+        // delete keeps the run, so it should stay selected.
+        if (runId === activeRunId) setActiveRunId(null);
       } catch (e) {
         report(e);
       }
