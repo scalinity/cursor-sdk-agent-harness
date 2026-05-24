@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { eventLargePayloadResponseSchema, eventPayloadResponseSchema } from "@harness/shared";
 import { useErrorReporter } from "./useErrorReporter.js";
+import { apiUrl } from "../lib/api-base.js";
 
 export interface LargePayloadRef {
   url: string;
@@ -66,7 +67,7 @@ export function useLazyPayload(ref: LargePayloadRef | null): UseLazyPayloadResul
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(url, { signal: controller.signal });
+      const res = await fetch(apiUrl(url), { signal: controller.signal });
       if (!res.ok) throw new Error(`Payload fetch failed with ${res.status}`);
       const raw = await res.json();
       const parsed = url.includes("/large-payload/")

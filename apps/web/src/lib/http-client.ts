@@ -9,6 +9,7 @@
  * retries via the hook that owns the call (e.g. `useRunHistory.reload`).
  */
 import type { ZodTypeAny, z } from "zod";
+import { apiUrl } from "./api-base.js";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -115,7 +116,7 @@ export async function httpRequest<TResp extends ZodTypeAny | undefined = undefin
   }
   let resp: Response;
   try {
-    resp = await fetch(url, init);
+    resp = await fetch(apiUrl(url), init);
   } catch (e) {
     throw new HttpError(
       e instanceof Error ? e.message : "network error",

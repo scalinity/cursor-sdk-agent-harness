@@ -7,6 +7,10 @@ import { loadWindowState, saveWindowState } from "./window-state.js";
 
 let mainWindow: BrowserWindow | null = null;
 let serverClose: (() => Promise<void>) | null = null;
+// Resolved origin of the embedded server (e.g. http://127.0.0.1:4783). Passed
+// to the renderer via preload so the app://harness renderer can reach the
+// API/WS cross-origin. Null until the server starts (or if it fails to).
+let serverOrigin: string | null = null;
 
 const isDev = process.env.HARNESS_DEV === "1";
 const DEV_URL = process.env.HARNESS_DEV_URL ?? "http://127.0.0.1:5173";
@@ -18,12 +22,13 @@ async function startEmbeddedServer(): Promise<void> {
   const mod = (await import("@harness/server/dist/programmatic.js")) as {
     startServer: (
       opts?: { envOverrides?: NodeJS.ProcessEnv },
-    ) => Promise<{ close: () => Promise<void> }>;
+    ) => Promise<{ close: () => Promise<void>; url: string }>;
   };
   const started = await mod.startServer({
     envOverrides: { HARNESS_DESKTOP: "1" },
   });
   serverClose = started.close;
+  serverOrigin = started.url;
 }
 
 async function startEmbeddedServerSafe(): Promise<void> {
@@ -49,6 +54,12 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Hand the embedded server's origin to the preload so the packaged
+      // (app://harness) renderer can call the API/WS cross-origin. Empty in
+      // dev where the renderer is same-origin behind the Vite proxy.
+      additionalArguments: serverOrigin
+        ? [`--harness-server-origin=${serverOrigin}`]
+        : [],
     },
   };
   if (state.x !== undefined) opts.x = state.x;
@@ -83,7 +94,11 @@ function createWindow(): void {
   if (isDev) {
     void mainWindow.loadURL(DEV_URL);
   } else {
-    void mainWindow.loadURL("app://harness/index.html");
+    // Load the protocol ROOT (path "/"), not "/index.html". The renderer's
+    // BrowserRouter matches on location.pathname; "/index.html" matches no
+    // route and renders a blank window. The app-protocol handler resolves a
+    // bare "/" to index.html on disk.
+    void mainWindow.loadURL("app://harness/");
   }
 }
 

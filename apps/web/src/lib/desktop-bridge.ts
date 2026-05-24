@@ -14,11 +14,19 @@ export interface HarnessBridge {
   openWorkspaceFolderDialog: () => Promise<{ path: string } | { cancelled: true }>;
   platform: string;
   onMenuAction: (channel: MenuActionChannel, handler: () => void) => () => void;
+  /**
+   * Absolute origin of the embedded Fastify server (e.g.
+   * `http://127.0.0.1:4783`), injected by the Electron main process. The
+   * packaged renderer loads from `app://harness` and must call this origin
+   * cross-origin for API/WS. Null when the main process didn't supply it
+   * (older preload, or a launch path that couldn't resolve the URL).
+   */
+  serverOrigin: string | null;
 }
 
 function readBridge(): HarnessBridge | null {
   if (typeof window === "undefined") return null;
-  const exposed = (window as unknown as { harness?: HarnessBridge }).harness;
+  const exposed = (window as unknown as { harness?: Partial<HarnessBridge> }).harness;
   if (!exposed) return null;
   if (
     typeof exposed.openWorkspaceFolderDialog !== "function" ||
@@ -26,7 +34,13 @@ function readBridge(): HarnessBridge | null {
   ) {
     return null;
   }
-  return exposed;
+  return {
+    openWorkspaceFolderDialog: exposed.openWorkspaceFolderDialog,
+    platform: exposed.platform ?? "",
+    onMenuAction: exposed.onMenuAction,
+    serverOrigin:
+      typeof exposed.serverOrigin === "string" ? exposed.serverOrigin : null,
+  };
 }
 
 export const desktopBridge: HarnessBridge | null = readBridge();

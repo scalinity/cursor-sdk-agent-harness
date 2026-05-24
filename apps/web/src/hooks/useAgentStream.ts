@@ -29,8 +29,12 @@ import { useRunStore } from "../state/run-store.js";
 import { useUiStore, type ConnectionState } from "../state/ui-store.js";
 import { useWebSocket } from "./useWebSocket.js";
 import { useCsrfToken } from "./useCsrfToken.js";
+import { wsUrl } from "../lib/api-base.js";
 
-const WS_URL = "/ws";
+// Absolute `ws(s)://…/ws` in the packaged desktop app (renderer is on
+// app://harness and must reach the embedded server cross-origin); plain
+// "/ws" in browser/dev, resolved against window.location by useWebSocket.
+const WS_URL = wsUrl("/ws");
 
 export interface UseAgentStreamInput {
   agentId: string | null;
