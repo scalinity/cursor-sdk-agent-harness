@@ -1,4 +1,12 @@
-import { app, BrowserWindow, nativeImage, protocol, type BrowserWindowConstructorOptions } from "electron";
+import {
+  app,
+  BrowserWindow,
+  nativeImage,
+  protocol,
+  session,
+  systemPreferences,
+  type BrowserWindowConstructorOptions,
+} from "electron";
 import { join } from "node:path";
 import { registerDialogHandlers } from "./dialogs.js";
 import { buildAppMenu } from "./menu.js";
@@ -55,6 +63,31 @@ async function startEmbeddedServerSafe(): Promise<void> {
   } catch (err: unknown) {
     console.error("[harness-desktop] failed to start embedded server:", err);
   }
+}
+
+// The renderer's voice-dictation feature calls getUserMedia for the mic. By
+// default Chromium would block the permission request inside Electron, so we
+// grant exactly the audio-capture permissions (nothing else) and, on macOS,
+// route through the OS TCC prompt so the system mic-access dialog appears.
+// Pairs with `com.apple.security.device.audio-input` + NSMicrophoneUsageDescription.
+function setupMediaPermissions(): void {
+  const MIC_PERMISSIONS = new Set(["media", "audioCapture", "microphone"]);
+  const ses = session.defaultSession;
+  ses.setPermissionRequestHandler((_wc, permission, callback) => {
+    if (!MIC_PERMISSIONS.has(permission)) {
+      callback(false);
+      return;
+    }
+    if (process.platform === "darwin") {
+      systemPreferences.askForMediaAccess("microphone").then(
+        (granted) => callback(granted),
+        () => callback(false),
+      );
+      return;
+    }
+    callback(true);
+  });
+  ses.setPermissionCheckHandler((_wc, permission) => MIC_PERMISSIONS.has(permission));
 }
 
 function createWindow(): void {
@@ -126,6 +159,7 @@ async function onReady(): Promise<void> {
     : join((process as NodeJS.Process & { resourcesPath: string }).resourcesPath, "renderer");
   registerAppProtocol(rendererRoot);
   registerDialogHandlers();
+  setupMediaPermissions();
 
   if (isDev && process.platform === "darwin" && app.dock) {
     // Packaged builds get the dock icon from the bundle's .icns; in dev we
