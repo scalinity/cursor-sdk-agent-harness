@@ -124,51 +124,56 @@ export function AppShell() {
     activeWorkspace.activeWorkspaceId === null;
 
   return (
-    <div
-      className={cn(
-        "app-grid",
-        codeHidden && "app-grid--code-hidden",
-        showWorkspaceModal && "pointer-events-none select-none blur-sm",
-      )}
-    >
-      {showBootstrapBanner ? (
-        <BootstrapBanner
-          error={csrf.error ?? "CSRF bootstrap failed"}
-          loading={csrf.loading}
-          onRetry={() => void csrf.refresh()}
+    <>
+      <div
+        className={cn(
+          "app-grid",
+          codeHidden && "app-grid--code-hidden",
+          // The modal is rendered as a sibling, not a child, so `blur-sm`
+          // (a CSS filter that inherits) and `pointer-events-none` (which
+          // cascades) only affect the shell — never the modal itself.
+          showWorkspaceModal && "pointer-events-none select-none blur-sm",
+        )}
+      >
+        {showBootstrapBanner ? (
+          <BootstrapBanner
+            error={csrf.error ?? "CSRF bootstrap failed"}
+            loading={csrf.loading}
+            onRetry={() => void csrf.refresh()}
+          />
+        ) : null}
+        <Titlebar
+          onNewAgent={() => setNewAgentOpen(true)}
+          workspace={activeWorkspace.workspace}
+          onPickWorkspace={() => void workspacePicker.pick()}
+          {...(activeRunId
+            ? { onCancelRun: () => cancelRun(activeRunId) }
+            : {})}
         />
-      ) : null}
-      <Titlebar
-        onNewAgent={() => setNewAgentOpen(true)}
-        workspace={activeWorkspace.workspace}
-        onPickWorkspace={() => void workspacePicker.pick()}
-        {...(activeRunId
-          ? { onCancelRun: () => cancelRun(activeRunId) }
-          : {})}
-      />
-      <SessionsRail runs={runs} activeRunId={activeRunId} onSelectRun={setActiveRunId} />
-      <CenterPane
-        activeAgent={activeAgent}
-        activeRun={activeRun}
-        activeRunId={activeRunId}
-        connectionState={connectionState}
-        onSubmit={onSubmit}
-        onApprovalResolve={onApprovalResolve}
-        cancelUnavailable={cancelUnavailable}
-      />
-      <RightPane activeRunId={activeRunId} />
-      <Statusbar
-        connectionState={connectionState}
-        modelLabel={activeAgent?.modelId ?? null}
-        runningRunId={activeRunId}
-        workspaceName={activeWorkspace.workspace?.label ?? activeWorkspace.workspace?.path ?? null}
-      />
-      <NewAgentDialog
-        open={newAgentOpen}
-        onClose={() => setNewAgentOpen(false)}
-        onCreated={(agentId) => selectAgent(agentId)}
-      />
+        <SessionsRail runs={runs} activeRunId={activeRunId} onSelectRun={setActiveRunId} />
+        <CenterPane
+          activeAgent={activeAgent}
+          activeRun={activeRun}
+          activeRunId={activeRunId}
+          connectionState={connectionState}
+          onSubmit={onSubmit}
+          onApprovalResolve={onApprovalResolve}
+          cancelUnavailable={cancelUnavailable}
+        />
+        <RightPane activeRunId={activeRunId} />
+        <Statusbar
+          connectionState={connectionState}
+          modelLabel={activeAgent?.modelId ?? null}
+          runningRunId={activeRunId}
+          workspaceName={activeWorkspace.workspace?.label ?? activeWorkspace.workspace?.path ?? null}
+        />
+        <NewAgentDialog
+          open={newAgentOpen}
+          onClose={() => setNewAgentOpen(false)}
+          onCreated={(agentId) => selectAgent(agentId)}
+        />
+      </div>
       {showWorkspaceModal ? <WorkspaceRequiredModal /> : null}
-    </div>
+    </>
   );
 }
