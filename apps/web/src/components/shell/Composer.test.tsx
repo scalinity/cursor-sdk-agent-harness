@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSummary } from "@harness/shared";
 import { Composer } from "./Composer.js";
@@ -138,6 +138,42 @@ describe("Composer", () => {
 
     rerender(<Composer activeAgent={fixtureAgent()} onSubmit={vi.fn()} />);
     expect(sendButton().disabled).toBe(false);
+  });
+
+  it("R17-W6: caps image attachments at 16 and warns on overflow", async () => {
+    const { container } = render(<Composer activeAgent={fixtureAgent()} onSubmit={vi.fn()} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const files = Array.from(
+      { length: 17 },
+      (_, i) => new File([new Uint8Array([i])], `img-${i}.png`, { type: "image/png" }),
+    );
+    fireEvent.change(input, { target: { files } });
+    await waitFor(() => {
+      expect(container.querySelectorAll(".composer-chip").length).toBe(16);
+    });
+    const toasts = useUiStore.getState().toasts;
+    expect(toasts.some((t) => t.severity === "warn" && /16 images/.test(t.message))).toBe(true);
+  });
+
+  it("R17-W6: image-only submit synthesizes a prompt and forwards the image", async () => {
+    const onSubmit = vi.fn().mockResolvedValue("run-x");
+    const { container } = render(<Composer activeAgent={fixtureAgent()} onSubmit={onSubmit} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    // bytes [1,2,3] → base64 "AQID"
+    const file = new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
+    fireEvent.change(input, { target: { files: [file] } });
+    await waitFor(() => {
+      expect(container.querySelectorAll(".composer-chip").length).toBe(1);
+    });
+    // Empty draft + one image: submit must synthesize a non-empty prompt
+    // (POST /api/runs requires prompt length ≥ 1) and forward the image.
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit).toHaveBeenCalledWith({
+      prompt: "(see attached image)",
+      agentId: "agent-1",
+      images: [{ data: "AQID", mimeType: "image/png" }],
+    });
   });
 });
 
