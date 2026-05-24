@@ -128,3 +128,42 @@ export function XIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Back — browser history previous. */
+export function ArrowLeftIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...SVG_PROPS}>
+      <path d="M19 12H5" />
+      <path d="m12 19-7-7 7-7" />
+    </svg>
+  );
+}
+
+/** Forward — browser history next. */
+export function ArrowRightIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...SVG_PROPS}>
+      <path d="M5 12h14" />
+      <path d="m12 5 7 7-7 7" />
+    </svg>
+  );
+}
+
+/** Reload — re-fetch the current page. */
+export function ReloadIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...SVG_PROPS}>
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      <path d="M21 3v6h-6" />
+    </svg>
+  );
+}
+
+/** Stop — abort the in-flight load. */
+export function StopIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...SVG_PROPS}>
+      <rect x="6" y="6" width="12" height="12" rx="1" />
+    </svg>
+  );
+}

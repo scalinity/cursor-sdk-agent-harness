@@ -1,4 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type {
+  BrowserInvokeRequest,
+  BrowserInvokeResult,
+  BrowserPushEvent,
+} from "@harness/shared" with { "resolution-mode": "import" };
 
 // The main process passes the embedded server's resolved origin via an
 // `--harness-server-origin=<url>` additionalArgument (see main.ts). The
@@ -31,6 +36,15 @@ const harnessBridge = {
     const listener = (): void => handler();
     ipcRenderer.on(channel, listener);
     return () => ipcRenderer.removeListener(channel, listener);
+  },
+  browser: {
+    invoke: (req: BrowserInvokeRequest): Promise<BrowserInvokeResult> =>
+      ipcRenderer.invoke("browser:invoke", req) as Promise<BrowserInvokeResult>,
+    onEvent: (handler: (event: BrowserPushEvent) => void): (() => void) => {
+      const listener = (_e: unknown, event: BrowserPushEvent): void => handler(event);
+      ipcRenderer.on("browser:event", listener);
+      return () => ipcRenderer.removeListener("browser:event", listener);
+    },
   },
 };
 

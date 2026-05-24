@@ -10,6 +10,21 @@ export type MenuActionChannel =
   | "menu:toggle-code-pane"
   | "menu:preferences";
 
+import type {
+  BrowserInvokeRequest,
+  BrowserInvokeResult,
+  BrowserPushEvent,
+} from "@harness/shared";
+
+/**
+ * Browser-pane control surface. Present only in the desktop app (the embedded
+ * Chromium views live in the Electron main process); null in browser mode.
+ */
+export interface HarnessBrowserBridge {
+  invoke: (req: BrowserInvokeRequest) => Promise<BrowserInvokeResult>;
+  onEvent: (handler: (event: BrowserPushEvent) => void) => () => void;
+}
+
 export interface HarnessBridge {
   openWorkspaceFolderDialog: () => Promise<{ path: string } | { cancelled: true }>;
   platform: string;
@@ -22,6 +37,8 @@ export interface HarnessBridge {
    * (older preload, or a launch path that couldn't resolve the URL).
    */
   serverOrigin: string | null;
+  /** Embedded-browser control surface; null when the preload didn't expose it. */
+  browser: HarnessBrowserBridge | null;
 }
 
 function readBridge(): HarnessBridge | null {
@@ -34,12 +51,20 @@ function readBridge(): HarnessBridge | null {
   ) {
     return null;
   }
+  const rawBrowser = exposed.browser;
+  const browser: HarnessBrowserBridge | null =
+    rawBrowser &&
+    typeof rawBrowser.invoke === "function" &&
+    typeof rawBrowser.onEvent === "function"
+      ? { invoke: rawBrowser.invoke, onEvent: rawBrowser.onEvent }
+      : null;
   return {
     openWorkspaceFolderDialog: exposed.openWorkspaceFolderDialog,
     platform: exposed.platform ?? "",
     onMenuAction: exposed.onMenuAction,
     serverOrigin:
       typeof exposed.serverOrigin === "string" ? exposed.serverOrigin : null,
+    browser,
   };
 }
 

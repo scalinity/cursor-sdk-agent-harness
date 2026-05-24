@@ -25,6 +25,124 @@ each phase. Use it as the single source of truth for "what is decided" vs
 | 15 | Post-Build Remediation | ✅ complete | Six P0s found and fixed: F-001 Zustand `?? []` infinite render loop (blank screen), F-002 CSRF cold-start race tearing down WS, F-003 `.env` not loaded by dev orchestrator (API key never imported), F-004 harness model IDs (`composer-2-5-fast` / `composer-2-5`) not in `@cursor/sdk@1.0.13` enum, F-005 normalizer treating per-message deltas as snapshot replacements, F-006 streaming-text channel buffer wiped by StrictMode unsubscribe. Live smoke loop verified end-to-end through the UI: create agent → submit prompt → events stream → "SMOKE LOOP COMPLETE" rendered correctly → FINISHED status → run appears in `/runs` history with tokens → `/usage` totals roll up. Full ledger in `docs/POST_BUILD_REVIEW.md`. OQ-06 (assistant delta vs snapshot) now confirmed: per-message deltas. |
 | 16 | Desktop App + Workspace Selection | ✅ complete | Electron main process at `apps/desktop/` boots Fastify in-process via the new `apps/server/src/programmatic.ts`. Origin policy + WS upgrade accept both the dev Vite origin and the `app://harness` custom protocol when `HARNESS_DESKTOP=1`. New `app.activeWorkspaceId` setting + GET/PUT `/api/workspace-allowlist/active` endpoints; `useActiveWorkspace` + `useWorkspacePicker` hooks wire the native folder dialog (or `window.prompt` browser fallback) through the existing allowlist add path. `WorkspaceRequiredModal` blocks the shell until a workspace is chosen. Native menu bar with ⌘O Open Workspace, ⌘N New Agent, ⌘J Toggle Code Pane, ⌘, Preferences. Window state persisted to `userData/window-state.json`. Mockup remnants stripped from Titlebar (fake `cinder/api-gateway` crumb + `feat/pagination… +184 −72` branch slot + `12m 04s` timer pill), RightPane (synthetic `no-file-open` tab + breadcrumb), RightTabs (`Placeholder`), and Statusbar (unconditional `⌘. cancel` slot now context-sensitive). `pnpm typecheck && pnpm lint && pnpm test` all green: 256 server tests (including 2 new active-workspace route tests), 69 web tests, 6 plugin tests, 2 shared tests, 11 scripts tests. |
 | 17 | Cursor-style Shell Redesign + Attachments | ✅ complete | Titlebar reworked into a Cursor-style toolbar: left rail-collapse toggle, Diff/Files/Terminal/Browser surface toggles (Diff = real code-edit preview; others honest "not yet available" placeholders), `+` new-agent, right-pane collapse; workspace crumb removed from the top. New `ToolbarIcons` stroke-icon set (no new dep). `ui-store` gains `railHidden` + `rightPanelTab`; grid collapses the left rail. SessionsRail rebuilt: New Agent action, search, **workspaces as collapsible groups with chats nested by `run.workspaceId`** (+ Unassigned group), Open Workspace, per-run delete. Runs now carry `workspace_id` (migration `0002`, tagged with the active workspace at creation, surfaced on `RunSummary`). Composer gains a `+` attach button, drag-and-drop, attachment chips, and a centered "new session" hero when the right pane is collapsed on a fresh session. **Image attachment pipeline** (ledger OQ-23): `POST /api/runs` accepts `images: SdkImage[]` → `startRun` → `RunController` → `agent.send(SDKUserMessage{text,images})`; non-image files embedded as `@path`/name references. Coexists with a concurrent model-dropdown change (Composer model `Select`, `selectedModelId`). `pnpm typecheck && pnpm lint && pnpm test` all green: 262 server tests (+1 image-attachment test), 93 web tests, 2 shared tests, 11 scripts tests. |
+| 18 | Embedded Browser Pane (WebContentsView + built-in MCP) | 🟡 in progress | **Milestone 1 of 2 — manual driving — complete.** Electron `WebContentsView` browser in the right-pane Browser tab, one isolated `persist:agent-<id>` session per agent, driven manually (URL bar, back/fwd/reload/stop). Built-in browser MCP server + agent control + action visualization + console/network drawers + replay are **Milestone 2** (next session). See the Phase 18 section below. |
+
+---
+
+## Phase 18 — Embedded Browser Pane (in progress)
+
+This phase replaces the right-pane "Browser" placeholder with a real
+Chromium `WebContentsView` the user can drive **and** (Milestone 2) the
+agent can drive via a built-in MCP server. It is being delivered in two
+milestones at the user's request:
+
+- **Milestone 1 — manual driving (this session): complete.** The user
+  can open the Browser tab, type a URL, navigate, and use
+  back/forward/reload/stop against a real isolated Chromium view.
+- **Milestone 2 — agent control (next session): not started.** Built-in
+  browser MCP server (10 tools), `agent-options-builder` injection, New
+  Agent dialog toggle, action-visualization overlay, console/network
+  drawers, REST polling endpoints, replay handling.
+
+### Key SDK / architecture findings (binding)
+
+1. **`@cursor/sdk@1.0.13` MCP client is the official MCP SDK.** The bundle
+   contains `StreamableHTTP` (primary) + `SSEClientTransport` +
+   `StdioClientTransport`, `mcp-session-id` headers,
+   `Accept: application/json, text/event-stream`, `tools/list`,
+   `tools/call`, `notifications/initialized`. `McpServerConfig` accepts
+   **only** stdio (`command`) or http/sse (`url`) — there is **no
+   in-process object registration**. → The built-in browser MCP server
+   must be a **loopback Streamable-HTTP MCP server** registered via
+   `mcpServers["harness_browser"] = { url: "http://127.0.0.1:<port>/mcp" }`,
+   built on the official `@modelcontextprotocol/sdk` (Milestone 2).
+   New ledger entry **OQ-24** tracks the two behaviors that still need a
+   live `RUN_SDK_SMOKE` confirmation.
+2. **MCP tool names surface as `mcp__<server>__<tool>`.** The SDK bundle
+   contains the literal `t.startsWith("mcp__") … t.split("__")` parser.
+   The normalizer passes `raw.name` through unchanged, so a browser tool
+   appears as e.g. `mcp__harness_browser__browser_navigate`. The
+   `ToolCallCard` icon regex (`/browser|web/`) already maps it to the
+   globe icon. Action-overlay subscription (Milestone 2) must match the
+   tool **suffix**, not a `browser_` prefix.
+3. **The prompt's "in-process MCP bridging via IPC channel
+   `browser:invoke`" framing is corrected.** Because Phase 16 runs
+   Fastify *inside* the Electron main process, the MCP tool handlers call
+   `BrowserController` via an **in-process injection seam** (apps/desktop
+   injects the controller into apps/server at startup, respecting the
+   import direction) — *not* Electron IPC. Electron IPC (`browser:invoke`
+   / `browser:event`) is genuinely needed only for renderer↔main
+   (placeholder rect, manual nav, state + overlay push).
+4. **Action overlay cannot be a renderer DOM layer.** A `WebContentsView`
+   always paints *above* the window's web contents, so the amber-outline
+   overlay (Milestone 2) must be a sibling **transparent
+   `WebContentsView`** layered above the page view, not a DOM div.
+   Documented now to avoid a dead-end implementation later.
+5. **Electron 33.2.1 already ships `WebContentsView`** (added in Electron
+   30) — no version bump needed.
+
+### Milestone 1 — files created
+
+- `packages/shared/src/browser-protocol.ts` — Zod-first protocol for the
+  whole phase: `BrowserId/Rect/State`, `ConsoleMessage`,
+  `NetworkRequest`, `AccessibilityNode` (recursive), `BrowserActionEvent`,
+  the `browser:invoke` request/result + `browser:event` push unions, and
+  the 10 MCP tool input/output schemas (defined now; wired in Milestone 2).
+  Exported from `packages/shared/src/index.ts`.
+- `apps/desktop/src/browser-controller.ts` — main-process owner. One
+  `WebContentsView` per agent on `session.fromPartition('persist:agent-<id>',
+  { cache: true })`; secure `webPreferences` (nodeIntegration:false,
+  contextIsolation:true, sandbox:true, webSecurity:true, no preload);
+  permission/permission-check handlers deny all; downloads blocked;
+  single-tab window-open handler; 500-entry console + network ring
+  buffers; lazy create, position/hide, navigate/back/forward/reload/stop,
+  state snapshot, storage-clearing `destroy`, and `detachWindow` (drop
+  refs on window close *without* clearing storage).
+- `apps/desktop/src/browser-ipc.ts` — `browser:invoke` handler (light
+  discriminant guard; the renderer Zod-validates first) + `browser:event`
+  push forwarding.
+- `apps/web/src/components/browser/{BrowserPane,BrowserUrlBar,BrowserViewPlaceholder,BrowserStatusStrip}.tsx`.
+- `apps/web/src/hooks/{useBrowser,useBrowserViewMount}.ts`.
+- `apps/web/src/components/browser/BrowserUrlBar.test.tsx`,
+  `packages/shared/src/browser-protocol.test.ts`.
+
+### Milestone 1 — files modified
+
+- `apps/desktop/src/main.ts` — instantiate `BrowserController`, attach on
+  window create, detach on close, register browser IPC.
+- `apps/desktop/src/preload.ts` — expose `window.harness.browser.{invoke,onEvent}`.
+- `apps/desktop/package.json` — add `@harness/shared` (type-only;
+  resolution-mode import bridges the CJS↔ESM-only boundary).
+- `apps/web/src/lib/desktop-bridge.ts` — feature-detected `browser` bridge.
+- `apps/web/src/components/shell/RightPane.tsx` — route the Browser tab to
+  `BrowserPane`; narrow the placeholder map to files/terminal.
+- `apps/web/src/components/shell/ToolbarIcons.tsx` — add
+  ArrowLeft/ArrowRight/Reload/Stop icons.
+- `packages/shared/src/index.ts` — browser-protocol barrel exports.
+
+### Milestone 1 — gates
+
+- `pnpm typecheck` — all 5 workspaces clean.
+- `pnpm lint` — clean (token rules + no-useEffect-in-components: all
+  effects live in `hooks/`).
+- `pnpm test` — green: shared 10, web 106 (+4 BrowserUrlBar), server 263,
+  scripts 11, eslint-plugin 6, desktop 0.
+- Desktop build + install to `/Applications` for manual visual
+  verification (the WebContentsView only exists in the running Electron
+  app — it cannot be exercised by jsdom tests).
+
+### Known limitations (Milestone 1)
+
+- **Full-screen modal occlusion.** A native `WebContentsView` paints
+  above the renderer DOM, so a full-screen modal (e.g. NewAgentDialog)
+  opened while the Browser tab is visible would be occluded. The view is
+  hidden when the pane is collapsed (`codeHidden`) but not yet when a
+  modal opens — to be handled in Milestone 2 (hide-on-modal hook).
+- **No console/network drawer or REST polling endpoints yet** (ring
+  buffers exist in the controller; UI + endpoints are Milestone 2).
+- **better-sqlite3 ABI:** the desktop build rebuilds the native binding
+  for Electron's ABI; Node-ABI server tests then need
+  `pnpm rebuild better-sqlite3` to run again (known tension).
 
 ---
 

@@ -6,7 +6,8 @@ import { useUiStore, type RightPanelTab } from "../../state/ui-store.js";
 import { CodeEditPreviewPanel } from "../streaming/CodeEditPreviewPanel.js";
 import { RightPaneTabs } from "./RightTabs.js";
 import { Breadcrumbs } from "./Breadcrumbs.js";
-import { FilesIcon, TerminalIcon, GlobeIcon, type IconProps } from "./ToolbarIcons.js";
+import { FilesIcon, TerminalIcon, type IconProps } from "./ToolbarIcons.js";
+import { BrowserPane } from "../browser/BrowserPane.js";
 
 export interface RightPaneProps {
   activeRunId: string | null;
@@ -24,6 +25,8 @@ export function RightPane({ activeRunId }: RightPaneProps) {
       <RightPaneTabs />
       {rightPanelTab === "diff" ? (
         <DiffSurface activeRunId={activeRunId} />
+      ) : rightPanelTab === "browser" ? (
+        <BrowserPane activeRunId={activeRunId} />
       ) : (
         <PlaceholderSurface tab={rightPanelTab} />
       )}
@@ -56,7 +59,7 @@ function DiffSurface({ activeRunId }: RightPaneProps) {
 }
 
 const PLACEHOLDERS: Record<
-  Exclude<RightPanelTab, "diff">,
+  Exclude<RightPanelTab, "diff" | "browser">,
   { title: string; body: string; Icon: ComponentType<IconProps> }
 > = {
   files: {
@@ -69,14 +72,9 @@ const PLACEHOLDERS: Record<
     body: "An embedded terminal isn't available yet. Agent shell tool calls stream into the chat timeline.",
     Icon: TerminalIcon,
   },
-  browser: {
-    title: "Browser",
-    body: "An in-app browser preview isn't available yet.",
-    Icon: GlobeIcon,
-  },
 };
 
-function PlaceholderSurface({ tab }: { tab: Exclude<RightPanelTab, "diff"> }) {
+function PlaceholderSurface({ tab }: { tab: Exclude<RightPanelTab, "diff" | "browser"> }) {
   const { title, body, Icon } = PLACEHOLDERS[tab];
   return (
     <div className="right-pane__placeholder">

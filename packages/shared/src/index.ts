@@ -268,4 +268,53 @@ export type {
   PerfCountersAPI,
 } from "./perf-counters.js";
 
+// Browser pane protocol (Phase 18): IPC, state/console/network, MCP tools
+export {
+  accessibilityNodeSchema,
+  browserActionEventSchema,
+  browserClickInputSchema,
+  browserClickOutputSchema,
+  browserConsoleMessagesInputSchema,
+  browserConsoleMessagesOutputSchema,
+  browserEvaluateInputSchema,
+  browserEvaluateOutputSchema,
+  browserHistoryOutputSchema,
+  browserIdSchema,
+  browserInvokeRequestSchema,
+  browserInvokeResultSchema,
+  browserNavigateInputSchema,
+  browserNavigateOutputSchema,
+  browserNetworkRequestsInputSchema,
+  browserNetworkRequestsOutputSchema,
+  browserPushEventSchema,
+  browserRectSchema,
+  browserScreenshotInputSchema,
+  browserScreenshotOutputSchema,
+  browserSnapshotInputSchema,
+  browserSnapshotOutputSchema,
+  browserStateSchema,
+  browserTypeInputSchema,
+  browserTypeOutputSchema,
+  browserWaitForInputSchema,
+  browserWaitForOutputSchema,
+  consoleLevelSchema,
+  consoleMessageSchema,
+  networkRequestSchema,
+  waitConditionSchema,
+} from "./browser-protocol.js";
+export type {
+  AccessibilityNode,
+  BrowserActionEvent,
+  BrowserId,
+  BrowserInvokeRequest,
+  BrowserInvokeResult,
+  BrowserPushEvent,
+  BrowserRect,
+  BrowserState,
+  ConsoleLevel,
+  ConsoleMessage,
+  NetworkRequest,
+  WaitCondition,
+} from "./browser-protocol.js";
+
 export const HARNESS_VERSION = "0.0.0" as const;

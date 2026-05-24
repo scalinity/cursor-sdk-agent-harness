@@ -4,6 +4,8 @@ import { registerDialogHandlers } from "./dialogs.js";
 import { buildAppMenu } from "./menu.js";
 import { registerAppProtocol } from "./app-protocol.js";
 import { loadWindowState, saveWindowState } from "./window-state.js";
+import { BrowserController } from "./browser-controller.js";
+import { registerBrowserIpc } from "./browser-ipc.js";
 
 // Register `app://` as a STANDARD, secure, fetch/CORS-capable scheme BEFORE
 // app ready. Without `standard: true`, Chromium serializes the renderer's
@@ -25,6 +27,9 @@ protocol.registerSchemesAsPrivileged([
 
 let mainWindow: BrowserWindow | null = null;
 let serverClose: (() => Promise<void>) | null = null;
+// Owns the embedded Chromium views (one isolated session per agent). Created
+// once; the host window is (re)attached on each window creation.
+const browserController = new BrowserController();
 // Resolved origin of the embedded server (e.g. http://127.0.0.1:4783). Passed
 // to the renderer via preload so the app://harness renderer can reach the
 // API/WS cross-origin. Null until the server starts (or if it fails to).
@@ -83,6 +88,7 @@ function createWindow(): void {
   if (state.x !== undefined) opts.x = state.x;
   if (state.y !== undefined) opts.y = state.y;
   mainWindow = new BrowserWindow(opts);
+  browserController.attach(mainWindow);
 
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();
@@ -106,6 +112,7 @@ function createWindow(): void {
   mainWindow.on("unmaximize", persistState);
 
   mainWindow.on("closed", () => {
+    browserController.detachWindow();
     mainWindow = null;
   });
 
@@ -126,6 +133,7 @@ async function onReady(): Promise<void> {
     : join((process as NodeJS.Process & { resourcesPath: string }).resourcesPath, "renderer");
   registerAppProtocol(rendererRoot);
   registerDialogHandlers();
+  registerBrowserIpc(browserController, () => mainWindow);
 
   if (isDev && process.platform === "darwin" && app.dock) {
     // Packaged builds get the dock icon from the bundle's .icns; in dev we
