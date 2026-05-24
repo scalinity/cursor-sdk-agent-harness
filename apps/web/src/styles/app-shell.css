@@ -357,6 +357,28 @@ body,
   color: var(--color-text-inverse);
 }
 
+.center-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 18px 22px 4px;
+  scrollbar-color: var(--color-surface-3) transparent;
+  scrollbar-width: thin;
+}
+.center-scroll::-webkit-scrollbar,
+.editor-area::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.center-scroll::-webkit-scrollbar-thumb,
+.editor-area::-webkit-scrollbar-thumb {
+  background: var(--color-surface-3);
+  border-radius: 4px;
+}
+.center-scroll::-webkit-scrollbar-track,
+.editor-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 /* ---- Composer ---- */
 .composer {
   border-top: 1px solid var(--color-border-subtle);
