@@ -1,7 +1,6 @@
 import type { AgentSummary, RunSummary, SdkImage } from "@harness/shared";
 import { useRunStore } from "../../state/run-store.js";
 import { useUiStore } from "../../state/ui-store.js";
-import { CenterHeader } from "./CenterHeader.js";
 import { EventTimeline } from "./EventTimeline.js";
 import { Composer } from "./Composer.js";
 import { ConnectionBanner } from "./ConnectionBanner.js";
@@ -38,13 +37,10 @@ export function CenterPane({
   onApprovalResolve,
   cancelUnavailable,
 }: CenterPaneProps) {
-  // Counts are maintained incrementally in the store (RV2-S4) so we read
-  // them directly instead of scanning the seqList per render.
+  // eventCount drives heroMode (empty-state) detection; maintained incrementally
+  // in the store (RV2-S4) so we read it directly instead of scanning seqList.
   const eventCount = useRunStore((s) =>
     activeRunId ? (s.eventsByRunId[activeRunId]?.seqList.length ?? 0) : 0,
-  );
-  const toolCallCount = useRunStore((s) =>
-    activeRunId ? (s.eventsByRunId[activeRunId]?.toolCallCount ?? 0) : 0,
   );
   // Hero "new session" mode: when the right pane is collapsed and there is no
   // active run / no events yet, present the composer centered (Cursor's
@@ -55,12 +51,6 @@ export function CenterPane({
   if (heroMode) {
     return (
       <main className="center-pane">
-        <CenterHeader
-          activeAgent={activeAgent}
-          activeRun={activeRun}
-          toolCallCount={toolCallCount}
-          eventCount={eventCount}
-        />
         <div className="center-hero">
           <Composer activeAgent={activeAgent} onSubmit={onSubmit} heroMode />
         </div>
@@ -70,12 +60,6 @@ export function CenterPane({
 
   return (
     <main className="center-pane">
-      <CenterHeader
-        activeAgent={activeAgent}
-        activeRun={activeRun}
-        toolCallCount={toolCallCount}
-        eventCount={eventCount}
-      />
       <div className="center-scroll">
         <ConnectionBanner connectionState={connectionState} />
         {cancelUnavailable ? (

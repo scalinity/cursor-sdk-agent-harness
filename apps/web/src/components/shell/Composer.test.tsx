@@ -140,6 +140,18 @@ describe("Composer", () => {
     expect(sendButton().disabled).toBe(false);
   });
 
+  it("renders the icon Send button and a mic dictation button", () => {
+    render(<Composer activeAgent={fixtureAgent()} onSubmit={vi.fn()} />);
+    // Send is now an icon button but keeps its accessible name.
+    const send = screen.getByRole("button", { name: /send/i });
+    expect(send.className).toContain("composer-send");
+    // A mic button sits beside it. Voice APIs are absent under jsdom, so it is
+    // present-but-disabled rather than missing.
+    const mic = screen.getByRole("button", { name: /record voice input/i }) as HTMLButtonElement;
+    expect(mic.className).toContain("composer-mic");
+    expect(mic.disabled).toBe(true);
+  });
+
   it("R17-W6: caps image attachments at 16 and warns on overflow", async () => {
     const { container } = render(<Composer activeAgent={fixtureAgent()} onSubmit={vi.fn()} />);
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;

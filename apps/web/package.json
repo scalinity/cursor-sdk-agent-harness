@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@harness/shared": "workspace:*",
+    "@huggingface/transformers": "4.2.0",
     "@lezer/common": "1.5.2",
     "@lezer/highlight": "1.2.3",
     "@lezer/javascript": "1.5.4",

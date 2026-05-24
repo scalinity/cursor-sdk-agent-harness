@@ -1,4 +1,6 @@
-import type { AgentSummary, RunSummary } from "@harness/shared";
+import { MODEL_LABELS, type AgentSummary, type RunSummary } from "@harness/shared";
+import { useUiStore } from "../../state/ui-store.js";
+import { describeModel } from "../../lib/model-label.js";
 
 export interface CenterHeaderProps {
   activeAgent: AgentSummary | null;
@@ -13,7 +15,14 @@ export function CenterHeader({
   toolCallCount,
   eventCount,
 }: CenterHeaderProps) {
-  const title = activeRun?.promptPreview || activeAgent?.name || "No agent selected";
+  // The model is a standing user choice in the composer, independent of whether
+  // the auto-provisioned agent has landed yet — so show the selected model even
+  // before `activeAgent` exists (cold start) rather than "no model".
+  const selectedModelId = useUiStore((s) => s.selectedModelId);
+  const modelLabel = activeAgent
+    ? describeModel(activeAgent).modelLabel
+    : MODEL_LABELS[selectedModelId];
+  const title = activeRun?.promptPreview || "New Chat";
   return (
     <div className="center-head">
       <div className="min-w-0 truncate text-base font-semibold">{title}</div>
@@ -30,7 +39,7 @@ export function CenterHeader({
           {eventCount} events
         </span>
         <span className="inline-flex h-control-sm items-center gap-1.5 rounded-sm px-2 text-xs text-text-secondary">
-          {activeAgent ? activeAgent.modelId : "no model"}
+          {modelLabel}
         </span>
       </div>
     </div>

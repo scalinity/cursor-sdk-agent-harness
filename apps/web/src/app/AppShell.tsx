@@ -28,7 +28,8 @@ import { Toaster } from "../components/shell/Toaster.js";
 import { NewAgentDialog } from "../components/agents/NewAgentDialog.js";
 import { WorkspaceRequiredModal } from "../components/workspace/WorkspaceRequiredModal.js";
 import { cn } from "../lib/cn.js";
-import type { SdkImage } from "@harness/shared";
+import { MODEL_LABELS, type SdkImage } from "@harness/shared";
+import { describeModel } from "../lib/model-label.js";
 
 export function AppShell() {
   const csrf = useCsrfToken();
@@ -199,7 +200,7 @@ export function AppShell() {
           />
         ) : null}
         <Titlebar
-          onNewAgent={() => setNewAgentOpen(true)}
+          onNewSession={newSession}
           {...(activeRunId && activeRunCancellable
             ? { onCancelRun: () => cancelRun(activeRunId) }
             : {})}
@@ -208,7 +209,6 @@ export function AppShell() {
           runs={runs}
           activeRunId={activeRunId}
           onSelectRun={setActiveRunId}
-          onNewAgent={() => setNewAgentOpen(true)}
           onPickWorkspace={() => void workspacePicker.pick()}
           onNewSession={newSession}
           onDeleteRun={onDeleteRun}
@@ -225,7 +225,9 @@ export function AppShell() {
         <RightPane activeRunId={activeRunId} />
         <Statusbar
           connectionState={connectionState}
-          modelLabel={activeAgent?.modelId ?? null}
+          modelLabel={
+            activeAgent ? describeModel(activeAgent).modelLabel : MODEL_LABELS[selectedModelId]
+          }
           runningRunId={activeRunId}
           workspaceName={activeWorkspace.workspace?.label ?? activeWorkspace.workspace?.path ?? null}
         />

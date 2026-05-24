@@ -167,3 +167,55 @@ export function StopIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Home — the default workspace (the user's home directory). */
+export function HomeIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...SVG_PROPS}>
+      <path d="M3 10.5 12 3l9 7.5" />
+      <path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5" />
+      <path d="M9 21v-6h6v6" />
+    </svg>
+  );
+}
+
+/** Check — marks the active item in a menu. */
+export function CheckIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...SVG_PROPS}>
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
+/** Monitor — the "Local" run target indicator. */
+export function MonitorIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...SVG_PROPS}>
+      <rect width="20" height="14" x="2" y="3" rx="2" />
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
+    </svg>
+  );
+}
+
+/** Arrow-up — the composer's circular send affordance. */
+export function ArrowUpIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...SVG_PROPS}>
+      <path d="m5 12 7-7 7 7" />
+      <path d="M12 19V5" />
+    </svg>
+  );
+}
+
+/** Microphone — voice dictation toggle in the composer. */
+export function MicIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...SVG_PROPS}>
+      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <path d="M12 19v3" />
+    </svg>
+  );
+}

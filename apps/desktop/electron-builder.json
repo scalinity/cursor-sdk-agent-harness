@@ -22,6 +22,9 @@
     "hardenedRuntime": true,
     "icon": "build/icon.icns",
     "entitlements": "build/entitlements.mac.plist",
-    "entitlementsInherit": "build/entitlements.mac.plist"
+    "entitlementsInherit": "build/entitlements.mac.plist",
+    "extendInfo": {
+      "NSMicrophoneUsageDescription": "Voice dictation transcribes your speech into the composer locally, on your machine."
+    }
   }
 }
