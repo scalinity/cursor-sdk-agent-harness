@@ -492,6 +492,65 @@ body,
   opacity: 0.5;
   cursor: default;
 }
+.composer-mic {
+  display: grid;
+  place-items: center;
+  width: var(--height-control-md);
+  height: var(--height-control-md);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  flex: none;
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+.composer-mic:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-surface-2);
+}
+.composer-mic:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.composer-mic.composer-mic--recording {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  animation: composer-mic-pulse calc(var(--duration-slow) * 4) var(--ease-standard) infinite;
+}
+@keyframes composer-mic-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+.composer-send {
+  display: grid;
+  place-items: center;
+  width: var(--height-control-md);
+  height: var(--height-control-md);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--color-text-primary);
+  color: var(--color-background);
+  cursor: pointer;
+  flex: none;
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+.composer-send:hover:not(:disabled) {
+  background: var(--color-text-secondary);
+}
+.composer-send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.composer-stt-status {
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .composer-hero-hint {
   display: inline-flex;
   align-items: center;

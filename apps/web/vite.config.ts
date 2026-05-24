@@ -8,6 +8,12 @@ const SERVER_ORIGIN = `http://${SERVER_HOST}:${SERVER_PORT}`;
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Whisper STT runs in a dedicated ES-module worker (whisper-worker.ts).
+  worker: { format: "es" },
+  // `@huggingface/transformers` pulls in onnxruntime-web, which references its
+  // own WASM via import.meta.url and breaks Vite's dep pre-bundling. Exclude it
+  // so it's loaded as-is (only ever imported from the lazily-spawned worker).
+  optimizeDeps: { exclude: ["@huggingface/transformers"] },
   server: {
     host: "127.0.0.1",
     port: 5173,

@@ -7,9 +7,10 @@ import {
 } from "@harness/shared";
 import { useUiStore } from "../../state/ui-store.js";
 import { useErrorReporter } from "../../hooks/useErrorReporter.js";
+import { useSpeechToText } from "../../hooks/useSpeechToText.js";
 import { cn } from "../../lib/cn.js";
 import { Select, type SelectOption } from "../ui/Select.js";
-import { PlusIcon, XIcon } from "./ToolbarIcons.js";
+import { ArrowUpIcon, MicIcon, PlusIcon, SparkIcon, XIcon } from "./ToolbarIcons.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import {
   attachmentImages,
@@ -46,6 +47,20 @@ export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerPr
   const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { report } = useErrorReporter("composer");
+
+  // Voice dictation. The transcript is appended to whatever the user has
+  // already typed (read from the store at completion time, not from a stale
+  // closure) so dictating mid-draft never clobbers existing text.
+  const speech = useSpeechToText({
+    onTranscript: useCallback(
+      (text: string) => {
+        const current = useUiStore.getState().composerDraft;
+        const next = current.trim().length > 0 ? `${current.trimEnd()} ${text}` : text;
+        setDraft(next);
+      },
+      [setDraft],
+    ),
+  });
 
   // The coding agent is auto-provisioned for the active workspace + selected
   // model (see useEnsureDefaultAgent). "Ready" means that provisioning has
@@ -239,18 +254,48 @@ export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerPr
             placement="top"
             ariaLabel="Model"
             title="Model used for new runs. Switching it re-targets the coding agent."
-            className="h-control-md rounded-md border border-border-subtle bg-surface-2 px-2 text-md font-medium text-text-primary"
-            leading={<span className="size-2 rounded-full bg-accent-primary" aria-hidden="true" />}
+            className="h-control-md gap-1 rounded-md px-1 text-md font-medium text-text-tertiary hover:text-text-primary"
+            leading={<SparkIcon className="size-3.5 shrink-0" />}
           />
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            {speech.status !== "idle" && speech.status !== "recording" ? (
+              <span className="composer-stt-status" aria-live="polite">
+                {speech.modelProgress !== null
+                  ? `Loading voice model… ${speech.modelProgress}%`
+                  : "Transcribing…"}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              onClick={speech.toggle}
+              disabled={
+                busy ||
+                !speech.supported ||
+                speech.status === "requesting" ||
+                speech.status === "transcribing"
+              }
+              aria-pressed={speech.isRecording}
+              aria-label={speech.isRecording ? "Stop recording" : "Record voice input"}
+              title={
+                speech.supported
+                  ? speech.isRecording
+                    ? "Stop recording"
+                    : "Dictate with your microphone"
+                  : "Voice input isn't available here"
+              }
+              className={cn("composer-mic", speech.isRecording && "composer-mic--recording")}
+            >
+              <MicIcon className="size-4" />
+            </button>
             <button
               type="button"
               onClick={() => void submit()}
               disabled={!canSend}
-              title={ready ? undefined : "Preparing the coding agent…"}
-              className="inline-flex h-control-sm items-center gap-1.5 rounded-sm border-0 bg-accent-primary px-2.5 text-sm font-semibold text-text-inverse disabled:opacity-50"
+              aria-label="Send"
+              title={ready ? "Send" : "Preparing the coding agent…"}
+              className="composer-send"
             >
-              {busy ? "Sending…" : "Send"}
+              <ArrowUpIcon className="size-4" />
             </button>
           </div>
         </div>
