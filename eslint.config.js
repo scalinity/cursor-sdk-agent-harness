@@ -17,6 +17,7 @@ export default [
       "**/node_modules/**",
       "**/.pnpm-store/**",
       "**/.claude/**",
+      "**/.gyp-venv/**",
       "docs/mockup-rendered.html",
       "docs/mockup-design-dna.html",
     ],

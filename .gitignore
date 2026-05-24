@@ -53,3 +53,6 @@ phase*-*.png
 # Temporary
 .tmp/
 *.tmp
+
+# node-gyp build venv (provisioned by apps/desktop/scripts/package-mac.mjs)
+.gyp-venv/
