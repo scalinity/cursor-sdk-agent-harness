@@ -108,7 +108,9 @@ pnpm format           # prettier
 
 A phase is not complete until `pnpm typecheck && pnpm lint && pnpm test` all pass.
 
-**Desktop install (rule, not suggestion).** Every time you run `pnpm build:desktop`, immediately follow it by replacing the copy in `/Applications/` so the user can launch from Finder/Dock without re-running a dev command. The `.app` is gitignored and regenerated on each build; the user expects `/Applications/Cursor SDK Agent Harness.app` to be the latest.
+**Desktop install (rule, not suggestion).** When you finish a change that affects desktop runtime behavior (anything in `apps/server`, `apps/web`, `apps/desktop`, `packages/shared`), **you run the build + install yourself** — do not stop with "here's the command, please run it". The user expects `/Applications/Cursor SDK Agent Harness.app` to be the latest after every server/web/desktop change. The `.app` is gitignored and regenerated on each build.
+
+Run this exact pipeline (one Bash call so the steps chain on success):
 
 ```bash
 pnpm build:desktop \
@@ -117,7 +119,9 @@ pnpm build:desktop \
   && mv "apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app" /Applications/
 ```
 
-The DMG step inside `pnpm build:desktop` may fail with `hdiutil` exit 1 on recent macOS (APFS quirk) — ignore it; the `.app` is the deliverable. Don't propose a "fix" for the DMG failure unless the user asks; the DMG isn't used.
+`pnpm build:desktop` typically takes a few minutes — give the Bash call a generous timeout (≥10 min). The DMG step inside it may fail with `hdiutil` exit 1 on recent macOS (APFS quirk) — ignore it; the `.app` is the deliverable. Don't propose a "fix" for the DMG failure unless the user asks; the DMG isn't used. After the pipeline succeeds, briefly confirm the new `/Applications/Cursor SDK Agent Harness.app` mtime so the user knows the install landed.
+
+Skip this only when the change is server-tests-only or docs-only (nothing user-visible in the running app).
 
 ## SDK ground truth lives in the ledger
 
