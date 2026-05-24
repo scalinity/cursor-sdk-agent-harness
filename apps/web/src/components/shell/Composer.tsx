@@ -89,7 +89,22 @@ export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerPr
     async (files: FileList | File[]) => {
       const list = Array.from(files);
       if (list.length === 0) return;
-      const converted = await Promise.all(list.map(fileToAttachment));
+      // allSettled (R17-W3): a single unreadable file (FileReader error on a
+      // corrupt/locked file) must not reject the whole batch and surface as an
+      // unhandled rejection — keep the readable ones, toast the failures.
+      const results = await Promise.allSettled(list.map(fileToAttachment));
+      const converted: ComposerAttachment[] = [];
+      let failures = 0;
+      for (const r of results) {
+        if (r.status === "fulfilled") converted.push(r.value);
+        else failures += 1;
+      }
+      if (failures > 0) {
+        report(`Couldn't read ${failures} file${failures === 1 ? "" : "s"}.`, {
+          severity: "warn",
+        });
+      }
+      if (converted.length === 0) return;
       setAttachments((prev) => {
         const merged = [...prev, ...converted];
         // Cap image attachments at the SDK-aligned max; file refs are unbounded.
