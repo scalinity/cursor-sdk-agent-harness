@@ -91,6 +91,9 @@ export function attachmentImages(attachments: ReadonlyArray<ComposerAttachment>)
 export function fileReferenceText(attachments: ReadonlyArray<ComposerAttachment>): string {
   const files = attachments.filter((a): a is FileAttachment => a.kind === "file");
   if (files.length === 0) return "";
-  const lines = files.map((f) => `- ${f.path ?? f.name}`);
+  // R17-S2: filenames/paths are untrusted-by-convention (a user can drop a
+  // file named to inject prompt content). Collapse CR/LF so a multi-line
+  // filename can't add extra prompt lines.
+  const lines = files.map((f) => `- ${(f.path ?? f.name).replace(/[\r\n]+/g, " ")}`);
   return `\n\nAttached files:\n${lines.join("\n")}`;
 }
