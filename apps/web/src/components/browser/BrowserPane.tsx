@@ -11,27 +11,31 @@ export interface BrowserPaneProps {
 }
 
 /**
- * Right-pane "Browser" surface. Resolves the owning agent from the active run
- * (one isolated browser session per agent) and drives the native
- * `WebContentsView` through `useBrowser`. The view is hidden when the pane is
- * collapsed (`codeHidden`) so the native layer never paints over the rest of
- * the shell.
+ * Standalone browser session id used when no agent is active, so the Browser
+ * tab works like a normal browser without requiring an agent first. When an
+ * agent IS active, the pane uses that agent's id, keeping agent-driven sessions
+ * isolated per agent (spec §10).
+ */
+const MANUAL_BROWSER_ID = "manual";
+
+/**
+ * Right-pane "Browser" surface — a fully usable browser. It binds to the active
+ * run's agent when there is one (so agent-driven browsing shows here and each
+ * agent's session stays isolated), and otherwise falls back to a standalone
+ * `manual` session so you can just type a URL and browse. The native
+ * `WebContentsView` is hidden when the pane is collapsed (`codeHidden`).
  */
 export function BrowserPane({ activeRunId }: BrowserPaneProps) {
   const agentId = useRunStore((s) =>
     activeRunId ? (s.byId[activeRunId]?.agentId ?? null) : null,
   );
   const codeHidden = useUiStore((s) => s.codeHidden);
-  const browser = useBrowser(agentId);
+  const browserId = agentId ?? MANUAL_BROWSER_ID;
+  const browser = useBrowser(browserId);
 
   if (!browser.isDesktop) {
     return (
       <BrowserEmpty body="The embedded browser is only available in the desktop app." />
-    );
-  }
-  if (!agentId) {
-    return (
-      <BrowserEmpty body="Start or select an agent to drive its isolated browser session." />
     );
   }
 
@@ -46,11 +50,11 @@ export function BrowserPane({ activeRunId }: BrowserPaneProps) {
         onStop={browser.stop}
       />
       <div className="browser-pane__viewport">
-        <BrowserViewPlaceholder agentId={agentId} active={!codeHidden} />
+        <BrowserViewPlaceholder agentId={browserId} active={!codeHidden} />
         {!browser.state.exists ? (
           <div className="browser-pane__hint">
             <GlobeIcon className="size-7" />
-            <p>Enter a URL above to start browsing in this agent&apos;s isolated session.</p>
+            <p>Enter a URL above to start browsing.</p>
           </div>
         ) : null}
       </div>
