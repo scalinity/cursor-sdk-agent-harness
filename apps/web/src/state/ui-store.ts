@@ -8,7 +8,7 @@
  *   - A simple toast queue (used by `useErrorReporter`) with per-toast TTL
  */
 import { create } from "zustand";
-import type { ReplaySpeed } from "@harness/shared";
+import type { ReplaySpeed, WorkspaceAllowlistRow } from "@harness/shared";
 
 export type ConnectionState =
   | "idle"
@@ -49,6 +49,16 @@ export interface UiState {
    * and IDs never collide across mounted instances.
    */
   toastCounter: number;
+  /**
+   * Active-workspace selection. Lives in the store (not per-hook useState)
+   * because multiple consumers — AppShell for modal gating, the picker for
+   * setActive, Statusbar for the label — must observe the same value or the
+   * picker's update never reaches the gate and the modal stays up.
+   */
+  activeWorkspace: WorkspaceAllowlistRow | null;
+  activeWorkspaceId: string | null;
+  activeWorkspaceLoading: boolean;
+  activeWorkspaceError: string | null;
 
   setCodeHidden: (hidden: boolean) => void;
   toggleCodeHidden: () => void;
@@ -61,6 +71,12 @@ export interface UiState {
   pushToast: (toast: Omit<Toast, "id" | "createdAt" | "expiresAt"> & { ttlMs?: number | null }) => void;
   dismissToast: (id: string) => void;
   sweepExpiredToasts: (now?: number) => void;
+  setActiveWorkspaceData: (data: {
+    workspace: WorkspaceAllowlistRow | null;
+    activeWorkspaceId: string | null;
+  }) => void;
+  setActiveWorkspaceLoading: (loading: boolean) => void;
+  setActiveWorkspaceError: (error: string | null) => void;
 }
 
 const CODE_HIDDEN_STORAGE_KEY = "harness:codeHidden";
@@ -93,6 +109,12 @@ export const useUiStore = create<UiState>((set) => ({
   selectedCodeEditEventByRunId: {},
   toasts: [],
   toastCounter: 0,
+  activeWorkspace: null,
+  activeWorkspaceId: null,
+  // Starts true so AppShell doesn't briefly render the workspace-required
+  // modal during the cold-start GET before the server has answered.
+  activeWorkspaceLoading: true,
+  activeWorkspaceError: null,
 
   setCodeHidden: (hidden) => {
     persistCodeHidden(hidden);
@@ -150,4 +172,8 @@ export const useUiStore = create<UiState>((set) => ({
       if (survivors.length === s.toasts.length) return s;
       return { toasts: survivors };
     }),
+  setActiveWorkspaceData: ({ workspace, activeWorkspaceId }) =>
+    set({ activeWorkspace: workspace, activeWorkspaceId }),
+  setActiveWorkspaceLoading: (loading) => set({ activeWorkspaceLoading: loading }),
+  setActiveWorkspaceError: (error) => set({ activeWorkspaceError: error }),
 }));
