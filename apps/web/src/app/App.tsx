@@ -33,6 +33,11 @@ const Subagents = lazy(async () => {
   return { default: module.Subagents };
 });
 
+const Settings = lazy(async () => {
+  const module = await import("../pages/Settings.js");
+  return { default: module.Settings };
+});
+
 export function App() {
   return (
     <Routes>
@@ -60,6 +65,14 @@ export function App() {
         element={
           <Suspense fallback={null}>
             <Usage />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/settings"
+        element={
+          <Suspense fallback={null}>
+            <Settings />
           </Suspense>
         }
       />

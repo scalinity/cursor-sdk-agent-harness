@@ -20,7 +20,6 @@ import { useGitStatus } from "../hooks/useGitStatus.js";
 import { useRulesCount } from "../hooks/useRulesCount.js";
 import { useUiStore } from "../state/ui-store.js";
 import { useRunStore } from "../state/run-store.js";
-import { useAgentStore } from "../state/agent-store.js";
 import { Titlebar } from "../components/shell/Titlebar.js";
 import { SessionsRail } from "../components/shell/SessionsRail.js";
 import { CenterPane } from "../components/shell/CenterPane.js";
@@ -31,9 +30,8 @@ import { Toaster } from "../components/shell/Toaster.js";
 import { NewAgentDialog } from "../components/agents/NewAgentDialog.js";
 import { WorkspaceRequiredModal } from "../components/workspace/WorkspaceRequiredModal.js";
 import { cn } from "../lib/cn.js";
-import { MODEL_LABELS, type ContextMention, type ExecutionMode, type SdkImage } from "@harness/shared";
+import { MODEL_LABELS, type ContextMention, type SdkImage } from "@harness/shared";
 import { describeModel } from "../lib/model-label.js";
-import { mutatingRequest } from "../lib/http-client.js";
 
 export function AppShell() {
   const csrf = useCsrfToken();
@@ -109,22 +107,6 @@ export function AppShell() {
     setComposerDraft("");
   }, [setActiveRunId, setComposerDraft]);
 
-  const onExecutionModeChange = useCallback(
-    (mode: ExecutionMode) => {
-      if (!activeAgent) return;
-      // Optimistic update: the agent-store is hydrated from the server
-      // response on reload, but we want instant UI feedback.
-      useAgentStore.getState().upsertAgent({ ...activeAgent, executionMode: mode });
-      void mutatingRequest(`/api/agents/${activeAgent.id}`, {
-        method: "PATCH",
-        body: { executionMode: mode },
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken: () => csrf.refresh(),
-      });
-    },
-    [activeAgent, csrf],
-  );
-
   const onRenameRun = useCallback(
     (_runId: string, _name: string) => {
       void reloadRuns();
@@ -166,7 +148,7 @@ export function AppShell() {
     "menu:new-session": newSession,
     "menu:open-workspace": () => void workspacePicker.pick(),
     "menu:toggle-code-pane": () => toggleCodeHidden(),
-    "menu:preferences": () => navigate("/settings/mcp-servers"),
+    "menu:preferences": () => navigate("/settings"),
   });
 
   useKeyboardShortcuts(
@@ -257,8 +239,6 @@ export function AppShell() {
           onSubmit={onSubmit}
           onApprovalResolve={onApprovalResolve}
           cancelUnavailable={cancelUnavailable}
-          executionMode={activeAgent?.executionMode}
-          onExecutionModeChange={onExecutionModeChange}
         />
         <RightPane activeRunId={activeRunId} />
         <Statusbar
