@@ -1,8 +1,11 @@
 import { useCallback, useState } from "react";
-import type {
-  AddProviderRequest,
-  ModelProviderSummary,
-  TestProviderResponse,
+import {
+  listProvidersResponseSchema,
+  modelProviderSummarySchema,
+  testProviderResponseSchema,
+  type AddProviderRequest,
+  type ModelProviderSummary,
+  type TestProviderResponse,
 } from "@harness/shared";
 import { httpRequest } from "../lib/http-client.js";
 import { useMutatingRequest } from "./useMutatingRequest.js";
@@ -27,8 +30,10 @@ export function useProviders(): UseProvidersResult {
 
   const load = useCallback(async () => {
     try {
-      const data = await httpRequest("/api/providers");
-      setProviders((data as { items: ModelProviderSummary[] }).items);
+      const data = await httpRequest("/api/providers", {
+        responseSchema: listProvidersResponseSchema,
+      });
+      setProviders(data.items);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load providers");
@@ -43,8 +48,11 @@ export function useProviders(): UseProvidersResult {
 
   const addProvider = useCallback(
     async (req: AddProviderRequest): Promise<ModelProviderSummary> => {
-      const data = await mutate("/api/providers", { method: "POST", body: req });
-      const created = data as unknown as ModelProviderSummary;
+      const created = await mutate("/api/providers", {
+        method: "POST",
+        body: req,
+        responseSchema: modelProviderSummarySchema,
+      });
       setProviders((prev) => [...prev, created]);
       return created;
     },
@@ -61,8 +69,10 @@ export function useProviders(): UseProvidersResult {
 
   const testProvider = useCallback(
     async (id: string): Promise<TestProviderResponse> => {
-      const data = await mutate(`/api/providers/${id}/test`, { method: "POST" });
-      return data as unknown as TestProviderResponse;
+      return mutate(`/api/providers/${id}/test`, {
+        method: "POST",
+        responseSchema: testProviderResponseSchema,
+      });
     },
     [mutate],
   );

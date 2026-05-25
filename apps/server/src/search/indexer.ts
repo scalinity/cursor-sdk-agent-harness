@@ -154,6 +154,9 @@ export class WorkspaceIndexer {
     for (let i = 0; i < chunks.length; i += EMBED_BATCH_SIZE) {
       const batch = chunks.slice(i, i + EMBED_BATCH_SIZE);
       const vectors = await this.deps.embedder.embedBatch(batch.map((c) => c.content));
+      // P23-W5: WASM embedding is synchronous CPU work; yield between batches
+      // so a large file can't monopolize the single-threaded event loop.
+      await yieldToLoop();
       for (let j = 0; j < batch.length; j++) {
         const chunk = batch[j];
         const vec = vectors[j];

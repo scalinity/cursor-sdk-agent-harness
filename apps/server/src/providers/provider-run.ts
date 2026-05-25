@@ -172,6 +172,12 @@ export class ProviderRunController implements CancelableRun {
             (usage.outputTokens / 1_000_000) * this.init.pricing.outputPerMillionMicros,
         )
       : null;
+    // P23-W8: provider-reported token counts are a verified final-result
+    // extraction (not a local estimate), so `sdk_final_result` is the closest
+    // honest discriminator. A dedicated `provider_reported` value was
+    // considered but rejected: the runs.usage_source CHECK constraint
+    // (migration 0001) would require a full SQLite table rebuild — including
+    // the runs_fts triggers + indexes — which is disproportionate to a label.
     return {
       input_tokens: usage.inputTokens,
       output_tokens: usage.outputTokens,

@@ -31,8 +31,7 @@ import { Toaster } from "../components/shell/Toaster.js";
 import { NewAgentDialog } from "../components/agents/NewAgentDialog.js";
 import { WorkspaceRequiredModal } from "../components/workspace/WorkspaceRequiredModal.js";
 import { cn } from "../lib/cn.js";
-import { MODEL_LABELS, type ContextMention, type SdkImage } from "@harness/shared";
-import { describeModel } from "../lib/model-label.js";
+import { formatModelLabel, type ContextMention, type SdkImage } from "@harness/shared";
 
 export function AppShell() {
   const csrf = useCsrfToken();
@@ -245,13 +244,7 @@ export function AppShell() {
         <RightPane activeRunId={activeRunId} />
         <Statusbar
           connectionState={connectionState}
-          modelLabel={
-            activeAgent
-              ? describeModel(activeAgent).modelLabel
-              : selectedModelId === "auto"
-                ? "Auto"
-                : ((MODEL_LABELS as Record<string, string>)[selectedModelId] ?? selectedModelId)
-          }
+          modelLabel={formatModelLabel(activeAgent ? activeAgent.modelId : selectedModelId)}
           runningRunId={activeRunId}
           workspaceName={activeWorkspace.workspace?.label ?? activeWorkspace.workspace?.path ?? null}
           gitStatus={gitStatus}

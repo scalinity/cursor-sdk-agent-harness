@@ -25,6 +25,20 @@ export const AUTO_MODEL_ID = "auto" as const;
 export const unifiedModelIdSchema = z.string().min(1).max(200);
 export type UnifiedModelId = z.infer<typeof unifiedModelIdSchema>;
 
+/**
+ * P23-W9: single source of truth for rendering a unified model id as a label.
+ * `auto` → "Auto"; a known Cursor enum → its friendly label; a provider id
+ * `{providerId}:{model}` → the model part. Used by the composer, statusbar,
+ * and default-agent naming so they never diverge.
+ */
+export function formatModelLabel(modelId: string): string {
+  if (modelId === AUTO_MODEL_ID) return "Auto";
+  const known = (MODEL_LABELS as Record<string, string>)[modelId];
+  if (known) return known;
+  const colon = modelId.indexOf(":");
+  return colon > 0 ? modelId.slice(colon + 1) : modelId;
+}
+
 export const settingSourceSchema = z.enum([
   "project",
   "user",

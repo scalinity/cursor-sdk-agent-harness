@@ -25,9 +25,9 @@
  */
 import { useCallback, useEffect, useRef } from "react";
 import {
+  formatModelLabel,
   listMcpServersResponseSchema,
   listSubagentsResponseSchema,
-  MODEL_LABELS,
   type AgentSummary,
   type CreateAgentRequest,
 } from "@harness/shared";
@@ -36,17 +36,8 @@ import { useErrorReporter } from "./useErrorReporter.js";
 
 const DEFAULT_AGENT_MAP_KEY = "harness:defaultAgentIds";
 
-function modelLabel(modelId: string): string {
-  if (modelId === "auto") return "Auto";
-  const known = (MODEL_LABELS as Record<string, string>)[modelId];
-  if (known) return known;
-  // Provider-qualified id `{providerId}:{model}` → show the model part.
-  const colon = modelId.indexOf(":");
-  return colon > 0 ? modelId.slice(colon + 1) : modelId;
-}
-
 function defaultAgentName(modelId: string): string {
-  return `Coding Agent (${modelLabel(modelId)})`;
+  return `Coding Agent (${formatModelLabel(modelId)})`;
 }
 
 function readDefaultAgentMap(): Record<string, string> {

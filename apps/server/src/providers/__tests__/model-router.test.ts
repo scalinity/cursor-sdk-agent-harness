@@ -91,3 +91,40 @@ describe("ModelRouter.listUnifiedModels", () => {
     expect(openai.map((m) => m.id)).toContain(`${p.id}:gpt-5`);
   });
 });
+
+describe("ModelRouter.resolve", () => {
+  let db: ReturnType<typeof openTestDb> | null = null;
+  afterEach(() => {
+    db?.close();
+    db = null;
+  });
+
+  function makeRouter(): ModelRouter {
+    db = openTestDb({ skipSeed: true });
+    const repos = createRepositories(db.raw);
+    return new ModelRouter({
+      modelProvidersRepo: repos.modelProviders,
+      providerKeyStore: new ProviderKeyStore({ service: "test" }),
+    });
+  }
+
+  it("resolves a bare Cursor id to the SDK path", async () => {
+    const r = await makeRouter().resolve("composer-2-5", { promptTokens: 50, mode: "ask" });
+    expect(r.isCursor).toBe(true);
+    expect(r.provider).toBeNull();
+    expect(r.modelName).toBe("composer-2-5");
+  });
+
+  it("resolves auto to a concrete Cursor model when no providers exist", async () => {
+    const r = await makeRouter().resolve("auto", { promptTokens: 50, mode: "ask" });
+    expect(r.isCursor).toBe(true);
+    expect(r.unifiedId).toMatch(/^composer-2-5/);
+  });
+
+  it("falls back to the default Cursor model when the provider is missing", async () => {
+    const r = await makeRouter().resolve("nonexistent-id:gpt-5", { promptTokens: 50, mode: "ask" });
+    expect(r.isCursor).toBe(true);
+    expect(r.provider).toBeNull();
+    expect(r.unifiedId).toBe("composer-2-5-fast");
+  });
+});

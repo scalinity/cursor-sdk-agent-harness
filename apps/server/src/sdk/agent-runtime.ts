@@ -467,25 +467,34 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
         }
       }
 
-      // Assemble: rules → context → mode prefix → user prompt
+      // ── Phase 23: resolve the model (Cursor vs provider, incl. `auto`) ──
+      // Resolve BEFORE assembling the prompt so a tool-less (non-Cursor) model
+      // gets the read-only Ask framing (P23-W2). Token estimate uses the
+      // context + user prompt (the final sdkPrompt isn't built yet).
+      const promptTokens = Math.ceil(
+        (rulesBlock.length + contextBlock.length + input.prompt.length) / 4,
+      );
+      const resolved = deps.modelRouter
+        ? await deps.modelRouter.resolve(row.modelId, { promptTokens, mode: executionMode })
+        : { unifiedId: row.modelId, modelName: row.modelId, provider: null, isCursor: true };
+
+      // Assemble: rules → context → mode prefix → user prompt. Non-Cursor
+      // models are chat-only, so force the Ask prefix regardless of mode.
       const promptParts: string[] = [];
       if (rulesBlock) promptParts.push(rulesBlock);
       if (contextBlock) promptParts.push(contextBlock);
-      if (executionMode === "ask") promptParts.push(ASK_MODE_PREFIX);
+      if (executionMode === "ask" || !resolved.isCursor) {
+        promptParts.push(ASK_MODE_PREFIX);
+      }
       promptParts.push(input.prompt);
       const sdkPrompt = promptParts.join("\n\n");
 
-      if (executionMode === "yolo") {
+      if (executionMode === "yolo" && resolved.isCursor) {
         deps.logger.warn(
           { runId, agentId: row.id },
           "YOLO mode active but approval auto-resolve unavailable (OQ-10 unresolved)",
         );
       }
-      // ── Phase 23: resolve the model (Cursor vs provider, incl. `auto`) ──
-      const promptTokens = Math.ceil(sdkPrompt.length / 4);
-      const resolved = deps.modelRouter
-        ? await deps.modelRouter.resolve(row.modelId, { promptTokens, mode: executionMode })
-        : { unifiedId: row.modelId, modelName: row.modelId, provider: null, isCursor: true };
 
       const runRow = deps.runsRepo.create({
         id: runId,

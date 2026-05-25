@@ -35,6 +35,7 @@ export type {
 export {
   AUTO_MODEL_ID,
   DEFAULT_MODEL_ID,
+  formatModelLabel,
   MODEL_LABELS,
   SDK_RUN_TERMINAL_STATUSES,
   agentModeSchema,
