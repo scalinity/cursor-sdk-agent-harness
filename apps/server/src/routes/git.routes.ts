@@ -2,16 +2,14 @@ import { gitStatusResponseSchema } from "@harness/shared";
 import type { FastifyInstance } from "fastify";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
-import type { SettingsRepo } from "../db/repositories/settings.repo.js";
-import type { WorkspaceAllowlistRepo } from "../db/repositories/workspace-allowlist.repo.js";
-import { ACTIVE_WORKSPACE_SETTING_KEY } from "../config/settings-keys.js";
+import {
+  resolveWorkspacePath,
+  type WorkspaceResolverDeps,
+} from "../lib/workspace-resolver.js";
 
 const execFile = promisify(execFileCb);
 
-export interface GitRoutesDeps {
-  settingsRepo: SettingsRepo;
-  workspaceAllowlist: WorkspaceAllowlistRepo;
-}
+export type GitRoutesDeps = WorkspaceResolverDeps;
 
 /**
  * In-memory cache for git status, keyed by workspace path.
@@ -53,13 +51,6 @@ async function gitExec(
   } catch {
     return { stdout: "", ok: false };
   }
-}
-
-function resolveWorkspacePath(deps: GitRoutesDeps): string | null {
-  const activeId = deps.settingsRepo.get<string>(ACTIVE_WORKSPACE_SETTING_KEY);
-  if (!activeId) return null;
-  const entry = deps.workspaceAllowlist.getById(activeId);
-  return entry?.path ?? null;
 }
 
 export async function registerGitRoutes(

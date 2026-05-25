@@ -7,33 +7,18 @@ import type { z } from "zod";
 import { mkdir, writeFile, unlink, realpath as fsRealpath } from "node:fs/promises";
 import { Buffer } from "node:buffer";
 import path from "node:path";
-import type { SettingsRepo } from "../db/repositories/settings.repo.js";
-import type { WorkspaceAllowlistRepo } from "../db/repositories/workspace-allowlist.repo.js";
-import { ACTIVE_WORKSPACE_SETTING_KEY } from "../config/settings-keys.js";
+import {
+  resolveWorkspacePath,
+  type WorkspaceResolverDeps,
+} from "../lib/workspace-resolver.js";
 
-export interface FilesRoutesDeps {
-  settingsRepo: SettingsRepo;
-  workspaceAllowlist: WorkspaceAllowlistRepo;
-}
+export type FilesRoutesDeps = WorkspaceResolverDeps;
 
 function send422(reply: FastifyReply, error: z.ZodError) {
   return reply.code(422).send({
     code: "VALIDATION_ERROR",
     details: error.issues,
   });
-}
-
-function resolveWorkspaceRoot(
-  deps: FilesRoutesDeps,
-  workspaceId?: string,
-): string | null {
-  const id =
-    workspaceId ??
-    deps.settingsRepo.get<string>(ACTIVE_WORKSPACE_SETTING_KEY) ??
-    null;
-  if (!id) return null;
-  const entry = deps.workspaceAllowlist.getById(id);
-  return entry?.path ?? null;
 }
 
 export async function registerFilesRoutes(
@@ -46,7 +31,7 @@ export async function registerFilesRoutes(
 
     const { path: relativePath, content, workspaceId } = parsed.data;
 
-    const workspaceRoot = resolveWorkspaceRoot(deps, workspaceId);
+    const workspaceRoot = resolveWorkspacePath(deps, workspaceId);
     if (!workspaceRoot) {
       return reply.code(412).send({
         code: "NO_ACTIVE_WORKSPACE",
