@@ -316,5 +316,24 @@ export type {
   NetworkRequest,
   WaitCondition,
 } from "./browser-protocol.js";
+// Embedded-terminal wire protocol (separate from the run-event WS protocol).
+export {
+  MAX_TERMINAL_INPUT_CHARS,
+  MAX_TERMINAL_OUTPUT_CHARS,
+  MIN_TERMINAL_DIMENSION,
+  MAX_TERMINAL_DIMENSION,
+  terminalInputFrameSchema,
+  terminalResizeFrameSchema,
+  terminalClientFrameSchema,
+  terminalReadyFrameSchema,
+  terminalDataFrameSchema,
+  terminalExitFrameSchema,
+  terminalErrorFrameSchema,
+  terminalServerFrameSchema,
+} from "./terminal-protocol.js";
+export type {
+  TerminalClientFrame,
+  TerminalServerFrame,
+} from "./terminal-protocol.js";
 
 export const HARNESS_VERSION = "0.0.0" as const;

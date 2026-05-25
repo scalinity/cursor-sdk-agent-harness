@@ -174,7 +174,6 @@ export function useEnsureDefaultAgent(input: UseEnsureDefaultAgentInput): void {
           modelId,
           cwd: [workspacePath],
           settingSources: ["project", "user"],
-          sandboxEnabled: true,
           mcpServerIds: universal.mcpServerIds,
           subagentDefinitionIds: universal.subagentDefinitionIds,
         });

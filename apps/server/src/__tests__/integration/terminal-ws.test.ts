@@ -1,0 +1,334 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import type { FastifyInstance } from "fastify";
+import type { WebSocket } from "ws";
+import { buildApp } from "../../app.js";
+import { loadEnv } from "../../config/env.js";
+import { openTestDb } from "../../db/__tests__/helpers.js";
+import { createRepositories } from "../../db/repositories/index.js";
+import { CsrfSecretStore, CursorApiKeyStore } from "../../keychain/index.js";
+import {
+  createInMemoryKeychainDriver,
+  resetKeychainDriverForTests,
+  setKeychainDriver,
+} from "../../keychain/testing.js";
+import { createStubSdkAdapter } from "../../sdk/testing.js";
+import { TerminalSession, type PtyProcess, type SpawnPty } from "../../terminal/index.js";
+
+const ORIGIN = "http://127.0.0.1:5173";
+const BASE_ENV: NodeJS.ProcessEnv = {
+  HOST: "127.0.0.1",
+  PORT: "4783",
+  WEB_ORIGIN: ORIGIN,
+  LOG_LEVEL: "error",
+  KEYCHAIN_SERVICE: "cursor-sdk-agent-harness-test",
+  ALLOW_REMOTE_BIND: "false",
+};
+
+const NOOP_LOGGER = { info() {}, warn() {}, error() {} };
+
+interface Harness {
+  app: FastifyInstance;
+  session: TerminalSession;
+  close: () => Promise<void>;
+  csrfToken: () => Promise<string>;
+  cwd: string;
+}
+
+async function buildTerminalHarness(opts: {
+  spawnPty?: SpawnPty;
+  shell?: string;
+  shellArgs?: string[];
+}): Promise<Harness> {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "harness-term-"));
+  const realCwd = await fs.realpath(tmpDir);
+
+  const env = loadEnv(BASE_ENV);
+  const dbClient = openTestDb();
+  const repos = createRepositories(dbClient.raw);
+  repos.workspaceAllowlist.create({ path: realCwd, recursive: true });
+
+  const apiKeyStore = new CursorApiKeyStore({ service: env.KEYCHAIN_SERVICE });
+  await apiKeyStore.setApiKey("sk-test-term-12345678");
+
+  const session = new TerminalSession({
+    resolveCwd: () => realCwd,
+    logger: NOOP_LOGGER,
+    ...(opts.spawnPty ? { spawnPty: opts.spawnPty } : {}),
+    ...(opts.shell ? { shell: opts.shell } : {}),
+    ...(opts.shellArgs ? { shellArgs: opts.shellArgs } : {}),
+  });
+
+  const sdk = createStubSdkAdapter({
+    onSend: ({ agent, idempotencyKey }) => ({
+      runId: idempotencyKey ?? `stub-${Date.now()}`,
+      agentId: agent.agentId,
+      events: [],
+      finalResult: { status: "finished" as const, result: "done", durationMs: 1 },
+    }),
+  });
+
+  const { app } = await buildApp({
+    env,
+    repos,
+    apiKeyStore,
+    csrfSecretStore: new CsrfSecretStore({ service: env.KEYCHAIN_SERVICE }),
+    sdk,
+    terminalSession: session,
+  });
+  await app.listen({ host: "127.0.0.1", port: 0 });
+
+  return {
+    app,
+    session,
+    cwd: realCwd,
+    close: async () => {
+      await app.close();
+      dbClient.raw.close();
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    },
+    csrfToken: async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/security/csrf-token",
+        headers: { origin: ORIGIN },
+      });
+      return (res.json() as { token: string }).token;
+    },
+  };
+}
+
+/** A fake PTY whose output/exit the test drives, capturing writes + resizes. */
+function makeFakePty(): {
+  pty: PtyProcess;
+  emitData: (s: string) => void;
+  emitExit: (code: number, signal?: number) => void;
+  writes: string[];
+  resizes: Array<[number, number]>;
+  killed: () => boolean;
+} {
+  let dataCb: ((d: string) => void) | undefined;
+  let exitCb: ((e: { exitCode: number; signal?: number | undefined }) => void) | undefined;
+  const writes: string[] = [];
+  const resizes: Array<[number, number]> = [];
+  let wasKilled = false;
+  const pty: PtyProcess = {
+    onData: (cb) => {
+      dataCb = cb;
+      return { dispose() {} };
+    },
+    onExit: (cb) => {
+      exitCb = cb;
+      return { dispose() {} };
+    },
+    write: (d) => writes.push(d),
+    resize: (c, r) => resizes.push([c, r]),
+    kill: () => {
+      wasKilled = true;
+    },
+  };
+  return {
+    pty,
+    emitData: (s) => dataCb?.(s),
+    emitExit: (code, signal) => exitCb?.({ exitCode: code, signal }),
+    writes,
+    resizes,
+    killed: () => wasKilled,
+  };
+}
+
+type Frame = Record<string, unknown>;
+type FramePredicate = (frame: Frame) => boolean;
+
+/**
+ * Buffers every frame from socket creation so sequential `waitFor`s never
+ * race the back-to-back frames the server emits (e.g. ready → buffered
+ * screen). Attach immediately after `injectWS`.
+ */
+interface Collector {
+  waitFor(predicate: FramePredicate, timeoutMs?: number): Promise<Frame>;
+}
+
+function collect(socket: WebSocket): Collector {
+  const frames: Frame[] = [];
+  const waiters: Array<{ predicate: FramePredicate; resolve: (f: Frame) => void }> = [];
+  socket.on("message", (data: Buffer | string) => {
+    let frame: Frame;
+    try {
+      frame = JSON.parse(String(data)) as Frame;
+    } catch {
+      return;
+    }
+    frames.push(frame);
+    for (let i = waiters.length - 1; i >= 0; i--) {
+      const waiter = waiters[i];
+      if (waiter && waiter.predicate(frame)) {
+        waiter.resolve(frame);
+        waiters.splice(i, 1);
+      }
+    }
+  });
+  return {
+    waitFor(predicate, timeoutMs = 4_000) {
+      const existing = frames.find(predicate);
+      if (existing) return Promise.resolve(existing);
+      return new Promise<Frame>((resolve, reject) => {
+        const entry = { predicate, resolve };
+        waiters.push(entry);
+        setTimeout(() => {
+          const idx = waiters.indexOf(entry);
+          if (idx >= 0) {
+            waiters.splice(idx, 1);
+            reject(new Error("timed out waiting for terminal frame"));
+          }
+        }, timeoutMs);
+      });
+    },
+  };
+}
+
+const tick = (ms = 60): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+describe("Embedded terminal — /ws/terminal", () => {
+  let h: Harness;
+
+  beforeEach(() => {
+    setKeychainDriver(createInMemoryKeychainDriver());
+  });
+
+  afterEach(async () => {
+    await h?.close();
+    resetKeychainDriverForTests();
+  });
+
+  it("rejects an upgrade with a disallowed Origin", async () => {
+    const fake = makeFakePty();
+    h = await buildTerminalHarness({ spawnPty: () => fake.pty });
+    await expect(
+      h.app.injectWS("/ws/terminal", { headers: { origin: "http://evil.example.com" } }),
+    ).rejects.toThrow();
+  });
+
+  it("rejects an upgrade without a CSRF token (closes the socket)", async () => {
+    const fake = makeFakePty();
+    h = await buildTerminalHarness({ spawnPty: () => fake.pty });
+    const socket = await h.app.injectWS("/ws/terminal", { headers: { origin: ORIGIN } });
+    const closed = await Promise.race([
+      new Promise<number>((resolve) => socket.once("close", (code: number) => resolve(code))),
+      (async () => {
+        for (let i = 0; i < 60; i++) {
+          if (socket.readyState === socket.CLOSED || socket.readyState === socket.CLOSING) {
+            return socket.readyState;
+          }
+          await tick(50);
+        }
+        return -1;
+      })(),
+    ]);
+    expect(closed).not.toBe(-1);
+  });
+
+  it("sends ready with the resolved cwd, then streams PTY output and exit", async () => {
+    const fake = makeFakePty();
+    h = await buildTerminalHarness({ spawnPty: () => fake.pty });
+    const token = await h.csrfToken();
+    const socket = await h.app.injectWS(`/ws/terminal?csrf=${encodeURIComponent(token)}`, {
+      headers: { origin: ORIGIN },
+    });
+    const frames = collect(socket);
+
+    const ready = await frames.waitFor((f) => f.type === "ready");
+    expect(ready.cwd).toBe(h.cwd);
+    expect(ready.cols).toBe(80);
+    expect(ready.rows).toBe(24);
+
+    fake.emitData("hello-from-pty\r\n");
+    const data = await frames.waitFor((f) => f.type === "data");
+    expect(data.data).toContain("hello-from-pty");
+
+    fake.emitExit(0);
+    const exit = await frames.waitFor((f) => f.type === "exit");
+    expect(exit.code).toBe(0);
+  });
+
+  it("routes client input to the PTY and applies resize", async () => {
+    const fake = makeFakePty();
+    h = await buildTerminalHarness({ spawnPty: () => fake.pty });
+    const token = await h.csrfToken();
+    const socket = await h.app.injectWS(`/ws/terminal?csrf=${encodeURIComponent(token)}`, {
+      headers: { origin: ORIGIN },
+    });
+    const frames = collect(socket);
+    await frames.waitFor((f) => f.type === "ready");
+
+    socket.send(JSON.stringify({ type: "input", data: "echo hi\n" }));
+    socket.send(JSON.stringify({ type: "resize", cols: 120, rows: 40 }));
+    await tick();
+
+    expect(fake.writes).toContain("echo hi\n");
+    expect(fake.resizes).toContainEqual([120, 40]);
+  });
+
+  it("replays the ring buffer to a re-attaching client", async () => {
+    const fake = makeFakePty();
+    h = await buildTerminalHarness({ spawnPty: () => fake.pty });
+    const token = await h.csrfToken();
+
+    const first = await h.app.injectWS(`/ws/terminal?csrf=${encodeURIComponent(token)}`, {
+      headers: { origin: ORIGIN },
+    });
+    const firstFrames = collect(first);
+    await firstFrames.waitFor((f) => f.type === "ready");
+    fake.emitData("PROMPT$ pwd\r\n/tmp\r\n");
+    await firstFrames.waitFor((f) => f.type === "data");
+
+    // A second client (reload / tab switch) gets ready + the buffered screen.
+    const second = await h.app.injectWS(`/ws/terminal?csrf=${encodeURIComponent(token)}`, {
+      headers: { origin: ORIGIN },
+    });
+    const secondFrames = collect(second);
+    await secondFrames.waitFor((f) => f.type === "ready");
+    const replay = await secondFrames.waitFor((f) => f.type === "data");
+    expect(replay.data).toContain("PROMPT$ pwd");
+  });
+
+  it("does not leak CURSOR_API_KEY into the spawned environment", async () => {
+    let capturedEnv: Record<string, string> = {};
+    const spawnPty: SpawnPty = (o) => {
+      capturedEnv = o.env;
+      return makeFakePty().pty;
+    };
+    process.env.CURSOR_API_KEY = "sk-should-not-leak";
+    try {
+      h = await buildTerminalHarness({ spawnPty });
+      const token = await h.csrfToken();
+      const socket = await h.app.injectWS(`/ws/terminal?csrf=${encodeURIComponent(token)}`, {
+        headers: { origin: ORIGIN },
+      });
+      const frames = collect(socket);
+      await frames.waitFor((f) => f.type === "ready");
+      expect(capturedEnv.CURSOR_API_KEY).toBeUndefined();
+      expect(capturedEnv.TERM).toBe("xterm-256color");
+    } finally {
+      delete process.env.CURSOR_API_KEY;
+    }
+  });
+
+  it("spawns a real shell via node-pty end-to-end (output + exit)", async () => {
+    // No spawnPty stub: exercises the real native binding + spawn-helper.
+    h = await buildTerminalHarness({ shell: "/bin/echo", shellArgs: ["TERMINAL_E2E_OK"] });
+    const token = await h.csrfToken();
+    const socket = await h.app.injectWS(`/ws/terminal?csrf=${encodeURIComponent(token)}`, {
+      headers: { origin: ORIGIN },
+    });
+    const frames = collect(socket);
+    await frames.waitFor((f) => f.type === "ready");
+    const data = await frames.waitFor(
+      (f) => f.type === "data" && String(f.data).includes("TERMINAL_E2E_OK"),
+    );
+    expect(data.data).toContain("TERMINAL_E2E_OK");
+    await frames.waitFor((f) => f.type === "exit");
+  });
+});

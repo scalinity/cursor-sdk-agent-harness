@@ -10,6 +10,7 @@
     "node_modules/**/*",
     "package.json"
   ],
+  "asar": false,
   "extraResources": [
     {
       "from": "../web/dist",

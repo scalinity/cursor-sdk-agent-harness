@@ -11,11 +11,8 @@ import { useSpeechToText } from "../useSpeechToText.js";
 
 describe("useSpeechToText", () => {
   it("reports unsupported and stays idle under jsdom", () => {
-    const onInterimTranscript = vi.fn();
-    const onFinalTranscript = vi.fn();
-    const { result } = renderHook(() =>
-      useSpeechToText({ onInterimTranscript, onFinalTranscript }),
-    );
+    const onTranscript = vi.fn();
+    const { result } = renderHook(() => useSpeechToText({ onTranscript }));
 
     expect(result.current.supported).toBe(false);
     expect(result.current.status).toBe("idle");
@@ -24,17 +21,13 @@ describe("useSpeechToText", () => {
   });
 
   it("toggle is a no-op when unsupported (does not throw or record)", () => {
-    const onInterimTranscript = vi.fn();
-    const onFinalTranscript = vi.fn();
-    const { result } = renderHook(() =>
-      useSpeechToText({ onInterimTranscript, onFinalTranscript }),
-    );
+    const onTranscript = vi.fn();
+    const { result } = renderHook(() => useSpeechToText({ onTranscript }));
 
     act(() => result.current.toggle());
 
     expect(result.current.status).toBe("idle");
     expect(result.current.isRecording).toBe(false);
-    expect(onInterimTranscript).not.toHaveBeenCalled();
-    expect(onFinalTranscript).not.toHaveBeenCalled();
+    expect(onTranscript).not.toHaveBeenCalled();
   });
 });

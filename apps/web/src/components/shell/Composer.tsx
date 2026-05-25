@@ -62,10 +62,7 @@ export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerPr
     },
     [setDraft],
   );
-  const speech = useSpeechToText({
-    onInterimTranscript: applyTranscript,
-    onFinalTranscript: applyTranscript,
-  });
+  const speech = useSpeechToText({ onTranscript: applyTranscript });
   // Snapshot the existing draft at the moment recording begins, then toggle.
   const handleMicToggle = useCallback(() => {
     if (speech.status === "idle") {

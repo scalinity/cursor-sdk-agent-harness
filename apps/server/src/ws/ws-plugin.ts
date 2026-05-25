@@ -32,6 +32,7 @@ import type { CancelResult } from "../sdk/run-controller.js";
 import type { CsrfTokenizer } from "../security/csrf.js";
 import { buildServerFrame } from "./frame-builder.js";
 import type { RunBus } from "./run-bus.js";
+import { validateWsUpgrade } from "./upgrade-guard.js";
 
 /**
  * Heartbeat schedule per spec §4 "Heartbeat and Reconnection Contract".
@@ -219,7 +220,7 @@ const wsPluginImpl: FastifyPluginAsync<WsPluginOptions> = async (
       const reqLog = req.log;
       // Origin and CSRF gates BEFORE we attach any handlers. A rejected
       // upgrade closes the socket immediately with the appropriate code.
-      const upgradeError = validateUpgrade(req, opts);
+      const upgradeError = validateWsUpgrade(req, opts);
       if (upgradeError) {
         reqLog.warn({ code: upgradeError.code }, "ws: upgrade rejected");
         sendOrSwallow(socket, errorFrame(upgradeError.code, upgradeError.message));
@@ -251,28 +252,6 @@ export const wsPlugin = fp(wsPluginImpl, {
   // `@fastify/websocket` must be registered before this plugin.
   dependencies: [],
 });
-
-function validateUpgrade(
-  req: FastifyRequest,
-  opts: WsPluginOptions,
-): { code: WsErrorCode; message: string } | null {
-  const origin = req.headers.origin;
-  const allowed = new Set<string>();
-  if (opts.allowedOrigin) allowed.add(opts.allowedOrigin);
-  for (const o of opts.allowedOrigins ?? []) allowed.add(o);
-  if (!origin || !allowed.has(origin)) {
-    return { code: "UNAUTHORIZED_ORIGIN", message: "Origin not allowed" };
-  }
-  const query = req.query as { csrf?: string } | undefined;
-  const token = query?.csrf;
-  if (typeof token !== "string" || token.length === 0) {
-    return { code: "CSRF_FAILED", message: "Missing csrf query parameter" };
-  }
-  if (!opts.csrf.validate(token)) {
-    return { code: "CSRF_FAILED", message: "Invalid CSRF token" };
-  }
-  return null;
-}
 
 function createConnection(
   socket: WebSocket,
