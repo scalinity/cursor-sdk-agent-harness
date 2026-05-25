@@ -2935,7 +2935,7 @@ Backpressure decision:
 | Collapsible JSON inspector | Yes: arbitrary shapes, lazy large-payload fetch. | JSON diffing between lifecycle updates. |
 | Code edit live preview | Yes: best-effort diff/patch extractors and character animation. | Guaranteed edit previews for unknown future tool schemas. |
 | Incremental syntax highlighting | Yes: Lezer-backed `SyntaxHighlighter` for TypeScript, JavaScript, Python, JSON, Markdown, shell, and plain text. | Shiki-quality themed static highlighting; additional languages. |
-| Persistent run history | Yes: canonical event log and transcript endpoint. | Full-text search across all payloads. |
+| Persistent run history | Yes: canonical event log and transcript endpoint. | Full-text search across all payloads → **v1.2 Phase 19**. |
 | Replay | Yes: instant, 1x, 2x, 4x. | Timeline minimap and video-like export. |
 | WebSocket reconnect/gap recovery | Yes: `after_seq` replay. | Cross-device subscriptions. |
 | Mid-run process crash recovery | Yes: mark interrupted and preserve events. | True stream reattachment unless SDK supports it. |
@@ -2952,6 +2952,15 @@ Backpressure decision:
 | Approval UI | Partial: request prompt, approve/deny protocol, persisted decisions. | Enabled SDK resolution once exact approval method is verified. |
 | Run cancellation | Yes when AbortSignal or `run.cancel()` is verified; implementation includes AbortController primary and `run.cancel()` fallback. If SDK exposes neither, runtime behavior remains Partial with explicit `CANCEL_UNAVAILABLE`. | Force-kill of SDK-internal tools without SDK support. |
 | Design system | Yes: reference image to token extraction, Tailwind v4 token integration, no hardcoded visual values. | Multi-theme support unless a second reference image is provided. |
+| Execution modes | No. | **v1.2 Phase 19**: Ask / Agent / YOLO mode system. |
+| Git status | No. | **v1.2 Phase 19**: Branch + dirty indicator in statusbar. |
+| Code block actions | No. | **v1.2 Phase 19**: Copy and "Apply to file" buttons. |
+| Session rename | No. | **v1.2 Phase 19**: Click-to-edit session names. |
+| Context intelligence | No. | **v1.2 Phase 20**: @-mentions, rules system, codebase search. |
+| Plan mode | No. | **v1.2 Phase 20**: Agent generates reviewable plan before executing. |
+| Custom docs indexing | No. | **v1.2 Phase 21**: Crawl + index external docs by URL. |
+| Notepads | No. | **v1.2 Phase 21**: Persistent context documents. |
+| Terminal AI | No. | **v1.2 Phase 21**: Natural-language-to-command in terminal. |
 | Remote hosting | No. | Hosted multi-user deployment. |
 | Telemetry | No external telemetry. | Optional local metrics dashboard. |
 
@@ -3221,3 +3230,161 @@ Tasks:
 - Add design QA pass against the reference image and token checklist.
 - Add build verification for strict TypeScript.
 - Write README with setup, Keychain import, workspace allowlist, pricing setup, reference-image token process, and SDK verification checklist.
+
+---
+
+## 17. v1.2 Additions — Cursor Feature Parity
+
+v1.2 closes the highest-impact gaps between CursorHarness and the native Cursor app. Phases are numbered 19+ and continue the existing phase discipline. All v1.2 work follows the same working agreements, token-only visual rules, persist-before-broadcast contract, and test gates from v1.1.
+
+### 17.1 Execution Mode System (Phase 19)
+
+The native Cursor app has three execution modes: Ask (read-only Q&A), Agent (default autonomous mode), and YOLO (auto-approve all actions). CursorHarness v1.1 has only one mode (Agent). v1.2 adds a first-class mode system.
+
+#### Domain model
+
+```ts
+export const executionModeSchema = z.enum(["ask", "agent", "yolo"]);
+export type ExecutionMode = z.infer<typeof executionModeSchema>;
+```
+
+Mode is stored at two levels:
+- **Agent default mode**: Persisted in `agents.mode`. New runs inherit the agent's mode unless overridden.
+- **Per-run mode**: Persisted in `runs.mode`. The mode used for a specific run is immutable after creation.
+
+A global `settings.defaultMode` controls what mode new agents start with.
+
+#### Mode behaviors
+
+| Mode | SDK prompt modification | Approval handling | UI indicator |
+|---|---|---|---|
+| `ask` | Prepends read-only instruction: "You are in Ask Mode. Answer the user's question about the codebase. Do NOT make any file changes, do NOT run any terminal commands, do NOT use any tools that modify files or execute code. Only read files and answer questions." | N/A — agent should not trigger approvals | Message-circle icon, `--color-info` accent |
+| `agent` | No modification (current behavior) | Normal approval flow (user approve/deny) | Bot icon, `--color-accent` |
+| `yolo` | No modification | Auto-approve all approval requests when OQ-10 is resolved; store preference otherwise | Zap icon, `--color-warning` accent, one-time confirmation tooltip |
+
+The prompt prefix for `ask` mode is applied at the SDK boundary in `agent-runtime.ts` only. The `runs.prompt` column stores the original user prompt for display and search.
+
+#### UI surface
+
+`ModeToggle`: Three-pill segmented control in the Composer area. Each pill shows an icon and short label. YOLO requires a one-time confirmation before first use per session.
+
+#### Schema changes
+
+```sql
+ALTER TABLE agents ADD COLUMN mode TEXT NOT NULL DEFAULT 'agent'
+  CHECK (mode IN ('ask', 'agent', 'yolo'));
+ALTER TABLE runs ADD COLUMN mode TEXT NOT NULL DEFAULT 'agent'
+  CHECK (mode IN ('ask', 'agent', 'yolo'));
+ALTER TABLE runs ADD COLUMN name TEXT;
+```
+
+### 17.2 Git Status in Statusbar (Phase 19)
+
+Native Cursor shows the current git branch and working-tree state. CursorHarness has no git awareness.
+
+#### Server endpoint
+
+`GET /api/git/status` returns:
+
+```ts
+const gitStatusResponseSchema = z.object({
+  isGitRepo: z.boolean(),
+  branch: z.string().nullable(),
+  isDirty: z.boolean(),
+  ahead: z.number(),
+  behind: z.number(),
+});
+```
+
+Implementation uses `execFile` (never `exec`) with the project's `execFileNoThrow` utility for subprocess safety. All git commands run with `cwd` set to the active workspace (realpath-validated). Results are cached for 10 seconds server-side.
+
+#### UI surface
+
+The statusbar gains a git section (left side): branch icon + branch name in `--font-mono --text-xs`, dirty dot in `--color-warning`, ahead/behind counts when non-zero. Hidden when `isGitRepo: false`. Frontend polls every 30 seconds via `useGitStatus` hook.
+
+### 17.3 Code Block Actions (Phase 19)
+
+v1.1 code blocks are display-only. v1.2 adds two action buttons.
+
+#### Copy button
+
+Every fenced code block gets a "Copy" overlay button (top-right corner, ghost style, clipboard icon). Uses `navigator.clipboard.writeText()`. Shows "Copied" checkmark for 2 seconds after click.
+
+#### "Apply to file" button
+
+Code blocks whose info string contains a filename annotation (e.g., `` ```ts:src/utils/helper.ts `` or `` ```ts src/utils/helper.ts ``) get an "Apply" button. The markdown block parser is extended to emit a `filename` field when the info string contains a path-like token.
+
+**Server endpoint:** `POST /api/files/write`
+
+```ts
+const fileWriteRequestSchema = z.object({
+  path: z.string().min(1),
+  content: z.string(),
+  workspaceId: z.string().optional(),
+});
+```
+
+**Security (critical):** The endpoint reuses `workspace-policy.ts` checks:
+1. Resolve workspace root from `workspaceId` or active workspace.
+2. Join root + relative path, then `fs.realpath`.
+3. Verify the resolved path starts with the workspace root (traversal guard).
+4. Verify the workspace is in the allowlist.
+5. Reject if any check fails.
+
+### 17.4 Session Rename (Phase 19)
+
+Runs gain a mutable `name` column (`TEXT`, nullable, max 200 chars). When a run is created without an explicit name, the server auto-generates one from the first line of the prompt (truncated to 60 chars with ellipsis).
+
+`SessionsRail` displays `run.name`. Double-click activates inline edit mode. Enter/blur saves via `PATCH /api/runs/:runId`. Escape reverts.
+
+### 17.5 Keyboard Shortcuts (Phase 19)
+
+| Shortcut | Action |
+|---|---|
+| `Cmd+N` | New session: clear active run state, focus Composer. Run record is created on first send, not on shortcut press. |
+
+Desktop menu: "New Session" added to File menu, wired through existing `onMenuAction` IPC bridge.
+
+### 17.6 Run History Full-Text Search (Phase 19)
+
+v1.1 deferred full-text search. v1.2 implements it with SQLite FTS5.
+
+#### FTS5 virtual table
+
+```sql
+CREATE VIRTUAL TABLE IF NOT EXISTS runs_fts USING fts5(
+  run_id UNINDEXED,
+  prompt,
+  name,
+  content='',
+  tokenize='porter unicode61'
+);
+```
+
+Kept in sync via `AFTER INSERT`, `AFTER UPDATE`, and `AFTER DELETE` triggers on the `runs` table. Existing runs are backfilled at migration time.
+
+#### Server endpoint
+
+`GET /api/runs/search?q=...` returns ranked results with FTS5 `snippet()` highlights:
+
+```ts
+const runSearchQuerySchema = z.object({
+  q: z.string().min(2).max(500),
+  limit: z.number().int().min(1).max(100).default(20),
+});
+```
+
+#### UI surface
+
+Search input at the top of the Run History page. Debounced 300ms, minimum 2 characters. When active, replaces normal run list with ranked search results. `Cmd+F` on the page focuses the search input.
+
+### 17.7 v1.2 Roadmap Summary
+
+| Phase | Title | Key features | Dependencies |
+|---|---|---|---|
+| 19 | Execution Modes, Git Status, and UX Quick Wins | Mode system (Ask/Agent/YOLO), git status bar, code block copy/apply, session rename, Cmd+N, FTS search | v1.1 complete |
+| 20 | Context Intelligence and Rules | @-mention system (@file, @folder, @symbol), project rules (`.harness/rules/`), codebase grep/search UI, Ask mode + codebase context | Phase 19 |
+| 21 | Enrichment | Custom docs indexing, Notepads (persistent context), terminal AI (Cmd+K → command), slash commands | Phase 20 |
+| 22 | Strategic | Codebase vector indexing, sub-agent parallel UI, Design Mode (browser → context), commit message generation, session diff view | Phases 19–21 |
+
+Phase prompts live in the existing prompts directory. Each phase follows the same one-phase-per-session discipline from v1.1.
