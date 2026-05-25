@@ -49,7 +49,7 @@ export function useGitStatus(): GitStatusResult {
       });
     } catch {
       if (!mountedRef.current) return;
-      setState({ ...DEFAULTS, isLoading: false });
+      setState((prev) => ({ ...prev, isLoading: false }));
     }
   }, []);
 
