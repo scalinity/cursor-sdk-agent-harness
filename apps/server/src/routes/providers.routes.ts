@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import dns from "node:dns/promises";
-import { addProviderRequestSchema } from "@harness/shared";
+import { addProviderRequestSchema, updateProviderRequestSchema } from "@harness/shared";
 import type { ModelProviderSummary, UnifiedModel } from "@harness/shared";
 import type { FastifyInstance, FastifyBaseLogger } from "fastify";
 import { isBlockedIp } from "../services/docs-crawler.service.js";
@@ -91,8 +91,9 @@ export async function registerProvidersRoutes(
       }
     }
     const id = randomUUID();
-    if (apiKey) await deps.providerKeyStore.set(id, apiKey);
-
+    // P23 CA1-W3: write the DB row FIRST (cheap, synchronous), then the
+    // Keychain — so a Keychain failure can't orphan a key with no row, and a
+    // DB failure can't leave a dangling Keychain entry.
     const row = deps.modelProvidersRepo.create({
       id,
       name,
@@ -101,6 +102,7 @@ export async function registerProvidersRoutes(
       baseUrl: baseUrl ?? null,
       models: [],
     });
+    if (apiKey) await deps.providerKeyStore.set(id, apiKey);
 
     // Populate the model list from the provider (also validates the key).
     let models: string[] = [];
@@ -114,6 +116,19 @@ export async function registerProvidersRoutes(
 
     const fresh = deps.modelProvidersRepo.getById(id)!;
     return reply.code(201).send(await toSummary(fresh, deps.providerKeyStore));
+  });
+
+  app.patch("/api/providers/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = updateProviderRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(422).send({ code: "VALIDATION_ERROR", details: parsed.error.issues });
+    }
+    if (!deps.modelProvidersRepo.getById(id)) {
+      return reply.code(404).send({ code: "NOT_FOUND", message: "Provider not found" });
+    }
+    deps.modelProvidersRepo.setEnabled(id, parsed.data.enabled);
+    return reply.send(await toSummary(deps.modelProvidersRepo.getById(id)!, deps.providerKeyStore));
   });
 
   app.delete("/api/providers/:id", async (request, reply) => {

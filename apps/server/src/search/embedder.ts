@@ -33,6 +33,14 @@ export interface Embedder {
 
 export const EMBEDDING_MODEL_ID = "Xenova/all-MiniLM-L6-v2";
 
+/**
+ * P23 CA1-S1: the model (~80MB) is downloaded from HuggingFace on first index
+ * (network egress for an otherwise-local app — documented intentionally). Pin
+ * a commit SHA here instead of a moving tag to make the artifact reproducible
+ * / build-time verifiable in production.
+ */
+export const EMBEDDING_MODEL_REVISION = "main";
+
 /** Default model cache dir: ~/Library/Application Support/<app>/models on macOS. */
 export function defaultModelCacheDir(): string {
   const appName = "cursor-sdk-agent-harness";
@@ -106,6 +114,7 @@ export class XenovaEmbedder implements Embedder {
     // Single-threaded WASM is the most portable across Node + bundled Electron.
     mod.env.backends.onnx.wasm.numThreads = 1;
     this.extractor = await mod.pipeline("feature-extraction", EMBEDDING_MODEL_ID, {
+      revision: EMBEDDING_MODEL_REVISION,
       progress_callback: (p: unknown) => {
         if (!onProgress) return;
         const rec = (p ?? {}) as { status?: string; file?: string; progress?: number };

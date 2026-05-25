@@ -41,3 +41,24 @@ export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   if (na === 0 || nb === 0) return 0;
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
+
+/**
+ * Cosine against a raw little-endian Float32 BLOB Buffer without allocating an
+ * intermediate Float32Array (P23 CA1-W1/S3) — reads floats in place. Used on
+ * the search hot path where one query is scored against every stored vector.
+ */
+export function cosineSimilarityBuffer(a: Float32Array, buf: Buffer): number {
+  const n = Math.min(a.length, Math.floor(buf.byteLength / 4));
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < n; i++) {
+    const av = a[i] ?? 0;
+    const bv = buf.readFloatLE(i * 4);
+    dot += av * bv;
+    na += av * av;
+    nb += bv * bv;
+  }
+  if (na === 0 || nb === 0) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}

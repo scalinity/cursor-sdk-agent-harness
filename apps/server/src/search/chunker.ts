@@ -104,7 +104,7 @@ function preferBoundary(
     windowChars += cost[i] ?? 0;
     if (windowChars > limit) break;
     const line = lines[i] ?? "";
-    if (isBlank(line) && bestBlank === -1) bestBlank = i - 1; // cut after the blank
+    if (isBlank(line) && bestBlank === -1) bestBlank = i - 1; // end before the blank (it starts the next chunk)
     if (DECL_RE.test(line) && bestDecl === -1) bestDecl = i - 1; // cut before the decl
   }
   if (bestBlank > start) return bestBlank;

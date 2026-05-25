@@ -28,7 +28,7 @@ export const DEFAULT_INDEXED_EXTENSIONS = [
 
 export const MAX_INDEXED_FILE_BYTES = 100 * 1024;
 
-const SKIP_DIRS = new Set([
+export const SKIP_DIRS = new Set([
   "node_modules",
   "dist",
   "build",

@@ -131,7 +131,10 @@ export class WorkspaceIndexer {
       const hash = sha256(content);
       const inserts = await this.embedFile(workspaceId, relPath, content, hash);
       this.deps.embeddingsRepo.replaceFile(workspaceId, relPath, inserts);
-      this.deps.indexStatusRepo.setStale(workspaceId);
+      // P23 CR1-S2: the incremental reindex already refreshed this file's
+      // chunks — don't mark the workspace stale (that would force a full
+      // re-walk on the next query, making the debounced single-file path
+      // redundant). Status stays `indexed`.
     } catch (err) {
       this.deps.logger.warn({ err, relPath }, "indexer: reindexFile failed");
     }

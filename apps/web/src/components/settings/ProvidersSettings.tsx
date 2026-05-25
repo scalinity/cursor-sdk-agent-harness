@@ -1,5 +1,9 @@
 import { useCallback, useState } from "react";
-import type { AddableProviderKind, ModelProviderSummary } from "@harness/shared";
+import {
+  PROVIDER_KIND_LABELS,
+  type AddableProviderKind,
+  type ModelProviderSummary,
+} from "@harness/shared";
 import { useProviders } from "../../hooks/useProviders.js";
 import { Select } from "../ui/Select.js";
 
@@ -10,16 +14,8 @@ const PROVIDER_OPTIONS = [
   { value: "ollama", label: "Ollama (local)" },
 ] as const;
 
-const PROVIDER_LABELS: Record<string, string> = {
-  anthropic: "Anthropic",
-  openai: "OpenAI",
-  google: "Google",
-  ollama: "Ollama",
-  cursor: "Cursor",
-};
-
 export function ProvidersSettings() {
-  const { providers, addProvider, deleteProvider, testProvider } = useProviders();
+  const { providers, addProvider, deleteProvider, testProvider, setEnabled } = useProviders();
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [provider, setProvider] = useState<AddableProviderKind>("anthropic");
@@ -107,11 +103,12 @@ export function ProvidersSettings() {
               <div className="flex min-w-0 flex-col gap-0.5">
                 <span className="truncate text-md font-medium text-text-primary">{p.name}</span>
                 <span className="text-2xs text-text-tertiary">
-                  {PROVIDER_LABELS[p.provider] ?? p.provider}
+                  {PROVIDER_KIND_LABELS[p.provider]}
                   {" · "}
                   {p.models.length} model{p.models.length !== 1 ? "s" : ""}
                   {" · "}
                   {p.hasApiKey ? "key set" : "no key"}
+                  {p.enabled ? "" : " · disabled"}
                   {p.baseUrl ? ` · ${p.baseUrl}` : ""}
                   {testResult[p.id] ? ` · ${testResult[p.id]}` : ""}
                 </span>
@@ -119,6 +116,13 @@ export function ProvidersSettings() {
               <div className="flex flex-none items-center gap-2">
                 <button type="button" onClick={() => void handleTest(p)} className="settings-link">
                   Test
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void setEnabled(p.id, !p.enabled)}
+                  className="settings-link"
+                >
+                  {p.enabled ? "Disable" : "Enable"}
                 </button>
                 <button
                   type="button"

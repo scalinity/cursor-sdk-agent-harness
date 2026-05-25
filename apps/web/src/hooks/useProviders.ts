@@ -18,6 +18,7 @@ export interface UseProvidersResult {
   addProvider: (req: AddProviderRequest) => Promise<ModelProviderSummary>;
   deleteProvider: (id: string) => Promise<void>;
   testProvider: (id: string) => Promise<TestProviderResponse>;
+  setEnabled: (id: string, enabled: boolean) => Promise<void>;
   reload: () => void;
 }
 
@@ -77,6 +78,18 @@ export function useProviders(): UseProvidersResult {
     [mutate],
   );
 
+  const setEnabled = useCallback(
+    async (id: string, enabled: boolean): Promise<void> => {
+      const updated = await mutate(`/api/providers/${id}`, {
+        method: "PATCH",
+        body: { enabled },
+        responseSchema: modelProviderSummarySchema,
+      });
+      setProviders((prev) => prev.map((p) => (p.id === id ? updated : p)));
+    },
+    [mutate],
+  );
+
   return {
     providers,
     loading,
@@ -84,6 +97,7 @@ export function useProviders(): UseProvidersResult {
     addProvider,
     deleteProvider,
     testProvider,
+    setEnabled,
     reload: () => void load(),
   };
 }

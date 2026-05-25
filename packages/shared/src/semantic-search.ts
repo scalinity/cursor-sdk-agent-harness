@@ -9,6 +9,9 @@ import { isoDateTimeSchema } from "./constants.js";
  * talks to: index status, the semantic query, and the result shape.
  */
 
+/** Default cosine-similarity floor for semantic results (shared by the query schema + @codebase resolver). */
+export const DEFAULT_SEMANTIC_MIN_SCORE = 0.3;
+
 export const indexStatusStateSchema = z.enum([
   "pending",
   "indexing",
@@ -40,7 +43,7 @@ export const semanticSearchQuerySchema = z.object({
   workspaceId: z.string().optional(),
   maxResults: z.coerce.number().int().min(1).max(50).default(10),
   filePattern: z.string().optional(),
-  minScore: z.coerce.number().min(0).max(1).default(0.3),
+  minScore: z.coerce.number().min(0).max(1).default(DEFAULT_SEMANTIC_MIN_SCORE),
 });
 export type SemanticSearchQuery = z.infer<typeof semanticSearchQuerySchema>;
 

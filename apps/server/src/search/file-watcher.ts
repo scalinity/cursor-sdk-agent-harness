@@ -3,7 +3,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import type { FastifyBaseLogger } from "fastify";
 import type { WorkspaceIndexer } from "./indexer.js";
-import { DEFAULT_INDEXED_EXTENSIONS } from "./file-walker.js";
+import { DEFAULT_INDEXED_EXTENSIONS, SKIP_DIRS } from "./file-walker.js";
 
 /**
  * Phase 23 — incremental re-index on file changes.
@@ -69,6 +69,12 @@ export class WorkspaceWatcher {
   private onChange(relName: string): void {
     const ext = path.extname(relName).toLowerCase();
     if (!INDEXED_EXTS.has(ext)) return;
+    // P23 (DB1 suggestion): mirror the walker's skip-dirs so a change under
+    // node_modules/dist/etc never gets indexed (the full walk would never
+    // include it — keeps the watcher-maintained set consistent with walkWorkspace).
+    if (relName.split(path.sep).some((seg) => SKIP_DIRS.has(seg) || seg.startsWith("."))) {
+      return;
+    }
     const existing = this.pending.get(relName);
     if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {

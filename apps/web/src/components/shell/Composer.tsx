@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import {
   AUTO_MODEL_ID,
   MODEL_LABELS,
+  PROVIDER_KIND_LABELS,
   type AgentSummary,
   type ContextMention,
   type ModelId,
@@ -25,13 +26,6 @@ import {
   MAX_IMAGE_ATTACHMENTS,
   type ComposerAttachment,
 } from "../../lib/attachments.js";
-
-const PROVIDER_SUFFIX: Record<string, string> = {
-  anthropic: " · Anthropic",
-  openai: " · OpenAI",
-  google: " · Google",
-  ollama: " · Ollama",
-};
 
 export interface ComposerProps {
   activeAgent: AgentSummary | null;
@@ -97,7 +91,7 @@ export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerPr
     const opts: SelectOption<string>[] = [{ value: AUTO_MODEL_ID, label: "✦ Auto" }];
     if (models.length > 0) {
       for (const m of models) {
-        const suffix = m.provider === "cursor" ? "" : (PROVIDER_SUFFIX[m.provider] ?? "");
+        const suffix = m.provider === "cursor" ? "" : ` · ${PROVIDER_KIND_LABELS[m.provider]}`;
         const askOnly = m.capabilities.toolUse ? "" : " (Ask only)";
         opts.push({ value: m.id, label: `${m.name}${suffix}${askOnly}` });
       }

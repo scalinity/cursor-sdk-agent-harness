@@ -437,6 +437,7 @@ export type {
 
 // Semantic codebase search (Phase 23): vector embeddings + index status
 export {
+  DEFAULT_SEMANTIC_MIN_SCORE,
   indexStatusStateSchema,
   indexStatusSchema,
   semanticSearchQuerySchema,
@@ -457,9 +458,11 @@ export type {
 export {
   providerKindSchema,
   addableProviderKindSchema,
+  PROVIDER_KIND_LABELS,
   modelProviderSummarySchema,
   listProvidersResponseSchema,
   addProviderRequestSchema,
+  updateProviderRequestSchema,
   testProviderResponseSchema,
   modelCapabilitiesSchema,
   modelPricingHintSchema,
@@ -472,6 +475,7 @@ export type {
   ModelProviderSummary,
   ListProvidersResponse,
   AddProviderRequest,
+  UpdateProviderRequest,
   TestProviderResponse,
   ModelCapabilities,
   ModelPricingHint,

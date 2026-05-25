@@ -25,21 +25,21 @@ export interface IndexedFileRef {
   contentHash: string;
 }
 
-export interface EmbeddingSearchRow {
+export interface EmbeddingVectorRow {
+  id: string;
   filePath: string;
   startLine: number;
   endLine: number;
   language: string | null;
-  content: string;
   embedding: Buffer;
 }
 
-interface EmbeddingDbRow {
+interface EmbeddingVectorDbRow {
+  id: string;
   file_path: string;
   start_line: number;
   end_line: number;
   language: string | null;
-  content: string;
   embedding: Buffer;
 }
 
@@ -102,21 +102,37 @@ export class EmbeddingsRepo {
     this.raw.prepare("DELETE FROM embeddings WHERE workspace_id = ?").run(workspaceId);
   }
 
-  /** All chunk rows for a workspace (brute-force cosine happens in JS). */
-  searchRows(workspaceId: string): EmbeddingSearchRow[] {
+  /**
+   * Vectors (no content) for a workspace — brute-force cosine scores against
+   * these. P23 CA1-W1: `content` (the heaviest column) is fetched only for the
+   * top-k survivors via `getContentByIds`, not loaded for every chunk.
+   */
+  searchVectors(workspaceId: string): EmbeddingVectorRow[] {
     const rows = this.raw
       .prepare(
-        `SELECT file_path, start_line, end_line, language, content, embedding
+        `SELECT id, file_path, start_line, end_line, language, embedding
          FROM embeddings WHERE workspace_id = ?`,
       )
-      .all(workspaceId) as EmbeddingDbRow[];
+      .all(workspaceId) as EmbeddingVectorDbRow[];
     return rows.map((r) => ({
+      id: r.id,
       filePath: r.file_path,
       startLine: r.start_line,
       endLine: r.end_line,
       language: r.language,
-      content: r.content,
       embedding: r.embedding,
     }));
+  }
+
+  /** Fetch chunk content for a set of ids (the search top-k). */
+  getContentByIds(ids: string[]): Map<string, string> {
+    const out = new Map<string, string>();
+    if (ids.length === 0) return out;
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = this.raw
+      .prepare(`SELECT id, content FROM embeddings WHERE id IN (${placeholders})`)
+      .all(...ids) as Array<{ id: string; content: string }>;
+    for (const r of rows) out.set(r.id, r.content);
+    return out;
   }
 }

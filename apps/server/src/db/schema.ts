@@ -263,5 +263,6 @@ export const modelProviders = sqliteTable(
       "model_providers_provider_check",
       sql`${table.provider} IN ('cursor', 'anthropic', 'openai', 'google', 'ollama')`,
     ),
+    check("model_providers_models_json_check", sql`json_valid(${table.modelsJson})`),
   ],
 );

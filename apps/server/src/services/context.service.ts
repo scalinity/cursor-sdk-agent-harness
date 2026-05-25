@@ -1,10 +1,11 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type {
-  ContextMention,
-  ResolvedMention,
-  ContextSearchResult,
-  SemanticSearchResult,
+import {
+  DEFAULT_SEMANTIC_MIN_SCORE,
+  type ContextMention,
+  type ResolvedMention,
+  type ContextSearchResult,
+  type SemanticSearchResult,
 } from "@harness/shared";
 import { grepSearch } from "./search.service.js";
 import type { DocsRepo } from "../db/repositories/docs.repo.js";
@@ -396,7 +397,7 @@ async function resolveCodebase(
       query: mention.value,
       workspaceId: root,
       maxResults: CODEBASE_MAX_RESULTS,
-      minScore: 0.3,
+      minScore: DEFAULT_SEMANTIC_MIN_SCORE,
     });
     if (semantic.results.length > 0) {
       const sections = semantic.results.map((r) => {

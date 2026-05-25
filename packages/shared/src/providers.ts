@@ -31,6 +31,15 @@ export const addableProviderKindSchema = z.enum([
 ]);
 export type AddableProviderKind = z.infer<typeof addableProviderKindSchema>;
 
+/** Display labels per provider kind — single source for composer + settings. */
+export const PROVIDER_KIND_LABELS: Record<ProviderKind, string> = {
+  cursor: "Cursor",
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  google: "Google",
+  ollama: "Ollama",
+};
+
 /**
  * A configured provider as returned to the client. The API key is NEVER
  * included — only whether one is present (`hasApiKey`). Keys live in the
@@ -60,6 +69,12 @@ export const addProviderRequestSchema = z.object({
   baseUrl: z.string().url().optional(),
 });
 export type AddProviderRequest = z.infer<typeof addProviderRequestSchema>;
+
+/** PATCH /api/providers/:id — toggle enabled/disabled. */
+export const updateProviderRequestSchema = z.object({
+  enabled: z.boolean(),
+});
+export type UpdateProviderRequest = z.infer<typeof updateProviderRequestSchema>;
 
 /** Result of `POST /api/providers/:id/test` — lists models on success. */
 export const testProviderResponseSchema = z.object({
