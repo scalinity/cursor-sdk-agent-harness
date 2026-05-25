@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import { sanitizeTerminalText } from "../output/sanitize.js";
 import { renderCodeBlock } from "./code-block.js";
 
 export interface MarkdownRenderOptions {
@@ -32,7 +33,7 @@ function renderTable(lines: readonly string[]): string {
 }
 
 export function renderMarkdown(markdown: string, options: MarkdownRenderOptions = {}): string {
-  const lines = markdown.split("\n");
+  const lines = sanitizeTerminalText(markdown).split("\n");
   const rendered: string[] = [];
   let index = 0;
   while (index < lines.length) {

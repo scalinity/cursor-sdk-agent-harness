@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import { sanitizeTerminalText } from "../output/sanitize.js";
 
 export interface CodeBlockOptions {
   language?: string;
@@ -10,8 +11,10 @@ function visibleWidth(value: string): number {
 }
 
 export function renderCodeBlock(code: string, options: CodeBlockOptions = {}): string {
-  const label = options.language && options.language.length > 0 ? ` ${options.language} ` : " code ";
-  const rawLines = code.length > 0 ? code.replace(/\n$/, "").split("\n") : [""];
+  const safeCode = sanitizeTerminalText(code);
+  const safeLanguage = options.language ? sanitizeTerminalText(options.language) : undefined;
+  const label = safeLanguage && safeLanguage.length > 0 ? ` ${safeLanguage} ` : " code ";
+  const rawLines = safeCode.length > 0 ? safeCode.replace(/\n$/, "").split("\n") : [""];
   const maxContent = Math.max(...rawLines.map(visibleWidth), label.length + 2, 8);
   const terminalWidth = Math.max(20, options.columns ?? process.stdout.columns ?? 80);
   const innerWidth = Math.min(maxContent + 2, terminalWidth - 4);

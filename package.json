@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "bin": {
+    "harness": "./bin/harness"
+  },
   "engines": {
     "node": ">=22.0.0",
     "pnpm": ">=9.0.0"
@@ -14,7 +17,7 @@
     "start:server": "pnpm --filter @harness/server start",
     "build": "pnpm -r --filter \"./apps/**\" --filter \"./packages/**\" run build",
     "build:desktop": "pnpm -F @harness/web build && pnpm -F @harness/server build && pnpm -F @harness/desktop build && pnpm -F @harness/desktop run package:mac",
-    "typecheck": "pnpm -r run typecheck",
+    "typecheck": "pnpm -F @harness/shared build && pnpm -r run typecheck",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "pnpm -r run test && pnpm test:scripts",

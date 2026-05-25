@@ -6,7 +6,7 @@ describe("search and history commands", () => {
   it("prints grep results with file, line, and match", async () => {
     const lines: string[] = [];
     const http = {
-      grepSearch: vi.fn(async () => ({ results: [{ path: "src/auth.ts", line: 12, column: 3, text: "const token = getToken();" }] })),
+      grepSearch: vi.fn(async () => ({ results: [{ path: "src/auth.ts", line: 12, column: 3, content: "const token = getToken();", contextBefore: [], contextAfter: [] }], totalMatches: 1, truncated: false, durationMs: 1 })),
     };
 
     await searchWorkspace({ query: "token", maxResults: 10, filesOnly: false, json: false }, { http, write: (line) => lines.push(line) });

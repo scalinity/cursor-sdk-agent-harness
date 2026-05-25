@@ -34,12 +34,17 @@ export interface AgentCreateOptions {
 
 export async function createAgent(options: AgentCreateOptions, deps: Pick<CommandDeps, "http" | "write">): Promise<AgentSummary> {
   await deps.http.ensureCsrfToken();
-  const agent = await deps.http.createAgent({
+  const created = await deps.http.createAgent({
     name: options.name,
     modelId: options.model ?? "composer-2-5-fast",
     mode: "local",
     cwd: [options.workspace ?? process.cwd()],
-  }) as AgentSummary;
+    mcpServerIds: [],
+    subagentDefinitionIds: [],
+  });
+  const agent = options.mode && created.executionMode !== options.mode
+    ? await deps.http.updateAgent(created.id, { executionMode: options.mode })
+    : created;
   if (options.json) writeJsonLine(deps.write, { type: "agent_created", agent });
   else deps.write(renderTable([agent], [
     { key: "id", header: "ID", value: (row) => shortId(row.id) },

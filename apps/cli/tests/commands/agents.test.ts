@@ -55,16 +55,44 @@ describe("agents commands", () => {
         terminatedAt: null,
         input,
       })),
+      updateAgent: vi.fn(async (id: string, input: unknown) => ({
+        id,
+        name: "CLI",
+        status: "active",
+        mode: "local",
+        executionMode: "ask",
+        modelId: "composer-2-5",
+        runCount: 0,
+        activeRunCount: 0,
+        totalCostUsdMicros: 0,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        lastActiveAt: null,
+        createdAt: "2026-05-25T18:00:00.000Z",
+        terminatedAt: null,
+        cwd: ["/tmp/project"],
+        settingSources: null,
+        sandboxEnabled: null,
+        cloudOptions: null,
+        mcpServerIds: [],
+        subagentDefinitionIds: [],
+        latestRunId: null,
+        latestRunStatus: null,
+        input,
+      })),
     };
 
-    await createAgent({ name: "CLI", model: "composer-2-5", mode: "agent", workspace: "/tmp/project", json: true }, { http, write: (line) => lines.push(line) });
+    await createAgent({ name: "CLI", model: "composer-2-5", mode: "ask", workspace: "/tmp/project", json: true }, { http, write: (line) => lines.push(line) });
 
     expect(http.createAgent).toHaveBeenCalledWith({
       name: "CLI",
       modelId: "composer-2-5",
       mode: "local",
       cwd: ["/tmp/project"],
+      mcpServerIds: [],
+      subagentDefinitionIds: [],
     });
+    expect(http.updateAgent).toHaveBeenCalledWith("agent-1", { executionMode: "ask" });
     expect(JSON.parse(lines[0] ?? "{}")).toMatchObject({ type: "agent_created", agent: { id: "agent-1" } });
   });
 });
