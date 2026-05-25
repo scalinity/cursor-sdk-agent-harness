@@ -3519,3 +3519,22 @@ Tightened the Priority 1 sub-agent dashboard slice against the standalone Phase 
 - `pnpm typecheck && pnpm lint && pnpm test` ✅ — 65 server test files / 454 passed + 1 skipped, 31 web test files / 139 passed, 4 shared test files / 39 passed, 3 eslint-plugin test files / 6 passed, scripts 11 passed
 - `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop && (pkill -f "Cursor SDK Agent Harness" 2>/dev/null; sleep 1) && rm -rf "/Applications/Cursor SDK Agent Harness.app" && mv "apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app" /Applications/` ✅
 - Installed app timestamp: `May 25 18:21:26 2026 /Applications/Cursor SDK Agent Harness.app` ✅
+
+---
+
+## Phase 24B Reconcile — CLI / Headless Mode
+
+### Summary
+
+Merged the source-only CLI/headless lane from the stale `phase-24b-interactive-cli` worktree. The merge intentionally excluded generated `apps/cli/dist` and `apps/cli/node_modules` artifacts while preserving the CLI package source, tests, package manifests, and lockfile updates.
+
+### Files modified
+
+- `apps/cli/**` — CLI package source, tests, config, command adapters, renderers, and Ink REPL components
+- `package.json` — adds `start:server`
+- `apps/server/package.json` — changes `start` to run the built server entrypoint
+- `pnpm-lock.yaml` — records CLI package dependencies
+
+### Verification
+
+- `pnpm -F @harness/shared build && pnpm typecheck && pnpm lint && pnpm test` ✅ — CLI 19 tests, shared 39, web 134, server 453 passed + 1 skipped, eslint plugin 6, scripts 11

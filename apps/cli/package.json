@@ -1,0 +1,32 @@
+{
+  "name": "@harness/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "harness": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node -e \"require('fs').chmodSync('dist/index.js', 0o755)\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@harness/shared": "workspace:*",
+    "chalk": "5.6.2",
+    "cli-spinners": "3.4.0",
+    "commander": "14.0.3",
+    "ink": "6.3.1",
+    "ink-text-input": "6.0.0",
+    "react": "19.0.0",
+    "ws": "8.18.0",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.5",
+    "@types/react": "19.0.7",
+    "@types/ws": "8.5.13",
+    "typescript": "5.7.3",
+    "vitest": "3.2.4"
+  }
+}
