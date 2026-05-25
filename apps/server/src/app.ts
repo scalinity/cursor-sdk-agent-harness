@@ -26,6 +26,11 @@ import {
   type SdkAdapter,
 } from "./sdk/index.js";
 import { createRunBus, wsPlugin, type RunBus } from "./ws/index.js";
+import {
+  TerminalSession,
+  terminalWsPlugin,
+  createWorkspaceCwdResolver,
+} from "./terminal/index.js";
 import { MAX_IMAGE_ATTACHMENTS, MAX_IMAGE_DATA_BYTES } from "@harness/shared";
 
 export interface AppDeps {
@@ -74,6 +79,12 @@ export interface AppDeps {
    * Tests may pass a shared instance to assert observation behavior.
    */
   perfCounters?: PerfCounters;
+  /**
+   * Embedded terminal session. Production builds one backed by node-pty.
+   * Integration tests inject a `TerminalSession` with a stub `spawnPty` so
+   * they exercise the `/ws/terminal` wiring without a real shell.
+   */
+  terminalSession?: TerminalSession;
 }
 
 export interface BuiltApp {
@@ -99,6 +110,11 @@ export interface BuiltApp {
    * `/api/observability/perf` route can read live snapshots.
    */
   perfCounters: PerfCounters;
+  /**
+   * Embedded terminal session, exposed so tests can drive/inspect it and so
+   * the desktop entrypoint could surface session state if needed.
+   */
+  terminalSession: TerminalSession;
 }
 
 export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
@@ -234,6 +250,24 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       : {}),
   });
 
+  // Embedded terminal — a single long-lived PTY shared over /ws/terminal.
+  // Ephemeral I/O: it never touches the persist-and-broadcast pipeline. The
+  // shell starts in the active workspace dir (allowlist-resolved), else home.
+  const terminalSession =
+    deps.terminalSession ??
+    new TerminalSession({
+      resolveCwd: createWorkspaceCwdResolver({
+        settings: repos.settings,
+        allowlist: repos.workspaceAllowlist,
+      }),
+      logger: app.log,
+    });
+  await app.register(terminalWsPlugin, {
+    csrf: csrfTokenizer,
+    allowedOrigins,
+    session: terminalSession,
+  });
+
   // Phase 13 — finalize any runs left RUNNING by a previous process.
   // Append the synthetic `run.interrupted` events BEFORE we accept
   // connections so the first replay sees the truncated timeline.
@@ -245,6 +279,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
 
   app.addHook("onClose", async () => {
     await agentRuntime.shutdown();
+    terminalSession.dispose();
     runBus.clear();
     pipeline.clear();
   });
@@ -280,5 +315,6 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     runBus,
     activeRuns,
     perfCounters,
+    terminalSession,
   };
 }

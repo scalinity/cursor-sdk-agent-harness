@@ -1,12 +1,14 @@
-import type { ComponentType } from "react";
+import { useRef, type ComponentType } from "react";
 import { codeEditEventsForRun, parseCodeEditPayload, selectedCodeEditEvent } from "../../lib/code-edit-events.js";
+import { cn } from "../../lib/cn.js";
 import { useRunStore } from "../../state/run-store.js";
 import type { CanonicalRunEvent } from "../../state/run-store.js";
-import { useUiStore, type RightPanelTab } from "../../state/ui-store.js";
+import { useUiStore } from "../../state/ui-store.js";
 import { CodeEditPreviewPanel } from "../streaming/CodeEditPreviewPanel.js";
 import { RightPaneTabs } from "./RightTabs.js";
 import { Breadcrumbs } from "./Breadcrumbs.js";
-import { FilesIcon, TerminalIcon, type IconProps } from "./ToolbarIcons.js";
+import { TerminalSurface } from "./TerminalSurface.js";
+import { FilesIcon, type IconProps } from "./ToolbarIcons.js";
 import { BrowserPane } from "../browser/BrowserPane.js";
 
 export interface RightPaneProps {
@@ -20,16 +22,26 @@ const EMPTY_EVENTS: CanonicalRunEvent[] = [];
 
 export function RightPane({ activeRunId }: RightPaneProps) {
   const rightPanelTab = useUiStore((s) => s.rightPanelTab);
+  // Latch: keep the terminal mounted once it has been opened so its PTY
+  // session and scrollback survive a tab switch (the server holds the shell;
+  // the client socket + xterm stay alive). Mutating a ref during render is a
+  // safe, idempotent memo here — no effect required.
+  const terminalOpenedRef = useRef(false);
+  if (rightPanelTab === "terminal") terminalOpenedRef.current = true;
+
   return (
     <section className="right-pane">
       <RightPaneTabs />
-      {rightPanelTab === "diff" ? (
-        <DiffSurface activeRunId={activeRunId} />
-      ) : rightPanelTab === "browser" ? (
-        <BrowserPane activeRunId={activeRunId} />
-      ) : (
-        <PlaceholderSurface tab={rightPanelTab} />
-      )}
+      {rightPanelTab === "diff" ? <DiffSurface activeRunId={activeRunId} /> : null}
+      {rightPanelTab === "files" ? <PlaceholderSurface tab="files" /> : null}
+      {rightPanelTab === "browser" ? <BrowserPane activeRunId={activeRunId} /> : null}
+      {terminalOpenedRef.current ? (
+        <div
+          className={cn("terminal-mount", rightPanelTab !== "terminal" && "terminal-mount--hidden")}
+        >
+          <TerminalSurface />
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -59,7 +71,7 @@ function DiffSurface({ activeRunId }: RightPaneProps) {
 }
 
 const PLACEHOLDERS: Record<
-  Exclude<RightPanelTab, "diff" | "browser">,
+  "files",
   { title: string; body: string; Icon: ComponentType<IconProps> }
 > = {
   files: {
@@ -67,14 +79,9 @@ const PLACEHOLDERS: Record<
     body: "A workspace file browser isn't wired up yet. Agent file edits appear under Diff.",
     Icon: FilesIcon,
   },
-  terminal: {
-    title: "Terminal",
-    body: "An embedded terminal isn't available yet. Agent shell tool calls stream into the chat timeline.",
-    Icon: TerminalIcon,
-  },
 };
 
-function PlaceholderSurface({ tab }: { tab: Exclude<RightPanelTab, "diff" | "browser"> }) {
+function PlaceholderSurface({ tab }: { tab: "files" }) {
   const { title, body, Icon } = PLACEHOLDERS[tab];
   return (
     <div className="right-pane__placeholder">
