@@ -3378,13 +3378,211 @@ const runSearchQuerySchema = z.object({
 
 Search input at the top of the Run History page. Debounced 300ms, minimum 2 characters. When active, replaces normal run list with ranked search results. `Cmd+F` on the page focuses the search input.
 
-### 17.7 v1.2 Roadmap Summary
+### 17.7 @-Mention Context System (Phase 20)
 
-| Phase | Title | Key features | Dependencies |
-|---|---|---|---|
-| 19 | Execution Modes, Git Status, and UX Quick Wins | Mode system (Ask/Agent/YOLO), git status bar, code block copy/apply, session rename, Cmd+N, FTS search | v1.1 complete |
-| 20 | Context Intelligence and Rules | @-mention system (@file, @folder, @symbol), project rules (`.harness/rules/`), codebase grep/search UI, Ask mode + codebase context | Phase 19 |
-| 21 | Enrichment | Custom docs indexing, Notepads (persistent context), terminal AI (Cmd+K → command), slash commands | Phase 20 |
-| 22 | Strategic | Codebase vector indexing, sub-agent parallel UI, Design Mode (browser → context), commit message generation, session diff view | Phases 19–21 |
+Structured context injection in the Composer via `@` trigger. This is the single most impactful v1.2 feature — it transforms the harness from a blind prompt box into a context-aware agent interface.
+
+#### Mention kinds
+
+```ts
+export const contextMentionKindSchema = z.enum([
+  "file",      // Full file content
+  "folder",    // Directory listing + key file excerpts
+  "symbol",    // Function/class/type definition
+  "codebase",  // Grep or semantic search results
+  "rules",     // Specific project rule
+  "docs",      // Indexed documentation (Phase 22)
+  "notepad",   // Persistent notepad content (Phase 22)
+  "element",   // Picked browser element (Phase 24)
+]);
+```
+
+#### Autocomplete
+
+Typing `@` in the Composer opens a floating dropdown. Results come from `GET /api/context/search?q=...&kinds=file,folder,symbol`. The endpoint walks the active workspace (respecting `.gitignore`), does fuzzy path matching for files/folders, and scans exported symbols (regex-based fast scanner for `.ts`/`.tsx`/`.js`/`.jsx`). Results are cached 60 seconds per workspace.
+
+#### Context chips
+
+Selected mentions appear as chips above the Composer input. Each chip shows an icon, label, and token estimate (`Math.ceil(content.length / 4)`). Chips are removable. On submit, mentions are sent alongside the prompt.
+
+#### Resolution and prompt assembly
+
+`POST /api/context/resolve` reads file content, folder trees, or symbol definitions (all realpath-validated against workspace policy). Resolved content is assembled into the prompt at the SDK boundary:
+
+```
+{project rules block}
+<context>
+{resolved mention content, separated by ---}
+</context>
+{mode prefix if ask mode}
+
+{user prompt}
+```
+
+The original user prompt (without context) is stored in `runs.prompt`. Assembled context metadata (kinds, paths, token estimates) is stored in `runs.context_metadata` (JSON column, migration 0004).
+
+Truncation limits: files at 50,000 chars, folders at 200 entries, symbols at 10,000 chars, codebase search at 10 results × 500 chars each.
+
+### 17.8 Project Rules System (Phase 20)
+
+Rules are markdown files in `.harness/rules/` within each workspace root. Each has YAML frontmatter with `name`, `scope`, and optionally `glob`.
+
+#### Scoping
+
+| Scope | Behavior |
+|---|---|
+| `always` | Included in every run for this workspace automatically. |
+| `glob` | Included when any @-mentioned file path matches the glob pattern. |
+| `manual` | Only included when explicitly @-mentioned by rule name. |
+
+#### Integration
+
+Rules are read at run start by `agent-runtime.ts`. Always-rules are prepended unconditionally. Glob-rules are matched against the run's context mentions. Manual-rules appear in the @-mention autocomplete (book icon). Invalid frontmatter is logged and skipped. Missing `.harness/rules/` is silently ignored.
+
+No database storage — rules live in the filesystem alongside the code they govern.
+
+### 17.9 Codebase Search (Phase 20)
+
+Text-based search via `GET /api/search/grep` and file search via `GET /api/search/files`.
+
+Grep uses `rg` (ripgrep) if available, falling back to `grep -rn` with `--exclude-dir` for `node_modules`, `.git`, `dist`. Results include 2 lines of context above/below each match. File search uses `find` or `fd` with fuzzy name matching. Both endpoints: `execFile` only (never `exec`), 10-second timeout, workspace realpath-validated.
+
+UI: new "Search" tab in the right pane with Text/Files toggle and click-to-add-as-context on results. `@codebase {query}` in the Composer resolves via grep and includes top results.
+
+### 17.10 Plan Mode (Phase 21)
+
+Two-phase execution: agent generates a reviewable plan, user approves/edits/rejects, then agent executes.
+
+Plan mode is a boolean toggle (`planEnabled`) on runs, not a separate execution mode. When active:
+
+1. **Generate**: Prompt prefix instructs agent to output only a plan (no tool use).
+2. **Review**: Plan text stored in `runs.plan_content`. WS frame `plan_ready` sent to client. UI shows `PlanReviewPanel` with the plan rendered as markdown and three buttons: Approve, Edit, Cancel.
+3. **Execute**: On approve, follow-up message says "Execute the plan." On edit, sends the edited plan. On reject, run is cancelled.
+
+New WS frames: `plan_ready` (server→client), `plan_decision` (client→server with `approve|edit|reject`).
+
+Schema: `runs.plan_enabled INTEGER`, `runs.plan_status TEXT CHECK(...)`, `runs.plan_content TEXT` (migration 0005).
+
+### 17.11 Session Diff View (Phase 21)
+
+Aggregated file-change view for a run: `GET /api/runs/:runId/diff`.
+
+**Hybrid approach:** Use `git diff` as primary source when workspace is a git repo; fall back to reconstructing from `code_edit.detected` events.
+
+UI: `SessionDiffPanel` in the right pane or as a full overlay. File list sidebar (status icons + addition/deletion counts), unified/split diff toggle, Lezer syntax highlighting on diff content. New design tokens for diff backgrounds (`--color-diff-add-bg`, `--color-diff-remove-bg` in OKLCH).
+
+### 17.12 Git Commit from Harness (Phase 21)
+
+**Commit message generation:** `POST /api/git/generate-commit-message` analyzes the session diff and original prompt. Template-based in v1.2: infers conventional commit type from diff shape (additions→feat, modifications→refactor), uses first prompt line as subject.
+
+**Git commit:** `POST /api/git/commit` with message, optional `stageAll` and `push` flags. Selective staging via `POST /api/git/stage` with file list. All commands use `execFile` in realpath-validated workspace.
+
+UI: `CommitDialog` modal from the Session Diff Panel — pre-filled commit message, file checklist, push toggle, branch display.
+
+### 17.13 Custom Documentation Indexing (Phase 22)
+
+Users paste a URL → server crawls the site → content is FTS5-indexed → available via `@docs` mentions.
+
+**Crawler** (`apps/server/src/docs/crawler.ts`): Breadth-first crawl up to `maxPages` (default 100). HTML→text via regex strip (no heavy dependencies). Respects `robots.txt`. Rate limited: 2 concurrent, 500ms delay. Timeout: 10s per page, 5min total.
+
+**Storage:** `docs_sources` table (id, name, base_url, status, page_count) + `docs_pages` table (id, source_id, url, title, content) + `docs_fts` FTS5 virtual table with triggers. Migration 0006.
+
+**Search:** `GET /api/docs/search?q=...` returns FTS5-ranked results with snippets.
+
+**@docs integration:** `@docs {query}` in Composer resolves by searching indexed docs and including top results.
+
+### 17.14 Notepads (Phase 22)
+
+Persistent markdown documents stored in SQLite (`notepads` table, migration 0006). CRUD via REST. @-mentionable: `@NotpadName` adds notepad content to agent context.
+
+UI: `/notepads` page with list + textarea editor. Auto-save on blur/2s debounce.
+
+### 17.15 Terminal AI (Phase 22)
+
+Cmd+K in the terminal opens a floating prompt bar. User types natural language → server generates a shell command via `POST /api/terminal/generate-command`.
+
+**Generation:** SDK-based (lightweight agent call with 10s timeout). Includes shell type, cwd, and last 50 lines of terminal output as context.
+
+**Dangerous command detection:** Scans for `rm -rf`, `kill`, `DROP TABLE`, `git push --force`, etc. UI shows warning banner when `dangerous: true`.
+
+UI: `TerminalCommandBar` — single-line input, generated command display, Enter to run, Tab to edit, Escape to dismiss.
+
+### 17.16 Slash Commands (Phase 22)
+
+User-definable prompt templates invoked from Composer with `/commandName`. Stored in `slash_commands` table (migration 0006). Variables in templates use `{{variable}}` syntax — on selection, user fills a small form before expansion.
+
+Five built-in commands seeded on install: `/explain`, `/review`, `/test`, `/fix`, `/refactor`.
+
+### 17.17 Semantic Codebase Search (Phase 23)
+
+Vector embedding index of workspace files for natural-language code search.
+
+**Embedding model:** `all-MiniLM-L6-v2` (384-dim, ONNX) loaded via `@xenova/transformers` or `onnxruntime-node`. Model cached in `~/Library/Application Support/cursor-sdk-agent-harness/models/`.
+
+**Chunking:** 512-token chunks with 128-token overlap. Prefer function/class boundaries. Index `.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.go`, `.rs`, `.java`, `.md`, `.json`. Skip `node_modules`, `.git`, `dist`, binary files, files >100KB.
+
+**Storage:** `embeddings` table (id, workspace_id, file_path, line range, content, embedding BLOB, content_hash) + `index_status` table. Migration 0007.
+
+**Incremental indexing:** Content-hash-based change detection. Background task on workspace selection + file watcher (`fs.watch` recursive, 2s debounce).
+
+**Search:** `GET /api/search/semantic?q=...` embeds query, computes cosine similarity against stored vectors, returns top N. Brute-force for v1.2 (handles 50K chunks in <100ms).
+
+**Performance target:** Index 10,000-file workspace in under 5 minutes on M1+.
+
+### 17.18 Multi-Model Provider Support (Phase 23)
+
+Route different tasks to different LLM providers. Cursor SDK models remain the only option with full tool-use. Non-Cursor models (Anthropic, OpenAI, Google, Ollama) operate in Ask/Plan modes only (chat-only, no file editing or terminal commands).
+
+**Provider abstraction:** `ModelProvider` interface with `sendMessage()` returning `AsyncIterable<ProviderEvent>`. Events normalized to canonical format.
+
+**API key storage:** All keys in macOS Keychain under `provider:{id}:api-key`. Configuration in `model_providers` table (migration 0007).
+
+**Run routing:** Model selection determines provider. Non-Cursor models bypass `AgentRuntimeManager` and use direct API clients. Model selector groups by provider with tool-use capability badges.
+
+**Auto mode:** Heuristic model selection based on prompt length, execution mode, and available providers. Fast model for short ask queries, capable model for agent/plan tasks.
+
+### 17.19 Sub-Agent Dashboard (Phase 24)
+
+Visual monitoring of parallel sub-agent execution. Detect sub-agent spawning from SDK events (OQ-24: MCP tool calls). Child runs linked via `runs.parent_run_id` (migration 0008).
+
+UI: `SubagentDashboard` — responsive card grid showing each sub-agent's name, status, elapsed time, token count, and compact event preview. Summary bar with active/completed counts.
+
+### 17.20 Design Mode (Phase 24)
+
+Click browser elements to target them as agent context. `BrowserController.pickElement()` injects a hover-highlight overlay, captures element data (outerHTML, computed styles, CSS selector, XPath, bounding-rect screenshot) on click. Captured data becomes a context chip of kind `"element"`.
+
+### 17.21 Git Worktree Isolation (Phase 24)
+
+Run agents in isolated git worktrees. `WorktreeManager` creates/removes worktrees, tracks association on run records. Diff/merge UI reuses `SessionDiffPanel`.
+
+### 17.22 CLI / Headless Mode (Phase 24)
+
+`apps/cli/` package — thin HTTP/WS client against the Fastify server. Commands: `run`, `agents list/create`, `search`, `history`. Streaming terminal output with markdown rendering. JSON mode for scripting. Requires server running independently (`pnpm start:server`).
+
+### 17.23 Light Theme (Phase 24)
+
+Light variant of the OKLCH token system in `tokens-light.css`. Theme selector: Light/Dark/System. `data-theme` attribute on `<html>`. Persisted as `settings.ui.theme`.
+
+### 17.24 v1.2 Roadmap Summary
+
+| Phase | Sprint | Title | Key features | Dependencies |
+|---|---|---|---|---|
+| 19 | 1 | Execution Modes & UX Quick Wins | Mode system (Ask/Agent/YOLO), git status bar, code block copy/apply, session rename, Cmd+N, FTS search | v1.1 complete |
+| 20 | 2 | Context Intelligence & Rules | @-mention system, project rules, codebase grep/search UI | Phase 19 |
+| 21 | 3 | Planning, Git, & Session Diffs | Plan mode, session diff view, commit message generation, git commit/push | Phase 20 |
+| 22 | 4 | Enrichment | Custom docs indexing, Notepads, terminal AI, slash commands | Phase 21 |
+| 23 | 5 | Semantic Search & Multi-Model | Vector codebase indexing, multi-provider BYOK, auto mode | Phase 22 |
+| 24 | 6 | Advanced Agent Features | Sub-agent dashboard, Design Mode, worktree isolation, CLI, light theme | Phase 23 (features are independent) |
+
+### 17.25 v1.2 Migration Summary
+
+| Migration | Phase | Tables/Columns |
+|---|---|---|
+| 0003 | 19 | `agents.mode`, `runs.mode`, `runs.name`, `runs_fts` virtual table + triggers |
+| 0004 | 20 | `runs.context_metadata` |
+| 0005 | 21 | `runs.plan_enabled`, `runs.plan_status`, `runs.plan_content` |
+| 0006 | 22 | `docs_sources`, `docs_pages`, `docs_fts`, `notepads`, `slash_commands` |
+| 0007 | 23 | `embeddings`, `index_status`, `model_providers` |
+| 0008 | 24 | `runs.parent_run_id` |
 
 Phase prompts live in the existing prompts directory. Each phase follows the same one-phase-per-session discipline from v1.1.
