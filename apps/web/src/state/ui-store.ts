@@ -8,7 +8,7 @@
  *   - A simple toast queue (used by `useErrorReporter`) with per-toast TTL
  */
 import { create } from "zustand";
-import { modelIdSchema, type ModelId, type ReplaySpeed, type WorkspaceAllowlistRow } from "@harness/shared";
+import { DEFAULT_MODEL_ID, type ReplaySpeed, type WorkspaceAllowlistRow } from "@harness/shared";
 
 export type ConnectionState =
   | "idle"
@@ -56,7 +56,7 @@ export interface UiState {
    * auto-provisioner (`useEnsureDefaultAgent`): switching it ensures/selects
    * a default agent configured for that model. Persisted across reloads.
    */
-  selectedModelId: ModelId;
+  selectedModelId: string;
   replaySpeedByRunId: Record<string, ReplaySpeed>;
   replayPausedByRunId: Record<string, boolean>;
   selectedCodeEditEventByRunId: Record<string, string>;
@@ -88,7 +88,7 @@ export interface UiState {
   setCsrfToken: (token: string | null) => void;
   setConnectionState: (state: ConnectionState) => void;
   setComposerDraft: (draft: string) => void;
-  setSelectedModelId: (modelId: ModelId) => void;
+  setSelectedModelId: (modelId: string) => void;
   setReplaySpeed: (runId: string, speed: ReplaySpeed) => void;
   setReplayPaused: (runId: string, paused: boolean) => void;
   selectCodeEditEvent: (runId: string, eventId: string | null) => void;
@@ -143,19 +143,19 @@ function persistRailHidden(hidden: boolean): void {
   }
 }
 
-function readInitialSelectedModel(): ModelId {
-  if (typeof window === "undefined") return "composer-2-5-fast";
+function readInitialSelectedModel(): string {
+  if (typeof window === "undefined") return DEFAULT_MODEL_ID;
   try {
-    const parsed = modelIdSchema.safeParse(
-      window.localStorage.getItem(SELECTED_MODEL_STORAGE_KEY),
-    );
-    return parsed.success ? parsed.data : "composer-2-5-fast";
+    // Phase 23 — accepts any unified model id (Cursor enum, `auto`, or
+    // `{providerId}:{model}`); not constrained to the Cursor enum anymore.
+    const stored = window.localStorage.getItem(SELECTED_MODEL_STORAGE_KEY);
+    return stored && stored.length > 0 ? stored : DEFAULT_MODEL_ID;
   } catch {
-    return "composer-2-5-fast";
+    return DEFAULT_MODEL_ID;
   }
 }
 
-function persistSelectedModel(modelId: ModelId): void {
+function persistSelectedModel(modelId: string): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(SELECTED_MODEL_STORAGE_KEY, modelId);

@@ -37,9 +37,18 @@ function resetUiStore(): void {
 describe("Composer", () => {
   beforeEach(() => {
     resetUiStore();
+    // useModels() fetches /api/models on mount; stub it so the selector falls
+    // back to the built-in Cursor model baseline (no real network).
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ items: [], autoAvailable: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    ) as unknown as typeof fetch;
   });
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
   });
 
   it("enables the textarea even without an active agent", () => {

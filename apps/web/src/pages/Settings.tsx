@@ -8,6 +8,8 @@ import { mutatingRequest } from "../lib/http-client.js";
 import { ModeToggle } from "../components/ModeToggle.js";
 import { DocsSettings } from "../components/settings/DocsSettings.js";
 import { CommandsSettings } from "../components/settings/CommandsSettings.js";
+import { ProvidersSettings } from "../components/settings/ProvidersSettings.js";
+import { IndexSettings } from "../components/settings/IndexSettings.js";
 
 export function Settings() {
   const navigate = useNavigate();
@@ -95,6 +97,8 @@ export function Settings() {
           </div>
         </section>
 
+        <IndexSettings />
+        <ProvidersSettings />
         <DocsSettings />
         <CommandsSettings />
       </div>

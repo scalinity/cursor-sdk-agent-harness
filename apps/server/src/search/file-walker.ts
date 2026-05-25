@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import path from "node:path";
 import { minimatch } from "minimatch";
 
@@ -117,7 +118,7 @@ export async function walkWorkspace(
   const out: WalkedFile[] = [];
 
   async function walk(dir: string): Promise<void> {
-    let entries: import("node:fs").Dirent[];
+    let entries: Dirent[];
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
     } catch {

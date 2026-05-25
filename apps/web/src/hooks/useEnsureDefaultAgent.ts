@@ -30,15 +30,23 @@ import {
   MODEL_LABELS,
   type AgentSummary,
   type CreateAgentRequest,
-  type ModelId,
 } from "@harness/shared";
 import { httpRequest } from "../lib/http-client.js";
 import { useErrorReporter } from "./useErrorReporter.js";
 
 const DEFAULT_AGENT_MAP_KEY = "harness:defaultAgentIds";
 
-function defaultAgentName(modelId: ModelId): string {
-  return `Coding Agent (${MODEL_LABELS[modelId]})`;
+function modelLabel(modelId: string): string {
+  if (modelId === "auto") return "Auto";
+  const known = (MODEL_LABELS as Record<string, string>)[modelId];
+  if (known) return known;
+  // Provider-qualified id `{providerId}:{model}` → show the model part.
+  const colon = modelId.indexOf(":");
+  return colon > 0 ? modelId.slice(colon + 1) : modelId;
+}
+
+function defaultAgentName(modelId: string): string {
+  return `Coding Agent (${modelLabel(modelId)})`;
 }
 
 function readDefaultAgentMap(): Record<string, string> {
@@ -72,7 +80,7 @@ function writeDefaultAgentId(mapKey: string, agentId: string): void {
 export interface UseEnsureDefaultAgentInput {
   activeWorkspaceId: string | null;
   workspacePath: string | null;
-  modelId: ModelId;
+  modelId: string;
   agents: AgentSummary[];
   activeAgent: AgentSummary | null;
   createAgent: (request: CreateAgentRequest) => Promise<AgentSummary>;

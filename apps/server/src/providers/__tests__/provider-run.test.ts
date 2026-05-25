@@ -12,7 +12,6 @@ class ScriptedProvider implements ModelProvider {
   readonly kind = "anthropic";
   readonly name = "Scripted";
   constructor(private readonly script: ProviderEvent[]) {}
-  // eslint-disable-next-line @typescript-eslint/require-await
   async *sendMessage(): AsyncIterable<ProviderEvent> {
     for (const ev of this.script) yield ev;
   }
