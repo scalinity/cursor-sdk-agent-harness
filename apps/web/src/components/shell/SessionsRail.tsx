@@ -354,11 +354,6 @@ function RailItem({ run, isActive, onSelectRun, onDeleteRun, onRenameRun }: Rail
   const startRename = () => {
     setRenameValue(label);
     setRenaming(true);
-    // Focus happens after the next paint when the input renders.
-    requestAnimationFrame(() => {
-      renameInputRef.current?.focus();
-      renameInputRef.current?.select();
-    });
   };
 
   const commitRename = () => {
@@ -404,7 +399,12 @@ function RailItem({ run, isActive, onSelectRun, onDeleteRun, onRenameRun }: Rail
       <div className="min-w-0">
         {renaming ? (
           <input
-            ref={renameInputRef}
+            ref={(node) => {
+              renameInputRef.current = node;
+              // Select the text once the input mounts.
+              node?.select();
+            }}
+            autoFocus
             className="w-full bg-transparent text-md text-text-primary outline-none"
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
