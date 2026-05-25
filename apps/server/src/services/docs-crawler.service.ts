@@ -61,6 +61,15 @@ export async function assertPublicUrl(raw: string): Promise<void> {
   }
 }
 
+const HTML_ENTITIES: Record<string, string> = {
+  nbsp: " ",
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  "#39": "'",
+};
+
 export function htmlToText(html: string): string {
   return html
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
@@ -69,12 +78,13 @@ export function htmlToText(html: string): string {
     .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
     .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
     .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
+    // Single-pass entity decode: a global replace scans the original string
+    // without re-scanning its own output, so `&amp;lt;` correctly yields
+    // `&lt;` rather than being double-decoded to `<`.
+    .replace(
+      /&(nbsp|amp|lt|gt|quot|#39);/gi,
+      (full, name: string) => HTML_ENTITIES[name.toLowerCase()] ?? full,
+    )
     .replace(/\s+/g, " ")
     .trim();
 }

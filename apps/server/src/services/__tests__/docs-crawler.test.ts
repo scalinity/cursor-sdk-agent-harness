@@ -33,6 +33,12 @@ describe("htmlToText", () => {
     const html = "<p>A &amp; B &lt; C &gt; D &quot;E&quot; F&#39;s</p>";
     expect(htmlToText(html)).toBe('A & B < C > D "E" F\'s');
   });
+
+  it("does not double-decode &amp;lt;", () => {
+    // A doc showing the escaped sequence &lt; encodes it as &amp;lt;.
+    const html = "<p>Write &amp;lt; for a less-than sign</p>";
+    expect(htmlToText(html)).toBe("Write &lt; for a less-than sign");
+  });
 });
 
 describe("extractTitle", () => {
