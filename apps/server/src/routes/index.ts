@@ -58,6 +58,10 @@ import {
   registerRulesRoutes,
   type RulesRoutesDeps,
 } from "./rules.routes.js";
+import {
+  registerProvidersRoutes,
+  type ProvidersRoutesDeps,
+} from "./providers.routes.js";
 
 export interface RouteDeps {
   security: SecurityRoutesDeps;
@@ -79,6 +83,7 @@ export interface RouteDeps {
   notepads: NotepadsRoutesDeps;
   commands: CommandsRoutesDeps;
   terminalAi: TerminalAiRoutesDeps;
+  providers: ProvidersRoutesDeps;
 }
 
 export async function registerRoutes(
@@ -105,4 +110,5 @@ export async function registerRoutes(
   await registerNotepadsRoutes(app, deps.notepads);
   await registerCommandsRoutes(app, deps.commands);
   await registerTerminalAiRoutes(app, deps.terminalAi);
+  await registerProvidersRoutes(app, deps.providers);
 }

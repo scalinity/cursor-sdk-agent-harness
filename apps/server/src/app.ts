@@ -8,6 +8,7 @@ import { createPerfCounters, type PerfCounters } from "./observability/perf-coun
 import {
   CursorApiKeyStore,
   CsrfSecretStore,
+  ProviderKeyStore,
 } from "./keychain/index.js";
 import { assertBindAllowed } from "./security/bind-policy.js";
 import { CsrfTokenizer, csrfPlugin } from "./security/csrf.js";
@@ -33,6 +34,7 @@ import {
 } from "./terminal/index.js";
 import { MAX_IMAGE_ATTACHMENTS, MAX_IMAGE_DATA_BYTES } from "@harness/shared";
 import { SearchService } from "./search/search-service.js";
+import { ModelRouter } from "./providers/model-router.js";
 
 export interface AppDeps {
   env: Env;
@@ -52,6 +54,9 @@ export interface AppDeps {
    * never downloads the ONNX model.
    */
   searchService?: SearchService;
+  /** Phase 23 — BYOK provider key store + model router (tests may inject). */
+  providerKeyStore?: ProviderKeyStore;
+  modelRouter?: ModelRouter;
   /**
    * Phase 06 SDK adapter. Production uses `createCursorSdkAdapter()` (the
    * default when omitted). Integration tests inject a stubbed adapter that
@@ -231,6 +236,12 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       logger: app.log,
     });
 
+  // Phase 23 — BYOK provider key store + multi-model router.
+  const providerKeyStore =
+    deps.providerKeyStore ?? new ProviderKeyStore({ service: env.KEYCHAIN_SERVICE });
+  const modelRouter =
+    deps.modelRouter ?? new ModelRouter({ modelProvidersRepo: repos.modelProviders, providerKeyStore });
+
   const sdk = deps.sdk ?? createCursorSdkAdapter();
   const agentRuntime = createAgentRuntime({
     agentsRepo: repos.agents,
@@ -246,6 +257,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     pipeline,
     allowlistRepo: repos.workspaceAllowlist,
     searchService,
+    modelRouter,
   });
 
   const approvalResponder =
@@ -352,6 +364,12 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     notepads: { notepadsRepo: repos.notepads },
     commands: { slashCommandsRepo: repos.slashCommands },
     terminalAi: {},
+    providers: {
+      modelProvidersRepo: repos.modelProviders,
+      providerKeyStore,
+      modelRouter,
+      logger: app.log,
+    },
   });
 
   // Seed built-in slash commands on first install

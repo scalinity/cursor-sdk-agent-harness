@@ -33,6 +33,7 @@ export type {
 
 // Models, modes, statuses, sources
 export {
+  AUTO_MODEL_ID,
   DEFAULT_MODEL_ID,
   MODEL_LABELS,
   SDK_RUN_TERMINAL_STATUSES,
@@ -41,6 +42,7 @@ export {
   executionModeSchema,
   mcpValidationStatusSchema,
   modelIdSchema,
+  unifiedModelIdSchema,
   knownLanguageSchema,
   replaySpeedSchema,
   sdkRunStatusSchema,
@@ -53,6 +55,7 @@ export type {
   ExecutionMode,
   McpValidationStatus,
   ModelId,
+  UnifiedModelId,
   KnownLanguage,
   ReplaySpeed,
   SdkRunStatus,

@@ -10,6 +10,21 @@ export const MODEL_LABELS: Record<ModelId, string> = {
 
 export const DEFAULT_MODEL_ID: ModelId = "composer-2-5-fast";
 
+/**
+ * Phase 23 — sentinel for Auto mode (system picks the model per task).
+ * Stored as a run/agent model id; resolved to a concrete model at run start.
+ */
+export const AUTO_MODEL_ID = "auto" as const;
+
+/**
+ * A selected model id in the multi-provider world: a bare Cursor enum id, the
+ * `auto` sentinel, or a provider-qualified `{providerId}:{modelName}` string.
+ * Kept loose (a string) because BYOK model names are open-ended; the strict
+ * `modelIdSchema` still guards the Cursor SDK boundary + pricing.
+ */
+export const unifiedModelIdSchema = z.string().min(1).max(200);
+export type UnifiedModelId = z.infer<typeof unifiedModelIdSchema>;
+
 export const settingSourceSchema = z.enum([
   "project",
   "user",

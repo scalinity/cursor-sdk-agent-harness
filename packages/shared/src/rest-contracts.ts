@@ -7,6 +7,7 @@ import {
   executionModeSchema,
   mcpValidationStatusSchema,
   modelIdSchema,
+  unifiedModelIdSchema,
   replaySpeedSchema,
   sdkRunStatusSchema,
   settingSourceSchema,
@@ -61,7 +62,8 @@ export const createAgentRequestSchema = z
   .object({
     name: z.string().min(1).max(256),
     mode: agentModeSchema,
-    modelId: modelIdSchema,
+    // Phase 23 — accepts Cursor enum ids, `auto`, or `{providerId}:{model}`.
+    modelId: unifiedModelIdSchema,
     cwd: z.array(z.string().min(1)).optional(),
     settingSources: z.array(settingSourceSchema).optional(),
     sandboxEnabled: z.boolean().optional(),
