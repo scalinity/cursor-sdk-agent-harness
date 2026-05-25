@@ -3538,3 +3538,17 @@ Merged the source-only CLI/headless lane from the stale `phase-24b-interactive-c
 ### Verification
 
 - `pnpm -F @harness/shared build && pnpm typecheck && pnpm lint && pnpm test` ✅ — CLI 19 tests, shared 39, web 134, server 453 passed + 1 skipped, eslint plugin 6, scripts 11
+
+### Review and address notes
+
+- `review-5` follow-up addressed all Phase 24B findings: workspace-correct default agent selection, REPL terminal-state cleanup, implemented one-shot `--no-stream`/`--timeout`/`--approve`, incremental one-shot streaming, WebSocket pre-terminal disconnect errors, configurable WS origin, terminal-output sanitization, private CLI preference/history writes, `/agent`/`/model`/inline `/history`, `agents create --mode`, explicit unsupported `search --workspace`, debounced/stale-guarded mentions, queued REPL prompts, typed CLI ports, stable prompt history, friendly command errors, and client contract tests.
+
+### Review address verification
+
+- `pnpm -F @harness/cli typecheck` ✅
+- `pnpm -F @harness/shared build && pnpm -F @harness/cli test` ✅ — 9 CLI test files / 23 passed
+- `pnpm --filter @harness/cli build` ✅
+- `pnpm -F @harness/server build` ✅ — required first in this clean worktree so desktop typecheck could resolve `@harness/server/dist/programmatic.js`
+- `pnpm typecheck && pnpm lint && pnpm test` ✅ — 65 server test files / 453 passed + 1 skipped, 28 web test files / 134 passed, 9 CLI test files / 23 passed, 4 shared test files / 39 passed, 3 eslint-plugin test files / 6 passed, scripts 11 passed
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` ✅
+- Desktop install: copied `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` to `/Applications/Cursor SDK Agent Harness.app` ✅ — installed timestamp May 25 19:32:20 2026
