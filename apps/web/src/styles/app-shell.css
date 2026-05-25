@@ -1529,6 +1529,7 @@ body,
 }
 .browser-statusstrip__loading {
   color: var(--color-accent-primary);
+}
 /* ---- Embedded terminal ---- */
 /* The mount stays in the tree once first opened so the PTY session and
    scrollback survive a tab switch; it's hidden (not unmounted) when another
