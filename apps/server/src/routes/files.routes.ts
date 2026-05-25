@@ -4,7 +4,7 @@ import {
 } from "@harness/shared";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { z } from "zod";
-import { mkdir, writeFile, realpath as fsRealpath } from "node:fs/promises";
+import { mkdir, writeFile, unlink, realpath as fsRealpath } from "node:fs/promises";
 import { Buffer } from "node:buffer";
 import path from "node:path";
 import type { SettingsRepo } from "../db/repositories/settings.repo.js";
@@ -117,6 +117,31 @@ export async function registerFilesRoutes(
     // Write the file
     const buf = Buffer.from(content, "utf-8");
     await writeFile(resolvedTarget, buf);
+
+    // Post-write TOCTOU check: verify the written file is still inside the
+    // workspace root. A race between path check and write could place the
+    // file outside the root if a symlink was swapped in concurrently.
+    try {
+      const realWritten = await fsRealpath(resolvedTarget);
+      if (
+        !realWritten.startsWith(realWorkspaceRoot + path.sep) &&
+        realWritten !== realWorkspaceRoot
+      ) {
+        // The file escaped the workspace — remove it and deny.
+        await unlink(resolvedTarget).catch(() => {/* best-effort cleanup */});
+        return reply.code(403).send({
+          code: "PATH_TRAVERSAL_REJECTED",
+          message: "Written file escaped the workspace root.",
+        });
+      }
+    } catch {
+      // If realpath fails after write, the file may be dangling. Clean up.
+      await unlink(resolvedTarget).catch(() => {/* best-effort cleanup */});
+      return reply.code(500).send({
+        code: "POST_WRITE_VERIFY_FAILED",
+        message: "Failed to verify written file path.",
+      });
+    }
 
     return fileWriteResponseSchema.parse({
       absolutePath: resolvedTarget,
