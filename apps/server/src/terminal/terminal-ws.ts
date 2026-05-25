@@ -6,6 +6,7 @@ import {
   type TerminalServerFrame,
 } from "@harness/shared";
 import type { CsrfTokenizer } from "../security/csrf.js";
+import { rawDataToString } from "../ws/raw-data.js";
 import { validateWsUpgrade } from "../ws/upgrade-guard.js";
 import type { TerminalSession } from "./terminal-session.js";
 
@@ -107,17 +108,5 @@ const terminalWsPluginImpl: FastifyPluginAsync<TerminalWsPluginOptions> = async 
 
 export const terminalWsPlugin = fp(terminalWsPluginImpl, {
   name: "harness-terminal-ws",
-  // `@fastify/websocket` must be registered before this plugin.
-  dependencies: [],
+  dependencies: ["@fastify/websocket"],
 });
-
-/**
- * Normalise the four `ws` RawData shapes to a UTF-8 string. The terminal
- * channel only speaks JSON text frames.
- */
-function rawDataToString(data: RawData): string {
-  if (typeof data === "string") return data;
-  if (Array.isArray(data)) return Buffer.concat(data).toString("utf8");
-  if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8");
-  return (data as Buffer).toString("utf8");
-}

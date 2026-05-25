@@ -139,7 +139,7 @@ export function useTerminalSession(): UseTerminalSessionResult {
       ws.onclose = () => {
         socket = null;
         if (disposed) return;
-        if (status !== "exited") setStatus("disconnected");
+        setStatus((prev) => (prev === "exited" ? prev : "disconnected"));
         scheduleReconnect();
       };
       ws.onerror = () => {

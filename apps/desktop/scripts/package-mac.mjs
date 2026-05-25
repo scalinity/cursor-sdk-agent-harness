@@ -1,4 +1,3 @@
-/* global console, process */
 /**
  * Package the macOS desktop app.
  *
