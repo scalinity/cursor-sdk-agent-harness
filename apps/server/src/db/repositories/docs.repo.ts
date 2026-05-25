@@ -8,6 +8,7 @@ interface DocsSourceDbRow {
   base_url: string;
   status: string;
   page_count: number;
+  max_pages: number;
   last_crawled_at: string | null;
   error_message: string | null;
   created_at: string;
@@ -28,6 +29,7 @@ function rowToSource(row: DocsSourceDbRow): DocsSource {
     baseUrl: row.base_url,
     status: row.status as DocsSourceStatus,
     pageCount: row.page_count,
+    maxPages: row.max_pages,
     lastCrawledAt: row.last_crawled_at,
     errorMessage: row.error_message,
     createdAt: row.created_at,
@@ -51,20 +53,21 @@ export class DocsRepo {
     return row ? rowToSource(row) : undefined;
   }
 
-  insertSource(id: string, name: string, baseUrl: string): DocsSource {
+  insertSource(id: string, name: string, baseUrl: string, maxPages: number): DocsSource {
     const now = isoNow();
     this.raw
       .prepare(
-        `INSERT INTO docs_sources (id, name, base_url, status, page_count, created_at)
-         VALUES (?, ?, ?, 'pending', 0, ?)`,
+        `INSERT INTO docs_sources (id, name, base_url, status, page_count, max_pages, created_at)
+         VALUES (?, ?, ?, 'pending', 0, ?, ?)`,
       )
-      .run(id, name, baseUrl, now);
+      .run(id, name, baseUrl, maxPages, now);
     return {
       id,
       name,
       baseUrl,
       status: "pending",
       pageCount: 0,
+      maxPages,
       lastCrawledAt: null,
       errorMessage: null,
       createdAt: now,
