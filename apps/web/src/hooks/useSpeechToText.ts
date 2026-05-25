@@ -105,8 +105,11 @@ function friendlyError(message: string): string {
   return `Dictation failed: ${message}`;
 }
 
+// S2: The result never changes during the app's lifetime — hoist to module scope.
+const SUPPORTED = detectSupport();
+
 export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): SpeechToText {
-  const supported = detectSupport();
+  const supported = SUPPORTED;
   const [status, setStatus] = useState<SpeechToTextStatus>("idle");
   const [modelProgress, setModelProgress] = useState<number | null>(null);
   const { report } = useErrorReporter("speech-to-text");
@@ -133,6 +136,13 @@ export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): Speec
   const lastInterimAtRef = useRef(0);
   const pendingFinalsRef = useRef(0);
   const stoppingRef = useRef(false);
+  // C1: Tracks the phraseId we expect for the next committed final — a cheap
+  // ordering assertion that catches silent transcript corruption if the worker's
+  // FIFO invariant is ever violated by a future refactor.
+  const nextCommitIdRef = useRef(1);
+  // W5: Ref-based guard against a double-start race (two rapid clicks both see
+  // status==="idle" before React batches the first start's state update).
+  const startingRef = useRef(false);
 
   const emit = useCallback(() => {
     onTranscriptRef.current(joinText(committedRef.current, interimRef.current));
@@ -167,11 +177,23 @@ export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): Speec
         case "result":
           setModelProgress(null);
           if (msg.final) {
-            // Commit the phrase permanently and clear the interim it refined.
+            // C1: assert ordering
+            if (msg.phraseId !== nextCommitIdRef.current) {
+              console.warn(
+                `[speech-to-text] out-of-order final: expected ${nextCommitIdRef.current}, got ${msg.phraseId}`,
+              );
+            }
+            nextCommitIdRef.current = msg.phraseId + 1;
+            // Commit the phrase permanently.
             if (msg.text.length > 0) {
               committedRef.current = joinText(committedRef.current, msg.text);
             }
-            interimRef.current = "";
+            // W3: Only clear interim if this final belongs to the currently
+            // active phrase (or no phrase is active). Otherwise a commit for
+            // phrase N arriving while N+1 is mid-stream would wipe N+1's text.
+            if (activePhraseIdRef.current === null || msg.phraseId === activePhraseIdRef.current) {
+              interimRef.current = "";
+            }
             pendingFinalsRef.current -= 1;
             emit();
             finishStopIfDrained();
@@ -188,6 +210,10 @@ export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): Speec
           }
           report(friendlyError(msg.message), { severity: "warn" });
           return;
+        default: {
+          const _exhaustive: never = msg;
+          void _exhaustive;
+        }
       }
     });
     workerRef.current = worker;
@@ -208,6 +234,10 @@ export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): Speec
   );
 
   const start = useCallback(async (): Promise<void> => {
+    // W5: Prevent double-start from rapid clicks — React's batched state
+    // update means two synchronous toggle() calls both see status==="idle".
+    if (startingRef.current) return;
+    startingRef.current = true;
     setStatus("requesting");
     // Reset transcript + phrase state for a fresh session.
     committedRef.current = "";
@@ -217,6 +247,7 @@ export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): Speec
     segmentFramesRef.current = [];
     lastInterimAtRef.current = 0;
     pendingFinalsRef.current = 0;
+    nextCommitIdRef.current = 1;
     stoppingRef.current = false;
     setModelProgress(null);
 
@@ -261,10 +292,14 @@ export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): Speec
           activePhraseIdRef.current = null;
           segmentFramesRef.current = [];
           if (phraseId === null) return;
-          // Commit pass over the full, padded phrase. Keep the last interim
-          // visible until this result lands so the text doesn't flash empty.
+          // C2: Guard before incrementing — sendTranscribe may bail on
+          // MIN_SAMPLES, and an un-drained pendingFinals count permanently
+          // sticks the UI at "transcribing".
+          if (audio.length < MIN_SAMPLES) return;
           pendingFinalsRef.current += 1;
-          sendTranscribe(audio.slice(), phraseId, true);
+          // W2: VAD's onSpeechEnd allocates a fresh Float32Array per event,
+          // so transfer directly without a redundant .slice() copy.
+          sendTranscribe(audio, phraseId, true);
         },
         onVADMisfire: () => {
           // Too short to be speech — discard the blip and any interim it showed.
@@ -287,6 +322,8 @@ export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): Speec
           ? "Microphone unavailable — check the app's mic permission."
           : `Dictation failed to start: ${err instanceof Error ? err.message : String(err)}`;
       report(msg, { severity: "warn" });
+    } finally {
+      startingRef.current = false;
     }
   }, [emit, ensureWorker, report, sendTranscribe]);
 

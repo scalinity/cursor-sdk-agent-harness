@@ -56,6 +56,8 @@ export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerPr
   const applyTranscript = useCallback(
     (text: string) => {
       const base = dictationBaseRef.current;
+      // Safe single-space join: `base` is .trimEnd()'d at snapshot (line below),
+      // and `text` is .trim()'d in the worker — so neither has leading/trailing spaces.
       const next =
         base.length > 0 && text.length > 0 ? `${base} ${text}` : base.length > 0 ? base : text;
       setDraft(next);

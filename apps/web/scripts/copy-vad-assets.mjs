@@ -11,7 +11,7 @@
  * Runs from the web package's `dev`/`build` scripts. The output lives under
  * public/vad/ and is gitignored (these are derived from node_modules).
  */
-import { copyFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, mkdirSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +28,15 @@ const ortDir = ortMain.slice(
   0,
   ortMain.lastIndexOf("onnxruntime-web") + "onnxruntime-web".length,
 );
+
+// Validate: the derived path must contain the files ort loads at runtime.
+const ortGlue = join(ortDir, "dist", "ort-wasm-simd-threaded.mjs");
+if (!existsSync(ortGlue)) {
+  throw new Error(
+    `[vad] ort-wasm-simd-threaded.mjs not found at ${ortGlue}` +
+      ` — the onnxruntime-web path derivation may be wrong (resolved from: ${ortMain})`,
+  );
+}
 
 const outDir = join(here, "..", "public", "vad");
 mkdirSync(outDir, { recursive: true });
