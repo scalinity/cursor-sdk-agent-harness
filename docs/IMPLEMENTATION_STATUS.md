@@ -3445,3 +3445,25 @@ Web:
 ### Next phase
 
 Stop after Phase 24 per prompt. No next planned v1.2 phase.
+
+---
+
+## Post-Phase 24 Bugfix — Search Active Workspace Resolution
+
+### Summary
+
+Fixed the search routes' active workspace resolver so it treats `app.activeWorkspaceId` as the allowlist row id stored by the active-workspace API, resolves that id to the workspace path, and only falls back to legacy path-shaped settings when no row id matches. This fixes `/api/search/semantic` returning `NO_WORKSPACE` from the Search tab while the shell already had an active workspace.
+
+### Files modified
+
+- `apps/server/src/config/active-workspace.ts` — resolve active allowlist row id to `row.path`
+- `apps/server/src/routes/search.routes.ts` — accept explicit semantic `workspaceId` as either row id or allowed path
+- `apps/server/src/routes/__tests__/search.routes.test.ts` — regression setup stores the active row id
+- `apps/server/src/routes/__tests__/search-semantic.test.ts` — semantic regression setup stores the active row id
+
+### Verification
+
+- `pnpm -F @harness/server exec vitest run src/routes/__tests__/search.routes.test.ts src/routes/__tests__/search-semantic.test.ts` ✅
+- `pnpm typecheck` ✅
+- `pnpm lint` ✅
+- `pnpm test` ✅ — 64 server test files / 450 passed + 1 skipped, 27 web test files / 127 passed, 4 shared test files / 39 passed, 3 eslint-plugin test files / 6 passed, scripts 11 passed
