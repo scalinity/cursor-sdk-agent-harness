@@ -60,6 +60,7 @@ export type {
 
 // Pricing helpers
 export {
+  DEFAULT_PRICING_MICROS,
   PRICING_SETTING_KEYS,
   dollarsPerMillionToMicros,
   microsToDollars,

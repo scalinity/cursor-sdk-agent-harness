@@ -1,4 +1,5 @@
 import {
+  DEFAULT_PRICING_MICROS,
   PRICING_SETTING_KEYS,
   type SettingsSnapshot,
   type UpdateSettingsRequest,
@@ -93,25 +94,25 @@ export function getSettingsSnapshot(repo: SettingsRepo): SettingsSnapshot {
     rawEventRetentionDays: pickNumber(m, TOP_LEVEL_KEYS.rawEventRetentionDays, 180),
     pricing: {
       composer25Fast: {
-        inputPerMillionUsdMicros: pickNumber(m, PRICING_SETTING_KEYS.fastInput, 0),
-        outputPerMillionUsdMicros: pickNumber(m, PRICING_SETTING_KEYS.fastOutput, 0),
+        inputPerMillionUsdMicros: pickNumber(m, PRICING_SETTING_KEYS.fastInput, DEFAULT_PRICING_MICROS.composer25Fast.inputPerMillionUsdMicros),
+        outputPerMillionUsdMicros: pickNumber(m, PRICING_SETTING_KEYS.fastOutput, DEFAULT_PRICING_MICROS.composer25Fast.outputPerMillionUsdMicros),
         cachedInputPerMillionUsdMicros: pickNumber(
           m,
           PRICING_SETTING_KEYS.fastCachedInput,
-          0,
+          DEFAULT_PRICING_MICROS.composer25Fast.cachedInputPerMillionUsdMicros,
         ),
       },
       composer25: {
-        inputPerMillionUsdMicros: pickNumber(m, PRICING_SETTING_KEYS.standardInput, 0),
+        inputPerMillionUsdMicros: pickNumber(m, PRICING_SETTING_KEYS.standardInput, DEFAULT_PRICING_MICROS.composer25.inputPerMillionUsdMicros),
         outputPerMillionUsdMicros: pickNumber(
           m,
           PRICING_SETTING_KEYS.standardOutput,
-          0,
+          DEFAULT_PRICING_MICROS.composer25.outputPerMillionUsdMicros,
         ),
         cachedInputPerMillionUsdMicros: pickNumber(
           m,
           PRICING_SETTING_KEYS.standardCachedInput,
-          0,
+          DEFAULT_PRICING_MICROS.composer25.cachedInputPerMillionUsdMicros,
         ),
       },
       promoMultiplier: pickNumber(m, PRICING_SETTING_KEYS.promoMultiplier, 1.0),
