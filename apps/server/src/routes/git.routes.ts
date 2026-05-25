@@ -23,6 +23,21 @@ const gitStatusCache = new Map<
 >();
 
 const CACHE_TTL_MS = 10_000;
+const CACHE_MAX_ENTRIES = 10;
+
+function cacheSet(
+  key: string,
+  data: ReturnType<typeof gitStatusResponseSchema.parse>,
+  expiresAt: number,
+): void {
+  // Evict the oldest entry when the cache exceeds the max size.
+  // Map preserves insertion order, so the first key is the oldest.
+  if (gitStatusCache.size >= CACHE_MAX_ENTRIES && !gitStatusCache.has(key)) {
+    const oldest = gitStatusCache.keys().next().value;
+    if (oldest !== undefined) gitStatusCache.delete(oldest);
+  }
+  gitStatusCache.set(key, { data, expiresAt });
+}
 
 async function gitExec(
   args: string[],
@@ -82,7 +97,7 @@ export async function registerGitRoutes(
         ahead: 0,
         behind: 0,
       });
-      gitStatusCache.set(workspacePath, { data, expiresAt: now + CACHE_TTL_MS });
+      cacheSet(workspacePath, data, now + CACHE_TTL_MS);
       return data;
     }
 
