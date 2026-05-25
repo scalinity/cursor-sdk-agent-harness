@@ -344,12 +344,14 @@ export async function registerRunsRoutes(
       }
       const updated = deps.runsRepo.getById(req.params.runId);
       if (!updated) return reply.code(404).send({ code: "RUN_NOT_FOUND" });
+      const patchEvents = deps.eventsRepo.getAllByRunId(updated.id);
+      const toolEvents = patchEvents.filter((evt) => evt.kind.startsWith("tool_call."));
       return runSummarySchema.parse({
         ...toRunSummary({
           ...updated,
           agentName: deps.agentsRepo.getById(updated.agentId)?.name ?? null,
-          toolCallCount: 0,
-          errorToolCallCount: 0,
+          toolCallCount: toolEvents.length,
+          errorToolCallCount: toolEvents.filter((evt) => evt.kind === "tool_call.error" || evt.status === "error").length,
         }),
       });
     },
