@@ -325,4 +325,46 @@ describe("RunController", () => {
     await expect(startController(adapter)).rejects.toThrow(/boom/);
     expect(sends).toHaveLength(1);
   });
+
+  it("persists last-turn usage as context occupancy, distinct from the summed billing total", async () => {
+    // Two turns: the second's input collapses (Composer self-summarized).
+    // Billing input = 50k + 8k = 58k (summed); occupancy = last turn = 8k.
+    const turns = [
+      { inputTokens: 50_000, outputTokens: 10_000 },
+      { inputTokens: 8_000, outputTokens: 2_000 },
+    ];
+    const adapter: SdkAdapter = {
+      async createAgent() {
+        return new StubSDKAgent(f.agentId);
+      },
+      async resumeAgent() {
+        return new StubSDKAgent(f.agentId);
+      },
+      async send(_agent, _message, sendOptions) {
+        return new StubRun(
+          {
+            runId: sendOptions.idempotencyKey ?? "stub",
+            agentId: f.agentId,
+            events: [],
+            deltasOnce: turns.map((t) => ({
+              type: "turn-ended",
+              usage: { inputTokens: t.inputTokens, outputTokens: t.outputTokens },
+            })),
+            finalResult: { status: "finished", durationMs: 5 },
+          },
+          sendOptions.onDelta,
+        );
+      },
+    };
+    const { controller, runId } = await startController(adapter);
+    await controller.awaitSettled();
+    const row = f.runs.getById(runId);
+    expect(row?.status).toBe("FINISHED");
+    // Billing totals are summed across turns.
+    expect(row?.inputTokens).toBe(58_000);
+    expect(row?.outputTokens).toBe(12_000);
+    // Context occupancy is the LAST turn only — the self-summary drop.
+    expect(row?.lastTurnInputTokens).toBe(8_000);
+    expect(row?.lastTurnOutputTokens).toBe(2_000);
+  });
 });

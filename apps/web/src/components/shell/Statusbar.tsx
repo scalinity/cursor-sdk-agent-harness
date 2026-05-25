@@ -1,4 +1,6 @@
 import type { ConnectionState } from "../../state/ui-store.js";
+import { useContextBudget } from "../../hooks/useContextBudget.js";
+import { ContextGauge } from "./ContextGauge.js";
 
 /**
  * Statusbar — bottom rail. Shows live-write indicator, model/ws status, and
@@ -27,10 +29,8 @@ export interface StatusbarProps {
   gitStatus?: GitStatusInfo;
   /** Phase 20 — number of active project rules in the workspace. */
   rulesCount?: number;
-  /** Phase 23 — semantic index status badge. */
-  indexStatus?:
-    | { status: string; indexedFiles: number; totalFiles: number; totalChunks: number }
-    | undefined;
+  /** Context-management: the run whose context gauge to display. */
+  activeRunId?: string | null;
 }
 
 function GitBranchIcon({ className }: { className?: string }) {
@@ -51,8 +51,10 @@ export function Statusbar({
   workspaceName,
   gitStatus,
   rulesCount,
-  indexStatus,
+  activeRunId,
 }: StatusbarProps) {
+  const budget = useContextBudget(activeRunId ?? null);
+
   return (
     <div className="statusbar">
       <span className="inline-flex flex-none items-center gap-1.5 text-accent-primary">
@@ -81,21 +83,10 @@ export function Statusbar({
             </span>
           </>
         ) : null}
-        {indexStatus && indexStatus.status !== "pending" ? (
+        {budget !== null ? (
           <>
             <span className="text-text-tertiary">·</span>
-            <span
-              className="inline-flex items-center gap-1 text-text-tertiary"
-              title="Semantic codebase index"
-            >
-              {indexStatus.status === "indexing"
-                ? `Indexing ${
-                    indexStatus.totalFiles > 0
-                      ? Math.round((indexStatus.indexedFiles / indexStatus.totalFiles) * 100)
-                      : 0
-                  }%`
-                : `Index: ${indexStatus.totalChunks}`}
-            </span>
+            <ContextGauge budget={budget} />
           </>
         ) : null}
         <span className="text-text-tertiary">·</span>

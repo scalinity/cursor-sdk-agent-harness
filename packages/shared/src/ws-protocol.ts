@@ -271,6 +271,36 @@ export const taskEventFrameSchema = frameBaseSchema.extend({
   }),
 });
 
+export const subagentLifecyclePayloadSchema = z.object({
+  parent_run_id: runIdSchema,
+  child_run_id: runIdSchema,
+  subagent_name: z.string().trim().min(1).max(256),
+  source_call_id: callIdSchema,
+  status: sdkRunStatusSchema.optional(),
+});
+
+export const subagentSpawnedFrameSchema = frameBaseSchema.extend({
+  type: z.literal("subagent_spawned"),
+  event: canonicalEventBaseSchema.extend({
+    sdk_type: z.literal("task"),
+    kind: z.literal("subagent.spawned"),
+    payload: subagentLifecyclePayloadSchema.extend({
+      status: z.literal("RUNNING").optional(),
+    }),
+  }),
+});
+
+export const subagentCompletedFrameSchema = frameBaseSchema.extend({
+  type: z.literal("subagent_completed"),
+  event: canonicalEventBaseSchema.extend({
+    sdk_type: z.literal("task"),
+    kind: z.literal("subagent.completed"),
+    payload: subagentLifecyclePayloadSchema.extend({
+      status: z.enum(["FINISHED", "ERROR", "CANCELLED", "EXPIRED"]),
+    }),
+  }),
+});
+
 export const requestEventFrameSchema = frameBaseSchema.extend({
   type: z.literal("sdk.request"),
   event: canonicalEventBaseSchema.extend({
@@ -392,6 +422,8 @@ export const serverFrameSchema = z.discriminatedUnion("type", [
   toolCallEventFrameSchema,
   statusEventFrameSchema,
   taskEventFrameSchema,
+  subagentSpawnedFrameSchema,
+  subagentCompletedFrameSchema,
   requestEventFrameSchema,
   codeEditDetectedFrameSchema,
   runFinalResultFrameSchema,

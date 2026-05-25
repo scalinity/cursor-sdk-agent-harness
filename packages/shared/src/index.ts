@@ -79,6 +79,20 @@ export {
 } from "./pricing.js";
 export type { ModelPricing, PricingSettingKey, PricingSettings } from "./pricing.js";
 
+export {
+  CONTEXT_DANGER_FRACTION,
+  CONTEXT_WARN_FRACTION,
+  CONTEXT_WINDOW_TOKENS,
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
+  MAX_OUTPUT_TOKENS,
+  SELF_SUMMARY_DROP_RATIO,
+  contextBudgetSchema,
+  contextWindowForModel,
+  deriveContextBudget,
+  isSelfSummaryDrop,
+} from "./context-budget.js";
+export type { ContextBudget } from "./context-budget.js";
+
 // SDK surface
 export {
   assistantSdkMessageSchema,
@@ -163,6 +177,9 @@ export {
   runInterruptedFrameSchema,
   serverFrameSchema,
   serverHeartbeatFrameSchema,
+  subagentCompletedFrameSchema,
+  subagentLifecyclePayloadSchema,
+  subagentSpawnedFrameSchema,
   submitUserInputFrameSchema,
   subscribeRunFrameSchema,
   unsubscribeRunFrameSchema,
@@ -226,9 +243,16 @@ export {
   fileWriteRequestSchema,
   fileWriteResponseSchema,
   gitStatusResponseSchema,
+  listWorkspaceFilesQuerySchema,
+  listWorkspaceFilesResponseSchema,
+  readWorkspaceFileQuerySchema,
+  readWorkspaceFileResponseSchema,
   runSearchQuerySchema,
   runSearchResultSchema,
   runPatchSchema,
+  subagentListItemSchema,
+  subagentListResponseSchema,
+  workspaceFileEntrySchema,
 } from "./rest-contracts.js";
 export type {
   AgentDetailResponse,
@@ -270,9 +294,15 @@ export type {
   FileWriteRequest,
   FileWriteResponse,
   GitStatusResponse,
+  ListWorkspaceFilesQuery,
+  ListWorkspaceFilesResponse,
+  ReadWorkspaceFileQuery,
+  ReadWorkspaceFileResponse,
   RunSearchQuery,
   RunSearchResult,
   RunPatch,
+  SubagentListItem,
+  SubagentListResponse,
 } from "./rest-contracts.js";
 
 export {

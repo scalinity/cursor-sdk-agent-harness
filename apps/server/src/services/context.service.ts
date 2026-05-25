@@ -84,6 +84,7 @@ async function scanFileForSymbols(filePath: string, relPath: string): Promise<Sy
 
 const EXCLUDED_DIRS = new Set([
   "node_modules", ".git", "dist", "build", "coverage", ".next", ".cache",
+  ".turbo", ".pnpm-store",
 ]);
 
 async function collectSymbols(workspaceRoot: string): Promise<SymbolEntry[]> {
@@ -104,7 +105,6 @@ async function collectSymbols(workspaceRoot: string): Promise<SymbolEntry[]> {
     }
     for (const entry of entries) {
       if (EXCLUDED_DIRS.has(entry.name)) continue;
-      if (entry.name.startsWith(".")) continue;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         await walk(full, depth + 1);
@@ -174,7 +174,6 @@ async function walkForFiles(
     for (const entry of entries) {
       if (results.length >= maxResults) return;
       if (EXCLUDED_DIRS.has(entry.name)) continue;
-      if (entry.name.startsWith(".") && entry.name !== ".harness") continue;
 
       const full = path.join(dir, entry.name);
       const relPath = path.relative(root, full);
@@ -315,7 +314,6 @@ async function resolveFolder(mention: ContextMention, root: string): Promise<Res
     for (const entry of entries) {
       if (count >= FOLDER_MAX_ENTRIES) break;
       if (EXCLUDED_DIRS.has(entry.name)) continue;
-      if (entry.name.startsWith(".")) continue;
       count++;
       const isDir = entry.isDirectory();
       let sizeSuffix = "";

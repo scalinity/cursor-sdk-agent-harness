@@ -49,15 +49,6 @@ export interface AppDeps {
   csrfTokenizer?: CsrfTokenizer;
   workspacePolicy?: WorkspacePolicy;
   /**
-   * Phase 23 — semantic search facade (embedder + indexer + watcher).
-   * Tests inject one backed by the deterministic FakeEmbedder so the suite
-   * never downloads the ONNX model.
-   */
-  searchService?: SearchService;
-  /** Phase 23 — BYOK provider key store + model router (tests may inject). */
-  providerKeyStore?: ProviderKeyStore;
-  modelRouter?: ModelRouter;
-  /**
    * Phase 06 SDK adapter. Production uses `createCursorSdkAdapter()` (the
    * default when omitted). Integration tests inject a stubbed adapter that
    * synthesises SDK events without touching the network or the real API key.
@@ -97,6 +88,9 @@ export interface AppDeps {
    * they exercise the `/ws/terminal` wiring without a real shell.
    */
   terminalSession?: TerminalSession;
+  providerKeyStore?: ProviderKeyStore;
+  searchService?: SearchService;
+  modelRouter?: ModelRouter;
 }
 
 export interface BuiltApp {
@@ -154,6 +148,8 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
 
   const apiKeyStore =
     deps.apiKeyStore ?? new CursorApiKeyStore({ service: env.KEYCHAIN_SERVICE });
+  const providerKeyStore =
+    deps.providerKeyStore ?? new ProviderKeyStore({ service: env.KEYCHAIN_SERVICE });
   const csrfSecretStore =
     deps.csrfSecretStore ?? new CsrfSecretStore({ service: env.KEYCHAIN_SERVICE });
   const csrfTokenizer =
@@ -213,6 +209,19 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   // persist-and-broadcast pipeline and the WS plugin share one
   // observation surface.
   const perfCounters = deps.perfCounters ?? createPerfCounters();
+  const searchService =
+    deps.searchService ??
+    new SearchService({
+      embeddingsRepo: repos.embeddings,
+      indexStatusRepo: repos.indexStatus,
+      logger: app.log,
+    });
+  const modelRouter =
+    deps.modelRouter ??
+    new ModelRouter({
+      modelProvidersRepo: repos.modelProviders,
+      providerKeyStore,
+    });
 
   // Phase 07 pipeline. Build the run bus + persist-and-broadcast first so
   // the agent runtime gets the real sink — the stub Phase 06 sink is now
@@ -221,26 +230,11 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   const activeRuns = new ActiveRuns();
   const pipeline = createPersistAndBroadcast({
     events: repos.events,
+    runs: repos.runs,
     bus: runBus,
     logger: app.log,
     perfCounters,
   });
-
-  // Phase 23 — semantic search facade. Default uses the real WASM embedder;
-  // tests inject one backed by the deterministic FakeEmbedder.
-  const searchService =
-    deps.searchService ??
-    new SearchService({
-      embeddingsRepo: repos.embeddings,
-      indexStatusRepo: repos.indexStatus,
-      logger: app.log,
-    });
-
-  // Phase 23 — BYOK provider key store + multi-model router.
-  const providerKeyStore =
-    deps.providerKeyStore ?? new ProviderKeyStore({ service: env.KEYCHAIN_SERVICE });
-  const modelRouter =
-    deps.modelRouter ?? new ModelRouter({ modelProvidersRepo: repos.modelProviders, providerKeyStore });
 
   const sdk = deps.sdk ?? createCursorSdkAdapter();
   const agentRuntime = createAgentRuntime({
@@ -310,8 +304,8 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
 
   app.addHook("onClose", async () => {
     await agentRuntime.shutdown();
-    terminalSession.dispose();
     searchService.stopWatching();
+    terminalSession.dispose();
     runBus.clear();
     pipeline.clear();
   });
@@ -323,7 +317,6 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       allowlist: repos.workspaceAllowlist,
       policy: workspacePolicy,
       settings: repos.settings,
-      searchService,
     },
     agents: { runtime: agentRuntime, agentsRepo: repos.agents },
     runs: {
@@ -350,7 +343,6 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       allowlistRepo: repos.workspaceAllowlist,
       docsRepo: repos.docs,
       notepadsRepo: repos.notepads,
-      searchService,
     },
     search: {
       settingsRepo: repos.settings,

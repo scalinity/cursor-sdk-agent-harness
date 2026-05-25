@@ -176,6 +176,64 @@ describe("persist-and-broadcast pipeline", () => {
     expect(codeEdit?.callId).toBe("c-1");
   });
 
+  it("syncs sub-agent child runs when lifecycle events commit", async () => {
+    const pipeline = createPersistAndBroadcast({ events, runs, bus, logger: silentLogger });
+    const seen: EventRow[] = [];
+    bus.subscribe(runId, (e) => seen.push(e));
+
+    pipeline.ingestSDKMessage({
+      raw: {
+        type: "tool_call",
+        agent_id: agentId,
+        run_id: runId,
+        call_id: "subagent-call-1",
+        name: "task",
+        status: "running",
+        args: { subagentType: { kind: "reviewer", name: "Reviewer" } },
+      },
+      runId,
+      agentId,
+      agentMode: "local",
+    });
+
+    const rowsAfterSpawn = events.getByRunIdAfterSeq(runId, 0, 100);
+    expect(rowsAfterSpawn.map((row) => row.kind)).toEqual([
+      "tool_call.running",
+      "subagent.spawned",
+    ]);
+    const child = runs.listSubagents(runId)[0];
+    expect(child).toMatchObject({ name: "Reviewer", status: "RUNNING" });
+
+    pipeline.ingestSDKMessage({
+      raw: {
+        type: "tool_call",
+        agent_id: agentId,
+        run_id: runId,
+        call_id: "subagent-call-1",
+        name: "task",
+        status: "completed",
+        args: { subagentType: { kind: "reviewer", name: "Reviewer" } },
+        result: { status: "FINISHED" },
+      },
+      runId,
+      agentId,
+      agentMode: "local",
+    });
+
+    expect(runs.listSubagents(runId)[0]).toMatchObject({
+      name: "Reviewer",
+      status: "FINISHED",
+    });
+
+    await new Promise((r) => setImmediate(r));
+    expect(seen.map((row) => row.kind)).toEqual([
+      "tool_call.running",
+      "subagent.spawned",
+      "tool_call.completed",
+      "subagent.completed",
+    ]);
+  });
+
   it("LRU-evicts the oldest buffer when capacity is reached", () => {
     const pipeline = createPersistAndBroadcast(
       { events, bus, logger: silentLogger },

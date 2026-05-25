@@ -111,7 +111,7 @@ export class TerminalSession {
       shell: options.shell ?? process.env.SHELL ?? "/bin/zsh",
       shellArgs: options.shellArgs ?? ["-l"],
       spawnPty: options.spawnPty ?? defaultSpawnPty,
-      env: options.env ?? scrubbedEnv(),
+      env: scrubbedEnv(options.env),
       ringBufferChars: options.ringBufferChars ?? DEFAULT_RING_BUFFER_CHARS,
     };
   }
@@ -325,15 +325,15 @@ const SCRUB_PATTERNS = [/TOKEN$/i, /SECRET$/i, /PASSWORD$/i, /_KEY$/i];
  * Copy `process.env` into a plain string record, dropping known and
  * pattern-matched secrets and any undefined entries. Ensures a sane `TERM`.
  */
-function scrubbedEnv(): Record<string, string> {
+function scrubbedEnv(source: NodeJS.ProcessEnv | Record<string, string> = process.env): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
+  for (const [key, value] of Object.entries(source)) {
     if (value === undefined) continue;
     if (SCRUB_KEYS.has(key)) continue;
     if (SCRUB_PATTERNS.some((p) => p.test(key))) continue;
     out[key] = value;
   }
-  if (!out.TERM) out.TERM = "xterm-256color";
+  out.TERM = "xterm-256color";
   if (!out.COLORTERM) out.COLORTERM = "truecolor";
   return out;
 }

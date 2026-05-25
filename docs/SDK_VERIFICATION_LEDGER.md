@@ -911,6 +911,37 @@ Phase 01 output — resolves every Open Question from `spec-v1.1.md` Section 14 
 ---
 ---
 
+## OQ-30: What is Composer 2.5's context-window size, and does the SDK self-summarize?
+
+- **Status**: `partial` — documented assumption, needs smoke-test confirmation.
+- **Question**: (a) What is the real context-window size for `composer-2-5` /
+  `composer-2-5-fast`? (b) Does the SDK's bundled harness perform Composer's
+  trained self-summarization automatically inside `agent.send`, or does the
+  model error at the limit?
+- **Current answer (assumption)**:
+  - Context window ≈ **200,000** tokens, max output ≈ **65,536** (user-reported;
+    no SDK API exposes this — `ModelListItem` / `ModelSelection` carry no token
+    fields; see `options.d.ts:60-67`).
+  - Composer is RL-trained to self-summarize when nearing a fixed token-length
+    trigger (`cursor.com/blog/self-summarization`). Summaries are ~1,000 tokens,
+    reuse KV cache. The SDK runs "the full Cursor harness for context management"
+    (`cursor.com/blog/typescript-sdk`), strongly implying this happens inside
+    `agent.send` automatically.
+  - The harness's context-budget module (`packages/shared/src/context-budget.ts`)
+    uses 200,000 as the configurable default and detects self-summary events via
+    a sharp per-turn `inputTokens` drop (see `isSelfSummaryDrop`).
+- **Implication for the harness**: do NOT reimplement summarization (Composer does
+  it better with trained RL behaviour); instead surface usage, detect the drop,
+  and offer a manual "start fresh session" affordance. The occupancy gauge is
+  derived from the last turn-ended event's per-turn `inputTokens + outputTokens`.
+- **Smoke test needed** (`RUN_SDK_SMOKE=true`): push context past 200k tokens
+  within a single agent and observe whether the SDK self-summarizes (per-turn
+  `inputTokens` drops) or errors. Verify the 200k assumption. Flip to `verified`
+  when confirmed.
+
+---
+---
+
 ## Verified runtime commands
 
 | Command | Where it was run | Purpose | Result |

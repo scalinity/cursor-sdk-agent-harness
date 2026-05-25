@@ -205,7 +205,10 @@ const fixtureRun: RunRecord = {
     usage_source: "sdk_final_result",
   },
   usageSource: "sdk_final_result",
-  durationMs: 4900,
+  durationMs: null,
+  modelId: null,
+  lastTurnInputTokens: null,
+  lastTurnOutputTokens: null,
 };
 
 const fixture = {

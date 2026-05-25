@@ -21,6 +21,7 @@ export interface CreateRunInput {
   modelId?: string | null;
   mode?: AgentMode | null;
   executionMode?: ExecutionMode | null;
+  parentRunId?: string | null;
   workspaceId?: string | null;
   contextMetadata?: unknown;
 }
@@ -41,6 +42,7 @@ interface RunDbRow {
   model_id: string | null;
   mode: string | null;
   execution_mode: string | null;
+  parent_run_id: string | null;
   workspace_id: string | null;
   started_at: string;
   finished_at: string | null;
@@ -55,6 +57,8 @@ interface RunDbRow {
   reasoning_tokens: number | null;
   cost_usd_micros: number | null;
   usage_source: string | null;
+  last_turn_input_tokens: number | null;
+  last_turn_output_tokens: number | null;
   error_json: string | null;
   interrupted_reason: string | null;
   context_metadata: string | null;
@@ -79,6 +83,7 @@ export interface RunHistoryListOptions {
   sort?: "started_desc" | "started_asc" | "duration_desc" | "duration_asc" | "cost_desc" | "cost_asc" | "tokens_desc" | "tokens_asc";
   limit?: number;
   offset?: number;
+  includeSubagents?: boolean;
 }
 
 interface RunHistoryDbRow extends RunDbRow {
@@ -92,6 +97,7 @@ export interface UsageRangeOptions {
   to?: string;
   agentId?: string;
   modelId?: string;
+  includeSubagents?: boolean;
 }
 
 export interface UsageSummaryAggregate {
@@ -119,6 +125,16 @@ export interface UsageBreakdownAggregate {
   runs: number;
   cost: number;
   tokens: number;
+}
+
+export interface SubagentRunListItem {
+  runId: string;
+  name: string;
+  status: SdkRunStatus;
+  startedAt: string;
+  completedAt: string | null;
+  tokenCount: number;
+  costMicros: number | null;
 }
 
 function historyRowToDomain(row: RunHistoryDbRow): RunHistoryRow {
@@ -196,6 +212,9 @@ function orderByForRunHistory(sort: NonNullable<RunHistoryListOptions["sort"]>, 
 function buildRunHistoryWhere(opts: RunHistoryListOptions): { clause: string; params: unknown[] } {
   const parts: string[] = [];
   const params: unknown[] = [];
+  if (opts.includeSubagents !== true) {
+    parts.push("r.parent_run_id IS NULL");
+  }
   const agentIds = opts.agentIds ?? (opts.agentId !== undefined ? [opts.agentId] : undefined);
   appendInClause(parts, params, "r.agent_id", agentIds);
   appendInClause(parts, params, "r.status", opts.statuses);
@@ -221,6 +240,9 @@ function buildRunHistoryWhere(opts: RunHistoryListOptions): { clause: string; pa
 function buildUsageWhere(opts: UsageRangeOptions): { clause: string; params: unknown[] } {
   const parts: string[] = [];
   const params: unknown[] = [];
+  if (opts.includeSubagents !== true) {
+    parts.push("r.parent_run_id IS NULL");
+  }
   appendUsageRange(parts, params, opts);
   return { clause: parts.length > 0 ? `WHERE ${parts.join(" AND ")}` : "", params };
 }
@@ -242,6 +264,7 @@ function rowToDomain(row: RunDbRow): RunRow {
     modelId: row.model_id,
     mode: row.mode === null ? null : (row.mode as AgentMode),
     executionMode: row.execution_mode === null ? null : executionModeSchema.parse(row.execution_mode),
+    parentRunId: row.parent_run_id,
     workspaceId: row.workspace_id,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
@@ -256,6 +279,8 @@ function rowToDomain(row: RunDbRow): RunRow {
     reasoningTokens: row.reasoning_tokens,
     costUsdMicros: row.cost_usd_micros,
     usageSource: row.usage_source === null ? null : (row.usage_source as UsageSource),
+    lastTurnInputTokens: row.last_turn_input_tokens,
+    lastTurnOutputTokens: row.last_turn_output_tokens,
     error: parseJsonOrNull(row.error_json),
     interruptedReason: row.interrupted_reason,
     contextMetadata: parseJsonOrNull(row.context_metadata),
@@ -274,10 +299,10 @@ export class RunsRepo {
       .prepare(
         `INSERT INTO runs (
             id, agent_id, status, prompt_preview, name, model_id, mode, execution_mode,
-            started_at, last_seq, created_at, updated_at, workspace_id, context_metadata
+            parent_run_id, started_at, last_seq, created_at, updated_at, workspace_id, context_metadata
           ) VALUES (
             @id, @agent_id, @status, @prompt_preview, @name, @model_id, @mode, @execution_mode,
-            @started_at, 0, @created_at, @updated_at, @workspace_id, @context_metadata
+            @parent_run_id, @started_at, 0, @created_at, @updated_at, @workspace_id, @context_metadata
           )`,
       )
       .run({
@@ -289,6 +314,7 @@ export class RunsRepo {
         model_id: input.modelId ?? null,
         mode: input.mode ?? null,
         execution_mode: input.executionMode ?? "agent",
+        parent_run_id: input.parentRunId ?? null,
         started_at: now,
         created_at: now,
         updated_at: now,
@@ -315,34 +341,117 @@ export class RunsRepo {
    * returns the current page, this returns the matching size of the
    * underlying set. Cheap (`COUNT(*)` over the runs PK index).
    */
-  count(opts: { agentId?: string } = {}): number {
+  count(opts: { agentId?: string; includeSubagents?: boolean } = {}): number {
+    const includeSubagents = opts.includeSubagents === true;
     if (opts.agentId !== undefined) {
       const row = this.raw
-        .prepare("SELECT COUNT(*) AS n FROM runs WHERE agent_id = ?")
+        .prepare(
+          `SELECT COUNT(*) AS n
+             FROM runs
+            WHERE agent_id = ?
+              ${includeSubagents ? "" : "AND parent_run_id IS NULL"}`,
+        )
         .get(opts.agentId) as { n: number };
       return row.n;
     }
     const row = this.raw
-      .prepare("SELECT COUNT(*) AS n FROM runs")
+      .prepare(
+        `SELECT COUNT(*) AS n
+           FROM runs
+          ${includeSubagents ? "" : "WHERE parent_run_id IS NULL"}`,
+      )
       .get() as { n: number };
     return row.n;
   }
 
-  list(opts: { agentId?: string; limit?: number; offset?: number } = {}): RunRow[] {
+  list(opts: { agentId?: string; limit?: number; offset?: number; includeSubagents?: boolean } = {}): RunRow[] {
     const limit = opts.limit ?? 100;
     const offset = opts.offset ?? 0;
+    const includeSubagents = opts.includeSubagents === true;
     if (opts.agentId !== undefined) {
       const rows = this.raw
         .prepare(
-          "SELECT * FROM runs WHERE agent_id = ? ORDER BY started_at DESC LIMIT ? OFFSET ?",
+          `SELECT *
+             FROM runs
+            WHERE agent_id = ?
+              ${includeSubagents ? "" : "AND parent_run_id IS NULL"}
+            ORDER BY started_at DESC
+            LIMIT ? OFFSET ?`,
         )
         .all(opts.agentId, limit, offset) as RunDbRow[];
       return rows.map(rowToDomain);
     }
     const rows = this.raw
-      .prepare("SELECT * FROM runs ORDER BY started_at DESC LIMIT ? OFFSET ?")
+      .prepare(
+        `SELECT *
+           FROM runs
+          ${includeSubagents ? "" : "WHERE parent_run_id IS NULL"}
+          ORDER BY started_at DESC
+          LIMIT ? OFFSET ?`,
+      )
       .all(limit, offset) as RunDbRow[];
     return rows.map(rowToDomain);
+  }
+
+  listSubagents(parentRunId: string): SubagentRunListItem[] {
+    const rows = this.raw
+      .prepare(
+        `SELECT *
+           FROM runs
+          WHERE parent_run_id = ?
+          ORDER BY started_at ASC
+          LIMIT 100`,
+      )
+      .all(parentRunId) as RunDbRow[];
+    return rows.map((row) => ({
+      runId: row.id,
+      name: row.name ?? (row.prompt_preview.replace(/^Subagent:\s*/u, "") || row.id),
+      status: row.status as SdkRunStatus,
+      startedAt: row.started_at,
+      completedAt: row.finished_at,
+      tokenCount: rowNumber(row.input_tokens) + rowNumber(row.output_tokens),
+      costMicros: row.cost_usd_micros,
+    }));
+  }
+
+  ensureSubagentRun(input: {
+    id: string;
+    parentRunId: string;
+    agentId: string;
+    name: string;
+    modelId?: string | null;
+    mode?: AgentMode | null;
+    executionMode?: ExecutionMode | null;
+    workspaceId?: string | null;
+  }): RunRow {
+    const existing = this.getById(input.id);
+    if (existing) return existing;
+    return this.create({
+      id: input.id,
+      agentId: input.agentId,
+      status: "RUNNING",
+      promptPreview: `Subagent: ${input.name}`,
+      name: input.name,
+      modelId: input.modelId ?? null,
+      mode: input.mode ?? null,
+      executionMode: input.executionMode ?? null,
+      parentRunId: input.parentRunId,
+      workspaceId: input.workspaceId ?? null,
+    });
+  }
+
+  completeSubagentRun(id: string, status: Extract<SdkRunStatus, "FINISHED" | "ERROR" | "CANCELLED" | "EXPIRED">): void {
+    const now = isoNow();
+    this.raw
+      .prepare(
+        `UPDATE runs
+            SET status = ?,
+                finished_at = COALESCE(finished_at, ?),
+                updated_at = ?
+          WHERE id = ?
+            AND parent_run_id IS NOT NULL`,
+      )
+      .run(status, now, now, id);
   }
 
   listHistory(opts: RunHistoryListOptions = {}): { items: RunHistoryRow[]; total: number } {
@@ -579,7 +688,7 @@ export class RunsRepo {
       );
   }
 
-  setUsage(id: string, usage: TokenUsage): void {
+  setUsage(id: string, usage: TokenUsage, lastTurn?: { lastTurnInputTokens: number | null; lastTurnOutputTokens: number | null }): void {
     // Usage may legitimately arrive for a CANCELLED or ERROR run (the SDK
     // emits turn-ended usage even when the user aborted mid-turn), so we
     // allow CANCELLED/ERROR here but refuse to overwrite EXPIRED rows that
@@ -593,6 +702,8 @@ export class RunsRepo {
                 reasoning_tokens = ?,
                 cost_usd_micros = ?,
                 usage_source = ?,
+                last_turn_input_tokens = ?,
+                last_turn_output_tokens = ?,
                 updated_at = ?
           WHERE id = ?
             AND status NOT IN ('EXPIRED')`,
@@ -604,6 +715,8 @@ export class RunsRepo {
         usage.reasoning_tokens,
         usage.cost_usd_micros,
         usage.usage_source,
+        lastTurn?.lastTurnInputTokens ?? null,
+        lastTurn?.lastTurnOutputTokens ?? null,
         isoNow(),
         id,
       );
@@ -611,9 +724,7 @@ export class RunsRepo {
 
   /**
    * Single transactional finalize: writes status + final-result columns +
-   * usage in one UPDATE wrapped in `db.transaction(...)`. Replaces the
-   * previous three-call sequence in RunController.consumeAndFinalise so a
-   * crash between any two writes can't leave the row half-finished.
+   * usage + context occupancy in one UPDATE wrapped in `db.transaction(...)`.
    *
    * Status guard matches setFinalResult (don't clobber CANCELLED/ERROR/
    * EXPIRED), since the same race is possible.
@@ -627,6 +738,8 @@ export class RunsRepo {
       gitMetadata: unknown;
       durationMs: number | null;
       usage: TokenUsage;
+      lastTurnInputTokens: number | null;
+      lastTurnOutputTokens: number | null;
     },
   ): void {
     const now = isoNow();
@@ -645,6 +758,8 @@ export class RunsRepo {
                   reasoning_tokens = ?,
                   cost_usd_micros = ?,
                   usage_source = ?,
+                  last_turn_input_tokens = ?,
+                  last_turn_output_tokens = ?,
                   finished_at = COALESCE(finished_at, ?),
                   updated_at = ?
             WHERE id = ?
@@ -662,6 +777,8 @@ export class RunsRepo {
           input.usage.reasoning_tokens,
           input.usage.cost_usd_micros,
           input.usage.usage_source,
+          input.lastTurnInputTokens,
+          input.lastTurnOutputTokens,
           now,
           now,
           id,
@@ -867,6 +984,7 @@ export class RunsRepo {
            FROM runs_fts
            JOIN runs r ON r.id = runs_fts.run_id
           WHERE runs_fts MATCH ?
+            AND r.parent_run_id IS NULL
           ORDER BY rank
           LIMIT ?`,
       )
@@ -895,13 +1013,27 @@ export class RunsRepo {
   }
 
   delete(id: string): void {
-    this.raw.prepare("DELETE FROM runs WHERE id = ?").run(id);
+    this.raw.transaction(() => {
+      this.raw
+        .prepare(
+          `WITH RECURSIVE descendants(id) AS (
+             SELECT id FROM runs WHERE parent_run_id = ?
+             UNION ALL
+             SELECT r.id
+               FROM runs r
+               INNER JOIN descendants d ON r.parent_run_id = d.id
+           )
+           DELETE FROM runs WHERE id IN (SELECT id FROM descendants)`,
+        )
+        .run(id);
+      this.raw.prepare("DELETE FROM runs WHERE id = ?").run(id);
+    })();
   }
 
   getLatestForAgent(agentId: string): RunRow | null {
     const row = this.raw
       .prepare(
-        "SELECT * FROM runs WHERE agent_id = ? ORDER BY started_at DESC LIMIT 1",
+        "SELECT * FROM runs WHERE agent_id = ? AND parent_run_id IS NULL ORDER BY started_at DESC LIMIT 1",
       )
       .get(agentId) as RunDbRow | undefined;
     return row ? rowToDomain(row) : null;
@@ -943,7 +1075,8 @@ export class RunsRepo {
                 COALESCE(SUM(input_tokens), 0)                      AS total_input,
                 COALESCE(SUM(output_tokens), 0)                     AS total_output
            FROM runs
-          WHERE agent_id = ?`,
+          WHERE agent_id = ?
+            AND parent_run_id IS NULL`,
       )
       .get(agentId) as
       | {
@@ -983,6 +1116,7 @@ export class RunsRepo {
                 COALESCE(SUM(input_tokens), 0)                      AS total_input,
                 COALESCE(SUM(output_tokens), 0)                     AS total_output
            FROM runs
+          WHERE parent_run_id IS NULL
           GROUP BY agent_id`,
       )
       .all() as Array<{

@@ -62,8 +62,8 @@ export function SessionsRail({
   // freshly-loaded rail shows every workspace's chats without a click.
   const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(() => new Set());
 
-  const { entries } = useWorkspaceAllowlist();
-  const { activeWorkspaceId, setActive } = useActiveWorkspace();
+  const { entries, remove } = useWorkspaceAllowlist();
+  const { activeWorkspaceId, setActive, reload: reloadActiveWorkspace } = useActiveWorkspace();
 
   // Overlay live run-store status over the REST RunSummary so an in-flight
   // status update surfaces without waiting for the next REST reload (RV2-S11).
@@ -108,6 +108,19 @@ export function SessionsRail({
       else next.add(id);
       return next;
     });
+  };
+
+  const handleRemoveWorkspace = (id: string) => {
+    // The server clears the active-workspace pointer when the removed entry was
+    // active; reload the global pointer so the shell reflects that immediately
+    // (its self-heal re-provisions a default workspace).
+    remove(id)
+      .then(() => {
+        if (id === activeWorkspaceId) void reloadActiveWorkspace();
+      })
+      .catch((err) => {
+        console.error("[SessionsRail] failed to remove workspace", id, err);
+      });
   };
 
   return (
@@ -158,6 +171,7 @@ export function SessionsRail({
               onSelectRun={onSelectRun}
               onToggle={() => toggleCollapsed(ws.id)}
               onActivate={() => void setActive(ws.id)}
+              onRemove={() => handleRemoveWorkspace(ws.id)}
               {...(onDeleteRun ? { onDeleteRun } : {})}
               {...(onRenameRun ? { onRenameRun } : {})}
             />
@@ -182,28 +196,10 @@ export function SessionsRail({
           onClick={onPickWorkspace}
           disabled={!onPickWorkspace}
         >
-          <FolderIcon className="size-4" />
           <span>Open Workspace…</span>
         </button>
-
-        {runs.length === 0 ? (
-          <div className="px-3.5 pt-2 text-md text-text-tertiary">
-            No chats yet. Start one from the composer.
-          </div>
-        ) : null}
       </div>
 
-      <div className="mt-auto border-t border-border-subtle p-2.5">
-        <div className="flex items-center gap-2 p-1">
-          <div className="grid size-6 place-items-center rounded-full bg-accent-bg text-2xs font-semibold text-accent-primary">
-            HA
-          </div>
-          <div className="min-w-0">
-            <div className="truncate text-md">Harness</div>
-            <div className="text-2xs text-text-tertiary">local · single-user</div>
-          </div>
-        </div>
-      </div>
     </aside>
   );
 }
@@ -217,6 +213,7 @@ interface WorkspaceGroupProps {
   onSelectRun: (runId: string) => void;
   onToggle: () => void;
   onActivate: () => void;
+  onRemove: () => void;
   onDeleteRun?: (runId: string) => void;
   onRenameRun?: (runId: string, name: string) => void;
 }
@@ -230,12 +227,20 @@ function WorkspaceGroup({
   onSelectRun,
   onToggle,
   onActivate,
+  onRemove,
   onDeleteRun,
   onRenameRun,
 }: WorkspaceGroupProps) {
+  // Removing a workspace drops it from the allowlist; require a confirming
+  // second click. Disarms when the pointer leaves the header — no timer, so
+  // the component stays effect-free per the repo rule.
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   return (
     <div className="ws-group">
-      <div className={cn("ws-head", isActive && "ws-head--active")}>
+      <div
+        className={cn("ws-head", isActive && "ws-head--active")}
+        onMouseLeave={() => setConfirmingRemove(false)}
+      >
         <button
           type="button"
           className="ws-head__twisty"
@@ -254,6 +259,24 @@ function WorkspaceGroup({
           <FolderIcon className="size-4 flex-none" />
           <span className="truncate">{workspaceLabel(workspace)}</span>
           {isActive ? <span className="ws-head__active-dot" aria-hidden="true" /> : null}
+        </button>
+        <button
+          type="button"
+          className={cn("ws-head__delete", confirmingRemove && "ws-head__delete--armed")}
+          aria-label={confirmingRemove ? "Click again to confirm remove" : "Remove workspace"}
+          title={confirmingRemove ? "Click again to confirm remove" : "Remove workspace"}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (confirmingRemove) {
+              setConfirmingRemove(false);
+              onRemove();
+            } else {
+              setConfirmingRemove(true);
+            }
+          }}
+          onBlur={() => setConfirmingRemove(false)}
+        >
+          <XIcon className="size-3.5" />
         </button>
       </div>
       {!collapsed ? (

@@ -68,6 +68,11 @@ export interface RunRecord {
   usageSource: UsageSource | null;
   /** Set when `run.final_result` arrives. */
   durationMs: number | null;
+  /** Run's model id — drives the context-window denominator for the gauge. */
+  modelId: string | null;
+  /** Last turn's per-turn usage = context-occupancy estimate (see context-budget). */
+  lastTurnInputTokens: number | null;
+  lastTurnOutputTokens: number | null;
 }
 
 export interface ApprovalState {
@@ -150,6 +155,9 @@ function ensureRunRecord(byId: Record<string, RunRecord>, runId: string, agentId
     usage: null,
     usageSource: null,
     durationMs: null,
+    modelId: null,
+    lastTurnInputTokens: null,
+    lastTurnOutputTokens: null,
   };
 }
 
@@ -441,6 +449,9 @@ export const useRunStore = create<RunState>((set) => ({
               }
             : null,
         usageSource: summary.usageSource,
+        modelId: summary.modelId,
+        lastTurnInputTokens: summary.lastTurnInputTokens,
+        lastTurnOutputTokens: summary.lastTurnOutputTokens,
       };
       return { ...state, byId: { ...state.byId, [summary.id]: updated } };
     });

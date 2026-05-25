@@ -17,15 +17,19 @@ export interface SearchRoutesDeps {
 }
 
 /**
- * Resolve the workspace root (== workspace id) for a request. An explicit
- * `workspaceId` is honored only if it is in the allowlist; otherwise the
- * active workspace is used.
+ * Resolve the workspace root for a request. An explicit `workspaceId` may be
+ * either an allowlist row id or an already-allowed filesystem path; otherwise
+ * the active workspace is used.
  */
 function resolveWorkspaceRoot(
   deps: SearchRoutesDeps,
   explicit: string | undefined,
 ): string | null {
-  if (explicit && deps.allowlistRepo.findMatching(explicit)) return explicit;
+  if (explicit) {
+    const row = deps.allowlistRepo.getById(explicit);
+    if (row) return row.path;
+    if (deps.allowlistRepo.findMatching(explicit)) return explicit;
+  }
   return getActiveWorkspaceRoot(deps);
 }
 

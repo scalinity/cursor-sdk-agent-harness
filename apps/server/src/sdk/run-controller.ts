@@ -12,6 +12,7 @@ import type { Run, SDKAgent, SdkAdapter, SendOptions } from "./sdk-adapter.js";
 import {
   accumulateTurnEndedUsage,
   extractUsage,
+  parseTurnEndedUsage,
   type ParsedTurnEndedUsage,
 } from "./usage-extractor.js";
 import type { StreamSink } from "./stream-stub.js";
@@ -75,6 +76,13 @@ export class RunController {
   private runHandle: Run | null = null;
   private status: SdkRunStatus = "CREATING";
   private accumulatedUsage: ParsedTurnEndedUsage | null = null;
+  /**
+   * The MOST RECENT turn-ended usage (NOT summed). Its `inputTokens` already
+   * includes all prior context the model re-ingested, so last-turn input +
+   * output is the context-occupancy estimate for the gauge — and it drops when
+   * Composer self-summarizes. Distinct from `accumulatedUsage` (billing sum).
+   */
+  private lastTurnUsage: ParsedTurnEndedUsage | null = null;
   private finalisePromise: Promise<void> | null = null;
 
   private readonly init: RunControllerInit;
@@ -304,8 +312,8 @@ export class RunController {
     if (finalResult) {
       const upper = finalResult.status.toUpperCase() as SdkRunStatus;
       // Single transactional finalize: status + final-result columns +
-      // usage all in one UPDATE. The status guard inside `finalize` keeps
-      // a CANCELLED/EXPIRED row from being clobbered by a late wait().
+      // usage + context occupancy in one UPDATE. The status guard inside
+      // `finalize` keeps a CANCELLED/EXPIRED row from being clobbered.
       this.init.runsRepo.finalize(this.runId, {
         status: upper,
         finalText: finalResult.result ?? null,
@@ -313,6 +321,8 @@ export class RunController {
         gitMetadata: finalResult.git ?? null,
         durationMs: finalResult.durationMs ?? null,
         usage,
+        lastTurnInputTokens: this.lastTurnUsage?.inputTokens ?? null,
+        lastTurnOutputTokens: this.lastTurnUsage?.outputTokens ?? null,
       });
       // Mirror the row status into the controller's view so subsequent
       // status frames don't fight the terminal-state guard.
@@ -324,8 +334,11 @@ export class RunController {
       if (!isTerminalStatus(this.status)) {
         this.init.runsRepo.setInterrupted(this.runId, "stream_error", null);
       }
-      // Usage still gets persisted; setUsage's guard exempts EXPIRED only.
-      this.init.runsRepo.setUsage(this.runId, usage);
+      // Usage + context occupancy persisted atomically; guard exempts EXPIRED.
+      this.init.runsRepo.setUsage(this.runId, usage, {
+        lastTurnInputTokens: this.lastTurnUsage?.inputTokens ?? null,
+        lastTurnOutputTokens: this.lastTurnUsage?.outputTokens ?? null,
+      });
     }
 
     this.onTerminate(this);
@@ -411,6 +424,8 @@ export class RunController {
         }
       }
       this.accumulatedUsage = next;
+      const thisTurn = parseTurnEndedUsage((rec as { usage?: unknown }).usage);
+      if (thisTurn) this.lastTurnUsage = thisTurn;
     }
   }
 

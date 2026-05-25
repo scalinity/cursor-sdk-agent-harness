@@ -175,6 +175,32 @@ export function buildServerFrame(
           payload: row.payload as never,
         },
       };
+    case "subagent.spawned":
+      return {
+        id: frameId,
+        type: "subagent_spawned",
+        sent_at: sentAt,
+        ...replayedFlag,
+        event: {
+          ...base,
+          sdk_type: "task",
+          kind: "subagent.spawned",
+          payload: row.payload as never,
+        },
+      };
+    case "subagent.completed":
+      return {
+        id: frameId,
+        type: "subagent_completed",
+        sent_at: sentAt,
+        ...replayedFlag,
+        event: {
+          ...base,
+          sdk_type: "task",
+          kind: "subagent.completed",
+          payload: row.payload as never,
+        },
+      };
     case "request.created":
       return {
         id: frameId,
@@ -295,6 +321,8 @@ const KNOWN_KINDS: Record<CanonicalEventKind, true> = {
   "run.interrupted": true,
   "approval.resolved": true,
   "approval.failed": true,
+  "subagent.spawned": true,
+  "subagent.completed": true,
 };
 
 function assertKindIsKnown(kind: string): void {

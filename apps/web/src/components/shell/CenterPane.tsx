@@ -6,6 +6,8 @@ import { Composer } from "./Composer.js";
 import { ConnectionBanner } from "./ConnectionBanner.js";
 import type { ConnectionState } from "../../state/ui-store.js";
 import { StreamingSurfaceBoundary } from "../streaming/StreamingSurfaceBoundary.js";
+import { SubagentDashboard } from "../SubagentDashboard.js";
+import { useSubagentMonitor } from "../../hooks/useSubagentMonitor.js";
 
 export interface CenterPaneProps {
   activeAgent: AgentSummary | null;
@@ -47,6 +49,7 @@ export function CenterPane({
   // empty-state agent view) instead of an empty timeline + docked composer.
   const codeHidden = useUiStore((s) => s.codeHidden);
   const heroMode = codeHidden && activeRun === null && eventCount === 0;
+  const subagentMonitor = useSubagentMonitor(activeRunId);
 
   if (heroMode) {
     return (
@@ -70,6 +73,18 @@ export function CenterPane({
             <span className="mono">CANCEL_UNAVAILABLE</span>
             <span>{cancelUnavailable.message}</span>
           </div>
+        ) : null}
+        {subagentMonitor.subagents.length > 0 || subagentMonitor.loading || subagentMonitor.error ? (
+          <SubagentDashboard
+            subagents={subagentMonitor.subagents}
+            activeCount={subagentMonitor.activeCount}
+            completedCount={subagentMonitor.completedCount}
+            loading={subagentMonitor.loading}
+            error={subagentMonitor.error}
+            onRetry={() => {
+              void subagentMonitor.reload();
+            }}
+          />
         ) : null}
         <StreamingSurfaceBoundary surface="chat-timeline">
           <EventTimeline

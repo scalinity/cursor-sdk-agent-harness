@@ -42,7 +42,7 @@ export interface StartupRecoveryResult {
 export function runStartupRecovery(
   deps: StartupRecoveryDeps,
 ): StartupRecoveryResult {
-  const all = deps.runs.list({ limit: 10_000 });
+  const all = deps.runs.list({ limit: 10_000, includeSubagents: true });
   const nonTerminal = all.filter(
     (row) => row.status === "CREATING" || row.status === "RUNNING",
   );

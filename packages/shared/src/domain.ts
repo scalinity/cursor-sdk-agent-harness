@@ -59,6 +59,8 @@ export const runRowSchema = z.object({
   modelId: z.string().nullable(),
   mode: agentModeSchema.nullable(),
   executionMode: executionModeSchema.nullable(),
+  /** Parent run when this row represents a Phase 24 sub-agent child run. */
+  parentRunId: runIdSchema.nullable(),
   /** Workspace active when the run was created (null for legacy/untagged runs). */
   workspaceId: z.string().nullable(),
   startedAt: isoDateTimeSchema,
@@ -74,6 +76,9 @@ export const runRowSchema = z.object({
   reasoningTokens: z.number().int().nonnegative().nullable(),
   costUsdMicros: z.number().int().nonnegative().nullable(),
   usageSource: usageSourceSchema.nullable(),
+  // Last turn's per-turn usage — context-occupancy estimate for the fill gauge.
+  lastTurnInputTokens: z.number().int().nonnegative().nullable(),
+  lastTurnOutputTokens: z.number().int().nonnegative().nullable(),
   error: z.unknown().nullable(),
   interruptedReason: z.string().nullable(),
   contextMetadata: z.unknown().nullable(),
@@ -164,6 +169,8 @@ export const canonicalEventKindSchema = z.enum([
   "code_edit.detected",
   "run.final_result",
   "run.interrupted",
+  "subagent.spawned",
+  "subagent.completed",
   // Phase 13 — approval outcomes. `approval.resolved` is the success
   // path (SDK accepted the decision); `approval.failed` is everything
   // else, including the OQ-10 "no SDK method exists" branch where the

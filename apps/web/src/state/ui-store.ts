@@ -8,7 +8,7 @@
  *   - A simple toast queue (used by `useErrorReporter`) with per-toast TTL
  */
 import { create } from "zustand";
-import { DEFAULT_MODEL_ID, type ReplaySpeed, type WorkspaceAllowlistRow } from "@harness/shared";
+import { DEFAULT_MODEL_ID, unifiedModelIdSchema, type ReplaySpeed, type UnifiedModelId, type WorkspaceAllowlistRow } from "@harness/shared";
 
 export type ConnectionState =
   | "idle"
@@ -56,7 +56,7 @@ export interface UiState {
    * auto-provisioner (`useEnsureDefaultAgent`): switching it ensures/selects
    * a default agent configured for that model. Persisted across reloads.
    */
-  selectedModelId: string;
+  selectedModelId: UnifiedModelId;
   replaySpeedByRunId: Record<string, ReplaySpeed>;
   replayPausedByRunId: Record<string, boolean>;
   selectedCodeEditEventByRunId: Record<string, string>;
@@ -77,6 +77,17 @@ export interface UiState {
   activeWorkspaceId: string | null;
   activeWorkspaceLoading: boolean;
   activeWorkspaceError: string | null;
+  /**
+   * Workspace allowlist. Lives in the store (not per-hook useState) for the
+   * same reason as the active-workspace slice above: every consumer — the
+   * sidebar (SessionsRail), the workspace picker, WorkspaceSwitcher,
+   * NewAgentDialog — must observe one list. Without shared state the picker's
+   * `add` never reaches the sidebar's hook instance, so a newly opened
+   * workspace never appears in the rail.
+   */
+  workspaceAllowlist: WorkspaceAllowlistRow[];
+  workspaceAllowlistLoading: boolean;
+  workspaceAllowlistError: string | null;
 
   setCodeHidden: (hidden: boolean) => void;
   toggleCodeHidden: () => void;
@@ -88,7 +99,7 @@ export interface UiState {
   setCsrfToken: (token: string | null) => void;
   setConnectionState: (state: ConnectionState) => void;
   setComposerDraft: (draft: string) => void;
-  setSelectedModelId: (modelId: string) => void;
+  setSelectedModelId: (modelId: UnifiedModelId) => void;
   setReplaySpeed: (runId: string, speed: ReplaySpeed) => void;
   setReplayPaused: (runId: string, paused: boolean) => void;
   selectCodeEditEvent: (runId: string, eventId: string | null) => void;
@@ -101,6 +112,11 @@ export interface UiState {
   }) => void;
   setActiveWorkspaceLoading: (loading: boolean) => void;
   setActiveWorkspaceError: (error: string | null) => void;
+  setWorkspaceAllowlist: (entries: WorkspaceAllowlistRow[]) => void;
+  addWorkspaceAllowlistEntry: (entry: WorkspaceAllowlistRow) => void;
+  removeWorkspaceAllowlistEntry: (id: string) => void;
+  setWorkspaceAllowlistLoading: (loading: boolean) => void;
+  setWorkspaceAllowlistError: (error: string | null) => void;
 }
 
 const CODE_HIDDEN_STORAGE_KEY = "harness:codeHidden";
@@ -143,19 +159,19 @@ function persistRailHidden(hidden: boolean): void {
   }
 }
 
-function readInitialSelectedModel(): string {
+function readInitialSelectedModel(): UnifiedModelId {
   if (typeof window === "undefined") return DEFAULT_MODEL_ID;
   try {
-    // Phase 23 — accepts any unified model id (Cursor enum, `auto`, or
-    // `{providerId}:{model}`); not constrained to the Cursor enum anymore.
-    const stored = window.localStorage.getItem(SELECTED_MODEL_STORAGE_KEY);
-    return stored && stored.length > 0 ? stored : DEFAULT_MODEL_ID;
+    const parsed = unifiedModelIdSchema.safeParse(
+      window.localStorage.getItem(SELECTED_MODEL_STORAGE_KEY),
+    );
+    return parsed.success ? parsed.data : DEFAULT_MODEL_ID;
   } catch {
     return DEFAULT_MODEL_ID;
   }
 }
 
-function persistSelectedModel(modelId: string): void {
+function persistSelectedModel(modelId: UnifiedModelId): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(SELECTED_MODEL_STORAGE_KEY, modelId);
@@ -183,6 +199,9 @@ export const useUiStore = create<UiState>((set) => ({
   // modal during the cold-start GET before the server has answered.
   activeWorkspaceLoading: true,
   activeWorkspaceError: null,
+  workspaceAllowlist: [],
+  workspaceAllowlistLoading: false,
+  workspaceAllowlistError: null,
 
   setCodeHidden: (hidden) => {
     persistCodeHidden(hidden);
@@ -264,4 +283,17 @@ export const useUiStore = create<UiState>((set) => ({
     set({ activeWorkspace: workspace, activeWorkspaceId }),
   setActiveWorkspaceLoading: (loading) => set({ activeWorkspaceLoading: loading }),
   setActiveWorkspaceError: (error) => set({ activeWorkspaceError: error }),
+  setWorkspaceAllowlist: (entries) => set({ workspaceAllowlist: entries }),
+  addWorkspaceAllowlistEntry: (entry) =>
+    set((s) => ({
+      // De-dupe by id so an optimistic add followed by a reload that also
+      // returns the row doesn't duplicate it.
+      workspaceAllowlist: [...s.workspaceAllowlist.filter((e) => e.id !== entry.id), entry],
+    })),
+  removeWorkspaceAllowlistEntry: (id) =>
+    set((s) => ({
+      workspaceAllowlist: s.workspaceAllowlist.filter((e) => e.id !== id),
+    })),
+  setWorkspaceAllowlistLoading: (loading) => set({ workspaceAllowlistLoading: loading }),
+  setWorkspaceAllowlistError: (error) => set({ workspaceAllowlistError: error }),
 }));

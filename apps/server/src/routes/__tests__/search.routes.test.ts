@@ -21,8 +21,8 @@ function setup(workspacePath: string | null) {
   const db = openTestDb({ skipSeed: true });
   const repos = createRepositories(db.raw);
   if (workspacePath) {
-    repos.workspaceAllowlist.create({ path: workspacePath });
-    repos.settings.set("app.activeWorkspaceId", workspacePath);
+    const entry = repos.workspaceAllowlist.create({ path: workspacePath });
+    repos.settings.set("app.activeWorkspaceId", entry.id);
   }
   const app = Fastify({ logger: false });
   const searchService = new SearchService({

@@ -293,6 +293,156 @@ describe("normalize — discriminant coverage", () => {
     expect(out.events[0]?.kind).toBe("tool_call.completed");
   });
 
+  it("emits subagent.spawned for a task tool call that starts a sub-agent", () => {
+    const out = normalize({
+      raw: {
+        type: "tool_call",
+        agent_id: AGENT_ID,
+        run_id: RUN_ID,
+        call_id: "task-1",
+        name: "task",
+        status: "running",
+        args: { subagentType: { kind: "custom", name: "Reviewer" } },
+      },
+      runContext: ctx(),
+    });
+
+    expect(out.events.map((e) => e.kind)).toEqual([
+      "tool_call.running",
+      "subagent.spawned",
+    ]);
+    expect(out.events[1]).toMatchObject({
+      sdkType: "task",
+      callId: "task-1",
+      status: "running",
+      payload: {
+        parent_run_id: RUN_ID,
+        subagent_name: "Reviewer",
+        source_call_id: "task-1",
+      },
+    });
+    expect((out.events[1]?.payload as { child_run_id?: string }).child_run_id).toMatch(
+      /^subagent-/,
+    );
+  });
+
+  it("emits subagent.completed for the matching completed task tool call", () => {
+    const out = normalize({
+      raw: {
+        type: "tool_call",
+        agent_id: AGENT_ID,
+        run_id: RUN_ID,
+        call_id: "task-1",
+        name: "task",
+        status: "completed",
+        args: { subagentType: { kind: "custom", name: "Reviewer" } },
+      },
+      runContext: ctx(),
+    });
+
+    expect(out.events.map((e) => e.kind)).toEqual([
+      "tool_call.completed",
+      "subagent.completed",
+    ]);
+    expect(out.events[1]).toMatchObject({
+      sdkType: "task",
+      callId: "task-1",
+      status: "completed",
+      payload: {
+        parent_run_id: RUN_ID,
+        subagent_name: "Reviewer",
+        source_call_id: "task-1",
+        status: "FINISHED",
+      },
+    });
+  });
+
+  it("does not treat a generic task tool call as a sub-agent", () => {
+    const out = normalize({
+      raw: {
+        type: "tool_call",
+        agent_id: AGENT_ID,
+        run_id: RUN_ID,
+        call_id: "task-generic",
+        name: "task",
+        status: "running",
+        args: { name: "ordinary task", prompt: "do something" },
+      },
+      runContext: ctx(),
+    });
+
+    expect(out.events.map((e) => e.kind)).toEqual(["tool_call.running"]);
+  });
+
+  it("detects MCP sub-agent tool calls from providerIdentifier and toolName", () => {
+    const out = normalize({
+      raw: {
+        type: "tool_call",
+        agent_id: AGENT_ID,
+        run_id: RUN_ID,
+        call_id: "mcp-1",
+        name: "mcp",
+        status: "running",
+        args: { providerIdentifier: "review-subagent", toolName: "start" },
+      },
+      runContext: ctx(),
+    });
+
+    expect(out.events.map((e) => e.kind)).toEqual([
+      "tool_call.running",
+      "subagent.spawned",
+    ]);
+    expect(out.events[1]?.payload).toMatchObject({
+      subagent_name: "review-subagent",
+      source_call_id: "mcp-1",
+      status: "RUNNING",
+    });
+  });
+
+  it("detects MCP sub-agent tool calls from mcp__ provider names", () => {
+    const out = normalize({
+      raw: {
+        type: "tool_call",
+        agent_id: AGENT_ID,
+        run_id: RUN_ID,
+        call_id: "mcp-2",
+        name: "mcp__planner_agent__run",
+        status: "completed",
+        result: { ok: true },
+      },
+      runContext: ctx(),
+    });
+
+    expect(out.events.map((e) => e.kind)).toEqual([
+      "tool_call.completed",
+      "subagent.completed",
+    ]);
+    expect(out.events[1]?.payload).toMatchObject({
+      subagent_name: "planner_agent",
+      source_call_id: "mcp-2",
+      status: "FINISHED",
+    });
+  });
+
+  it("bounds sub-agent display names emitted from SDK args", () => {
+    const longName = "Reviewer".repeat(80);
+    const out = normalize({
+      raw: {
+        type: "tool_call",
+        agent_id: AGENT_ID,
+        run_id: RUN_ID,
+        call_id: "task-long",
+        name: "task",
+        status: "running",
+        args: { subagentType: { kind: "custom", name: longName } },
+      },
+      runContext: ctx(),
+    });
+
+    const payload = out.events[1]?.payload as { subagent_name?: string };
+    expect(payload.subagent_name).toHaveLength(256);
+  });
+
   it("normalises sdk.status to status.changed and preserves the status literal", () => {
     const out = normalize({
       raw: {

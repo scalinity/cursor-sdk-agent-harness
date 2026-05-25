@@ -59,8 +59,10 @@ function fixtureRun(overrides: Partial<RunSummary> = {}): RunSummary {
     usageSource: "sdk_final_result",
     toolCallCount: 0,
     errorToolCallCount: 0,
+    lastTurnInputTokens: null,
+    lastTurnOutputTokens: null,
     ...overrides,
-  };
+  } as RunSummary;
 }
 
 describe("SessionsRail", () => {

@@ -32,6 +32,9 @@ function seedRunWithRunningToolCall(receivedAtMs: number): void {
         usage: null,
         usageSource: null,
         durationMs: null,
+        modelId: null,
+        lastTurnInputTokens: null,
+        lastTurnOutputTokens: null,
       },
     },
     eventsByRunId: {

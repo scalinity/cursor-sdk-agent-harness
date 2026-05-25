@@ -1,6 +1,10 @@
 import {
   fileWriteRequestSchema,
   fileWriteResponseSchema,
+  listWorkspaceFilesQuerySchema,
+  listWorkspaceFilesResponseSchema,
+  readWorkspaceFileQuerySchema,
+  readWorkspaceFileResponseSchema,
 } from "@harness/shared";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { z } from "zod";
@@ -11,6 +15,11 @@ import {
   resolveWorkspacePath,
   type WorkspaceResolverDeps,
 } from "../lib/workspace-resolver.js";
+import {
+  listWorkspaceFiles,
+  readWorkspaceFile,
+  type WorkspaceFilesErrorCode,
+} from "../services/workspace-files.service.js";
 
 export type FilesRoutesDeps = WorkspaceResolverDeps;
 
@@ -21,10 +30,61 @@ function send422(reply: FastifyReply, error: z.ZodError) {
   });
 }
 
+// Maps a workspace-files service error to the HTTP status the client expects.
+const FILE_ERROR_STATUS: Record<WorkspaceFilesErrorCode, number> = {
+  ABSOLUTE_PATH_REJECTED: 400,
+  PATH_TRAVERSAL_REJECTED: 403,
+  WORKSPACE_NOT_FOUND: 412,
+  NOT_FOUND: 404,
+  NOT_A_DIRECTORY: 400,
+  NOT_A_FILE: 400,
+};
+
 export async function registerFilesRoutes(
   app: FastifyInstance,
   deps: FilesRoutesDeps,
 ): Promise<void> {
+  // Read-only directory listing for the Files surface. Lists the workspace
+  // root when `path` is omitted; the service rejects traversal/symlink escapes.
+  app.get("/api/files/list", async (req, reply) => {
+    const parsed = listWorkspaceFilesQuerySchema.safeParse(req.query);
+    if (!parsed.success) return send422(reply, parsed.error);
+
+    const workspaceRoot = resolveWorkspacePath(deps, parsed.data.workspaceId);
+    if (!workspaceRoot) {
+      return reply.code(412).send({
+        code: "NO_ACTIVE_WORKSPACE",
+        message: "No active workspace configured.",
+      });
+    }
+
+    const result = await listWorkspaceFiles(workspaceRoot, parsed.data.path);
+    if (!result.ok) {
+      return reply.code(FILE_ERROR_STATUS[result.code]).send({ code: result.code });
+    }
+    return listWorkspaceFilesResponseSchema.parse(result.value);
+  });
+
+  // Read-only file content (capped + binary-sniffed) for the preview pane.
+  app.get("/api/files/read", async (req, reply) => {
+    const parsed = readWorkspaceFileQuerySchema.safeParse(req.query);
+    if (!parsed.success) return send422(reply, parsed.error);
+
+    const workspaceRoot = resolveWorkspacePath(deps, parsed.data.workspaceId);
+    if (!workspaceRoot) {
+      return reply.code(412).send({
+        code: "NO_ACTIVE_WORKSPACE",
+        message: "No active workspace configured.",
+      });
+    }
+
+    const result = await readWorkspaceFile(workspaceRoot, parsed.data.path);
+    if (!result.ok) {
+      return reply.code(FILE_ERROR_STATUS[result.code]).send({ code: result.code });
+    }
+    return readWorkspaceFileResponseSchema.parse(result.value);
+  });
+
   app.post("/api/files/write", async (req, reply) => {
     const parsed = fileWriteRequestSchema.safeParse(req.body);
     if (!parsed.success) return send422(reply, parsed.error);

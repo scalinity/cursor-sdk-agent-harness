@@ -67,6 +67,8 @@ function createRunFixture(
       cost_usd_micros: input.costUsdMicros,
       usage_source: input.usageSource,
     },
+    lastTurnInputTokens: null,
+    lastTurnOutputTokens: null,
   });
   raw
     .prepare("UPDATE runs SET started_at = ?, finished_at = ? WHERE id = ?")

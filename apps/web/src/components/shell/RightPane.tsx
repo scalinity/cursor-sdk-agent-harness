@@ -1,4 +1,4 @@
-import { useRef, type ComponentType } from "react";
+import { useRef } from "react";
 import { codeEditEventsForRun, parseCodeEditPayload, selectedCodeEditEvent } from "../../lib/code-edit-events.js";
 import { cn } from "../../lib/cn.js";
 import { useRunStore } from "../../state/run-store.js";
@@ -8,9 +8,9 @@ import { CodeEditPreviewPanel } from "../streaming/CodeEditPreviewPanel.js";
 import { RightPaneTabs } from "./RightTabs.js";
 import { Breadcrumbs } from "./Breadcrumbs.js";
 import { TerminalSurface } from "./TerminalSurface.js";
-import { FilesIcon, type IconProps } from "./ToolbarIcons.js";
 import { BrowserPane } from "../browser/BrowserPane.js";
 import { SearchPanel } from "../SearchPanel.js";
+import { FilesPanel } from "../FilesPanel.js";
 
 export interface RightPaneProps {
   activeRunId: string | null;
@@ -23,6 +23,10 @@ const EMPTY_EVENTS: CanonicalRunEvent[] = [];
 
 export function RightPane({ activeRunId }: RightPaneProps) {
   const rightPanelTab = useUiStore((s) => s.rightPanelTab);
+  // The Files surface is keyed by the active workspace id so it remounts and
+  // resets to the new workspace root when the user switches workspaces
+  // (CLAUDE.md "reset with key" pattern — no reactive effect needed).
+  const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
   // Latch: keep the terminal mounted once it has been opened so its PTY
   // session and scrollback survive a tab switch (the server holds the shell;
   // the client socket + xterm stay alive). Mutating a ref during render is a
@@ -34,7 +38,7 @@ export function RightPane({ activeRunId }: RightPaneProps) {
     <section className="right-pane">
       <RightPaneTabs />
       {rightPanelTab === "diff" ? <DiffSurface activeRunId={activeRunId} /> : null}
-      {rightPanelTab === "files" ? <PlaceholderSurface tab="files" /> : null}
+      {rightPanelTab === "files" ? <FilesPanel key={activeWorkspaceId ?? "none"} /> : null}
       {rightPanelTab === "browser" ? <BrowserPane activeRunId={activeRunId} /> : null}
       {rightPanelTab === "search" ? <SearchPanel /> : null}
       {terminalOpenedRef.current ? (
@@ -69,27 +73,5 @@ function DiffSurface({ activeRunId }: RightPaneProps) {
         <CodeEditPreviewPanel runId={activeRunId} />
       </div>
     </>
-  );
-}
-
-const PLACEHOLDERS: Record<
-  "files",
-  { title: string; body: string; Icon: ComponentType<IconProps> }
-> = {
-  files: {
-    title: "Files",
-    body: "A workspace file browser isn't wired up yet. Agent file edits appear under Diff.",
-    Icon: FilesIcon,
-  },
-};
-
-function PlaceholderSurface({ tab }: { tab: "files" }) {
-  const { title, body, Icon } = PLACEHOLDERS[tab];
-  return (
-    <div className="right-pane__placeholder">
-      <Icon className="size-7" />
-      <div className="right-pane__placeholder-title">{title}</div>
-      <p className="right-pane__placeholder-body">{body}</p>
-    </div>
   );
 }

@@ -9,6 +9,7 @@ import {
   runSearchQuerySchema,
   runSearchResultSchema,
   runSummarySchema,
+  subagentListResponseSchema,
   transcriptResponseSchema,
   type ExecutionMode,
   type TokenUsage,
@@ -99,6 +100,8 @@ function toRunSummary(row: {
   reasoningTokens: number | null;
   costUsdMicros: number | null;
   usageSource: TokenUsage["usage_source"] | null;
+  lastTurnInputTokens: number | null;
+  lastTurnOutputTokens: number | null;
   toolCallCount?: number;
   errorToolCallCount?: number;
 }) {
@@ -121,6 +124,8 @@ function toRunSummary(row: {
     reasoningTokens: row.reasoningTokens,
     costUsdMicros: row.costUsdMicros,
     usageSource: row.usageSource,
+    lastTurnInputTokens: row.lastTurnInputTokens ?? null,
+    lastTurnOutputTokens: row.lastTurnOutputTokens ?? null,
     toolCallCount: row.toolCallCount ?? 0,
     errorToolCallCount: row.errorToolCallCount ?? 0,
   };
@@ -167,6 +172,10 @@ function toolNameFromPayload(payload: unknown): string | null {
 
 function isTerminalStatus(status: string): boolean {
   return status === "FINISHED" || status === "ERROR" || status === "CANCELLED" || status === "EXPIRED";
+}
+
+function isActiveSubagentStatus(status: string): boolean {
+  return status === "CREATING" || status === "RUNNING";
 }
 
 function renderMarkdownTranscript(input: { run: ReturnType<RunsRepo["getById"]>; agentName: string; events: ReturnType<EventsRepo["getAllByRunId"]> }): string {
@@ -236,6 +245,18 @@ export async function registerRunsRoutes(
     const results = deps.runsRepo.search(parsed.data.q, parsed.data.limit);
     return runSearchResultSchema.parse({ results });
   });
+
+  app.get<{ Params: { runId: string } }>(
+    "/api/runs/:runId/subagents",
+    async (req, reply) => {
+      const parent = deps.runsRepo.getById(req.params.runId);
+      if (!parent) return reply.code(404).send({ code: "RUN_NOT_FOUND" });
+      const subagents = deps.runsRepo.listSubagents(parent.id);
+      const activeCount = subagents.filter((subagent) => isActiveSubagentStatus(subagent.status)).length;
+      const completedCount = subagents.length - activeCount;
+      return subagentListResponseSchema.parse({ subagents, activeCount, completedCount });
+    },
+  );
 
   app.get<{ Params: { runId: string } }>(
     "/api/runs/:runId",

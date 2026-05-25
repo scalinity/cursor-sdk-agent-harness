@@ -223,6 +223,8 @@ export const runSummarySchema = z.object({
   reasoningTokens: z.number().int().nonnegative().nullable(),
   costUsdMicros: z.number().int().nonnegative().nullable(),
   usageSource: usageSourceSchema.nullable(),
+  lastTurnInputTokens: z.number().int().nonnegative().nullable(),
+  lastTurnOutputTokens: z.number().int().nonnegative().nullable(),
   toolCallCount: z.number().int().nonnegative(),
   errorToolCallCount: z.number().int().nonnegative(),
 });
@@ -232,6 +234,24 @@ export const listRunsResponseSchema = z.object({
   items: z.array(runSummarySchema),
   total: z.number().int().nonnegative(),
 });
+
+export const subagentListItemSchema = z.object({
+  runId: z.string(),
+  name: z.string(),
+  status: sdkRunStatusSchema,
+  startedAt: isoDateTimeSchema,
+  completedAt: isoDateTimeSchema.nullable(),
+  tokenCount: z.number().int().nonnegative(),
+  costMicros: z.number().int().nonnegative().nullable(),
+});
+export type SubagentListItem = z.infer<typeof subagentListItemSchema>;
+
+export const subagentListResponseSchema = z.object({
+  subagents: z.array(subagentListItemSchema),
+  activeCount: z.number().int().nonnegative(),
+  completedCount: z.number().int().nonnegative(),
+});
+export type SubagentListResponse = z.infer<typeof subagentListResponseSchema>;
 
 export const getRunEventsQuerySchema = z.object({
   after_seq: z.coerce.number().int().nonnegative().default(0),
@@ -605,6 +625,41 @@ export type GitStatusResponse = z.infer<typeof gitStatusResponseSchema>;
 // ============================================================================
 // Phase 19 — File Write (Apply to File)
 // ============================================================================
+
+export const workspaceFileEntrySchema = z.object({
+  name: z.string(),
+  type: z.enum(["file", "directory", "symlink", "other"]),
+  size: z.number().int().nonnegative(),
+  modifiedAt: isoDateTimeSchema.nullable(),
+});
+
+export const listWorkspaceFilesQuerySchema = z.object({
+  path: z.string().max(1024).default(""),
+  workspaceId: z.string().optional(),
+});
+export type ListWorkspaceFilesQuery = z.infer<typeof listWorkspaceFilesQuerySchema>;
+
+export const listWorkspaceFilesResponseSchema = z.object({
+  relPath: z.string(),
+  parent: z.string().nullable(),
+  entries: z.array(workspaceFileEntrySchema),
+});
+export type ListWorkspaceFilesResponse = z.infer<typeof listWorkspaceFilesResponseSchema>;
+
+export const readWorkspaceFileQuerySchema = z.object({
+  path: z.string().min(1).max(1024),
+  workspaceId: z.string().optional(),
+});
+export type ReadWorkspaceFileQuery = z.infer<typeof readWorkspaceFileQuerySchema>;
+
+export const readWorkspaceFileResponseSchema = z.object({
+  relPath: z.string(),
+  content: z.string(),
+  size: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+  binary: z.boolean(),
+});
+export type ReadWorkspaceFileResponse = z.infer<typeof readWorkspaceFileResponseSchema>;
 
 export const fileWriteRequestSchema = z.object({
   path: z.string().min(1).max(1024).refine(

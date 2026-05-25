@@ -6,7 +6,6 @@
 
 import { sql } from "drizzle-orm";
 import {
-  blob,
   check,
   foreignKey,
   index,
@@ -60,8 +59,11 @@ export const runs = sqliteTable(
     agentId: text("agent_id").notNull(),
     status: text("status").notNull(),
     promptPreview: text("prompt_preview").notNull().default(""),
+    name: text("name"),
     modelId: text("model_id"),
     mode: text("mode"),
+    executionMode: text("execution_mode"),
+    parentRunId: text("parent_run_id"),
     workspaceId: text("workspace_id"),
     startedAt: text("started_at").notNull().default(nowDefault),
     finishedAt: text("finished_at"),
@@ -76,6 +78,9 @@ export const runs = sqliteTable(
     reasoningTokens: integer("reasoning_tokens"),
     costUsdMicros: integer("cost_usd_micros"),
     usageSource: text("usage_source"),
+    // Last turn's per-turn usage — context-occupancy estimate (see 0007).
+    lastTurnInputTokens: integer("last_turn_input_tokens"),
+    lastTurnOutputTokens: integer("last_turn_output_tokens"),
     errorJson: text("error_json"),
     interruptedReason: text("interrupted_reason"),
     contextMetadata: text("context_metadata"),
@@ -87,8 +92,13 @@ export const runs = sqliteTable(
       columns: [table.agentId],
       foreignColumns: [agents.id],
     }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.parentRunId],
+      foreignColumns: [table.id],
+    }).onDelete("cascade"),
     index("idx_runs_agent_id_started_at").on(table.agentId, table.startedAt),
     index("idx_runs_status_started_at").on(table.status, table.startedAt),
+    index("idx_runs_parent").on(table.parentRunId),
     index("idx_runs_workspace_id_started_at").on(table.workspaceId, table.startedAt),
     index("idx_runs_started_at").on(table.startedAt),
     index("idx_runs_model_id_started_at").on(table.modelId, table.startedAt),
@@ -198,71 +208,5 @@ export const workspaceAllowlist = sqliteTable(
   (table) => [
     index("idx_workspace_allowlist_path").on(table.path),
     index("idx_workspace_allowlist_last_used_at").on(table.lastUsedAt),
-  ],
-);
-
-// ── Phase 23: Semantic Search and Multi-Model Support ──────────────────────
-
-export const embeddings = sqliteTable(
-  "embeddings",
-  {
-    id: text("id").primaryKey(),
-    workspaceId: text("workspace_id").notNull(),
-    filePath: text("file_path").notNull(),
-    startLine: integer("start_line").notNull(),
-    endLine: integer("end_line").notNull(),
-    language: text("language"),
-    content: text("content").notNull(),
-    // Float32Array serialized to a buffer; better-sqlite3 returns a Buffer.
-    embedding: blob("embedding").notNull(),
-    contentHash: text("content_hash").notNull(),
-    createdAt: text("created_at").notNull().default(nowDefault),
-  },
-  (table) => [
-    index("idx_embeddings_workspace").on(table.workspaceId),
-    index("idx_embeddings_file").on(table.workspaceId, table.filePath),
-    index("idx_embeddings_hash").on(table.contentHash),
-  ],
-);
-
-export const indexStatus = sqliteTable(
-  "index_status",
-  {
-    workspaceId: text("workspace_id").primaryKey(),
-    status: text("status").notNull().default("pending"),
-    totalFiles: integer("total_files").notNull().default(0),
-    indexedFiles: integer("indexed_files").notNull().default(0),
-    totalChunks: integer("total_chunks").notNull().default(0),
-    lastIndexedAt: text("last_indexed_at"),
-    errorMessage: text("error_message"),
-  },
-  (table) => [
-    check(
-      "index_status_status_check",
-      sql`${table.status} IN ('pending', 'indexing', 'indexed', 'error', 'stale')`,
-    ),
-  ],
-);
-
-export const modelProviders = sqliteTable(
-  "model_providers",
-  {
-    id: text("id").primaryKey(),
-    name: text("name").notNull(),
-    provider: text("provider").notNull(),
-    apiKeyKeychainAccount: text("api_key_keychain_account"),
-    baseUrl: text("base_url"),
-    modelsJson: text("models").notNull().default("[]"),
-    enabled: integer("enabled").notNull().default(1),
-    createdAt: text("created_at").notNull().default(nowDefault),
-  },
-  (table) => [
-    index("idx_model_providers_provider").on(table.provider),
-    index("idx_model_providers_enabled").on(table.enabled),
-    check(
-      "model_providers_provider_check",
-      sql`${table.provider} IN ('cursor', 'anthropic', 'openai', 'google', 'ollama')`,
-    ),
-    check("model_providers_models_json_check", sql`json_valid(${table.modelsJson})`),
   ],
 );

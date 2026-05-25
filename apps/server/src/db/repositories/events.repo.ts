@@ -76,7 +76,7 @@ export class EventsRepo {
    * event row atomically. The repository owns the transaction so that
    * concurrent callers can never produce gapped or duplicate seq values.
    */
-  appendCanonicalEvent(event: AppendableEvent): EventRow {
+  appendCanonicalEvent(event: AppendableEvent, beforeCommit?: () => void): EventRow {
     const id = event.id ?? randomUUID();
     const receivedAt = event.receivedAt ?? isoNow();
     const payloadJson = JSON.stringify(event.payload ?? null);
@@ -113,6 +113,7 @@ export class EventsRepo {
           `EventsRepo.appendCanonicalEvent: run not found id=${event.runId}`,
         );
       }
+      beforeCommit?.();
       insert.run({
         id,
         run_id: event.runId,

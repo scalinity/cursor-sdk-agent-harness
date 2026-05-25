@@ -17,7 +17,7 @@ import { cn } from "../../lib/cn.js";
 import { Select, type SelectOption } from "../ui/Select.js";
 import { MentionAutocomplete } from "../MentionAutocomplete.js";
 import { ContextChipBar } from "../ContextChipBar.js";
-import { ArrowUpIcon, MicIcon, PlusIcon, SparkIcon, XIcon } from "./ToolbarIcons.js";
+import { ArrowUpIcon, MicIcon, PlusIcon, XIcon } from "./ToolbarIcons.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import {
   attachmentImages,
@@ -298,7 +298,7 @@ export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerPr
           >
             <PlusIcon className="size-4" />
           </button>
-          <Select
+          <Select<string>
             value={selectedModelId}
             options={modelOptions}
             onChange={setSelectedModelId}
@@ -307,7 +307,6 @@ export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerPr
             ariaLabel="Model"
             title="Model used for new runs. Switching it re-targets the coding agent."
             className="h-control-md gap-1 rounded-md px-1 text-md font-medium text-text-tertiary hover:text-text-primary"
-            leading={<SparkIcon className="size-3.5 shrink-0" />}
           />
           <div className="ml-auto flex items-center gap-2">
             {speech.modelProgress !== null ? (

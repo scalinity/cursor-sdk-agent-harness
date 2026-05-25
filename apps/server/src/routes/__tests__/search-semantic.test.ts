@@ -44,8 +44,10 @@ describe("GET /api/search/semantic", () => {
       embedder: new FakeEmbedder(),
     });
     services.push(searchService);
+    const entries = [];
     for (const ws of workspaces) {
-      repos.workspaceAllowlist.create({ path: ws });
+      const entry = repos.workspaceAllowlist.create({ path: ws });
+      entries.push(entry);
       // Pre-index synchronously so the route can read embeddings.
       const indexer = new WorkspaceIndexer({
         embeddingsRepo: repos.embeddings,
@@ -55,8 +57,8 @@ describe("GET /api/search/semantic", () => {
       });
       await indexer.indexWorkspace(ws, ws);
     }
-    const active = workspaces[activeIdx];
-    if (active) repos.settings.set("app.activeWorkspaceId", active);
+    const active = entries[activeIdx];
+    if (active) repos.settings.set("app.activeWorkspaceId", active.id);
     await registerSearchRoutes(app, {
       settingsRepo: repos.settings,
       allowlistRepo: repos.workspaceAllowlist,

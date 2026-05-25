@@ -293,6 +293,20 @@ export function accumulateTurnEndedUsage(
   return sum;
 }
 
+/**
+ * Parse a SINGLE `turn-ended.usage` payload without summing. Returns the
+ * per-turn usage (or null on parse failure). RunController keeps the most
+ * recent one as the context-occupancy estimate: a turn's `inputTokens`
+ * already includes all prior context the model re-ingested, so the LAST
+ * turn reflects how full the window is right now (and drops when Composer
+ * self-summarizes). Distinct from `accumulateTurnEndedUsage`, which sums
+ * across turns for the billing total on the `runs` row.
+ */
+export function parseTurnEndedUsage(next: unknown): ParsedTurnEndedUsage | null {
+  const parsed = turnEndedUsageShape.safeParse(next);
+  return parsed.success ? parsed.data : null;
+}
+
 function addOpt(a: number | undefined, b: number | undefined): number | undefined {
   if (a === undefined && b === undefined) return undefined;
   return (a ?? 0) + (b ?? 0);

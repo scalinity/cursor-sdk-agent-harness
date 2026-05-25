@@ -30,6 +30,7 @@ each phase. Use it as the single source of truth for "what is decided" vs
 | 20 | Context Intelligence and Rules | ✅ complete | @-mention system (file/folder/symbol/codebase/rules), project rules (.harness/rules/ with always/glob/manual scopes), codebase search (grep+file via ripgrep with fallback). Migration 0004, 16 new shared schemas, 3 new server routes, 3 new services, 6 new frontend components/hooks, Search tab in right pane. 464 tests (306 server, 122 web, 30 shared, 6 eslint, 11 scripts). |
 | 22 | Enrichment: Docs Indexing, Notepads, Terminal AI, Slash Commands | ✅ complete | Custom documentation indexing (crawl + FTS5 search + @docs mentions), persistent Notepads (@notepad mentions, editor page), Terminal AI (Cmd+K pattern-based command generation with dangerous-command detection), user-definable slash commands (CRUD + template expansion + built-in /explain, /review, /test, /fix, /refactor). Migration 0005, 19 new shared schemas (enrichment.ts), 3 new repos (docs, notepads, slash-commands), 4 new server routes, 1 new service (docs-crawler), 4 new hooks, 4 new components/pages, extended @-mention system with docs+notepad kinds. 500+ tests (350 server, 122 web). |
 | 23 | Semantic Search and Multi-Model Support | ✅ complete | Vector semantic codebase search (all-MiniLM-L6-v2 384-dim via @xenova/transformers ONNX **WASM**; boundary-aware chunker, incremental indexer + fs.watch, brute-force cosine) with @codebase semantic-preference→grep fallback. Multi-model providers (BYOK Anthropic/OpenAI/Google/Ollama, chat-only) via ModelRouter + ProviderRunController emitting identical canonical events; Keychain-backed keys. Auto mode (per-task heuristic). Migration 0007, shared semantic-search.ts + providers.ts, provider/index settings pages, statusbar index badge, SearchPanel Semantic toggle, unified model selector. Gates green: server 408 (+1 gated embed smoke), web 124, shared, eslint, scripts. |
+| 24 | Advanced Agent Features and Platform Expansion | 🟡 partial | Priority 1 shipped and review-hardened: sub-agent spawn/completion detection, child-run persistence, `/api/runs/:runId/subagents`, live WS frames, dashboard UI, top-level history filtering, lifecycle transaction sync, and dashboard error/loading states. Remaining independent features (Design Mode, worktree isolation, CLI/headless, light theme) deferred after the natural Priority 1 boundary. |
 
 ---
 
@@ -3356,3 +3357,91 @@ Web:
 ### Next phase
 
 Phase 23 — Semantic Search and Multi-Model (`23_SEMANTIC_SEARCH_AND_MULTI_MODEL.md`).
+
+---
+
+## Phase 24 Outcomes — Advanced Agent Features and Platform Expansion
+
+### Summary
+
+Shipped the Priority 1 sub-agent parallel execution dashboard as an independently functional Phase 24 slice. The harness now detects SDK sub-agent-style tool calls, persists child runs linked to a parent run, emits live lifecycle frames, exposes a child-run listing endpoint, and renders an in-session monitoring dashboard. A post-gate `review-5` pass was run before stop; `address` fixes hardened runtime wiring, parent/child isolation, lifecycle transaction sync, dashboard failure states, and sub-agent detection false positives.
+
+### Features delivered
+
+1. **Sub-agent lifecycle detection** — `normalizeSDKMessage` recognizes explicit task-style subagent tool calls and MCP-style subagent/agent provider or tool names, emitting `subagent.spawned` and `subagent.completed` canonical events with deterministic child run ids.
+
+2. **Child run persistence** — Migration `0008_advanced_features.sql` adds `runs.parent_run_id` plus `idx_runs_parent`; parent deletes cascade to children. The persist pipeline now creates/completes child run rows inside the same canonical event transaction that stores each lifecycle event, preserving the persist-before-broadcast contract.
+
+3. **Runtime sub-agent API** — `GET /api/runs/:runId/subagents` returns child run summaries, active/completed counts, token totals, costs, and timestamps using shared Zod response schemas. Top-level run history, search, usage, and agent aggregates default to parent runs only so child runs do not pollute user-facing history.
+
+4. **Visual dashboard** — `SubagentDashboard` appears in the center pane for runs with child agents, showing responsive cards with status badges, elapsed time, token usage, cost, compact lifecycle previews, expandable event streams, and loading/error/retry states. `useSubagentMonitor` subscribes through the shared live/replay run store path and polls the detail endpoint with a slower idle interval.
+
+### Schema changes
+
+- Migration `0008_advanced_features.sql`:
+  - `ALTER TABLE runs ADD COLUMN parent_run_id TEXT REFERENCES runs(id) ON DELETE CASCADE`
+  - `CREATE INDEX idx_runs_parent ON runs(parent_run_id)`
+- Shared schemas:
+  - `runRowSchema.parentRunId`
+  - canonical event kinds `subagent.spawned` and `subagent.completed`
+  - WS frames `subagent_spawned` and `subagent_completed`
+  - REST schemas `subagentListItemSchema` and `subagentListResponseSchema`
+
+### Files created
+
+Server:
+- `apps/server/src/db/migrations/0008_advanced_features.sql`
+- `apps/server/src/routes/__tests__/runs-subagents.test.ts`
+
+Web:
+- `apps/web/src/components/SubagentDashboard.tsx`
+- `apps/web/src/components/SubagentDashboard.test.tsx`
+- `apps/web/src/hooks/useSubagentMonitor.ts`
+
+### Files modified (key changes)
+
+Shared:
+- `packages/shared/src/domain.ts` — parent run id and subagent canonical event kinds
+- `packages/shared/src/ws-protocol.ts` — subagent lifecycle frames
+- `packages/shared/src/rest-contracts.ts` — subagent list endpoint schemas
+- `packages/shared/src/index.ts` — shared exports
+
+Server:
+- `apps/server/src/db/schema.ts` — `parent_run_id` column and index
+- `apps/server/src/db/repositories/runs.repo.ts` — create/list/complete child run helpers, parent-only top-level list/search/usage defaults, recursive parent delete cleanup
+- `apps/server/src/sdk/normalizer.ts` — sub-agent detection from SDK task/MCP tool-call shapes
+- `apps/server/src/sdk/persist-and-broadcast.ts` — child row sync in the lifecycle event transaction
+- `apps/server/src/sdk/startup-recovery.ts` — includes child rows when finalizing interrupted runs
+- `apps/server/src/ws/frame-builder.ts` — lifecycle frame construction
+- `apps/server/src/routes/runs.routes.ts` — subagent listing endpoint
+- `apps/server/src/app.ts` — route/pipeline dependency wiring and restored search/model runtime wiring
+- `apps/server/src/terminal/terminal-session.ts` — scrubbed injected terminal env plus normalized `TERM` for deterministic embedded-terminal env tests
+
+Web:
+- `apps/web/src/components/shell/CenterPane.tsx` — dashboard placement above the run timeline
+- `apps/web/src/app/AppShell.tsx` and `apps/web/src/state/ui-store.ts` — compile fixes for existing multi-model state drift
+
+### Acceptance gates
+
+- `pnpm -F @harness/shared build` ✅
+- `pnpm typecheck && pnpm lint && pnpm test` ✅ — 64 server test files / 450 passed + 1 skipped, 27 web test files / 127 passed, 4 shared test files / 39 passed, 3 eslint-plugin test files / 6 passed, scripts 11 passed
+- Feature smoke: `pnpm -F @harness/server test src/sdk/__tests__/normalizer.test.ts src/sdk/__tests__/persist-and-broadcast.test.ts src/routes/__tests__/runs-subagents.test.ts && pnpm -F @harness/web test src/components/SubagentDashboard.test.tsx` ✅
+- Migration apply: `pnpm migrate` ✅ (`applied=0`; local DB already had current migrations)
+- Desktop build: `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` ✅ (plain signing auto-discovery hit a local signing/path failure earlier; unsigned local package succeeded)
+- Desktop install: copied `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` to `/Applications/Cursor SDK Agent Harness.app` ✅
+
+### Review and address notes
+
+- `review-5` ran after Priority 1 gates/install/status. Four reviewers completed and one reviewer timed out without a report.
+- `address` fixes landed for the blocking findings: runtime `SearchService`/`ModelRouter` injection, parent/child delete and top-level filtering, lifecycle row sync inside event persistence, MCP/task false-positive detection, dashboard event/error rendering, bounded sub-agent names, idle polling, and injected terminal env scrubbing.
+
+### Deferred independent features
+
+- Design Mode — Browser Element Targeting
+- Git Worktree Isolation
+- CLI / Headless Mode
+- Light Theme
+
+### Next phase
+
+Stop after Phase 24 per prompt. No next planned v1.2 phase.

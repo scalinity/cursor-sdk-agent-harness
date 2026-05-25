@@ -158,6 +158,70 @@ export const fileSearchResultSchema = z.object({
 export type FileSearchResult = z.infer<typeof fileSearchResultSchema>;
 
 // ---------------------------------------------------------------------------
+// Workspace file browser (directory listing + read-only file preview)
+// ---------------------------------------------------------------------------
+
+function rejectsControlChars(value: string): boolean {
+  return !Array.from(value).some((ch) => ch.charCodeAt(0) < 0x20);
+}
+
+export const workspaceFileEntrySchema = z.object({
+  name: z.string(),
+  // `directory`/`file` are resolved from the dirent; `symlink` is a link we
+  // do not follow for type classification; `other` covers sockets/fifos/etc.
+  type: z.enum(["file", "directory", "symlink", "other"]),
+  size: z.number().int().nonnegative(),
+  // ISO timestamp, or null when the entry could not be stat'd (permissions).
+  modifiedAt: z.string().nullable(),
+});
+export type WorkspaceFileEntry = z.infer<typeof workspaceFileEntrySchema>;
+
+export const listWorkspaceFilesQuerySchema = z.object({
+  // Directory to list, relative to the workspace root. "" (the default) lists
+  // the workspace root itself. Absolute paths and traversal are rejected
+  // server-side after normalization.
+  path: z
+    .string()
+    .max(1024)
+    .refine(rejectsControlChars, "Path contains invalid characters")
+    .default(""),
+  workspaceId: z.string().optional(),
+});
+export type ListWorkspaceFilesQuery = z.infer<typeof listWorkspaceFilesQuerySchema>;
+
+export const listWorkspaceFilesResponseSchema = z.object({
+  // The directory that was listed, relative to the workspace root ("" = root).
+  relPath: z.string(),
+  // Parent directory relative path, or null when already at the root.
+  parent: z.string().nullable(),
+  entries: z.array(workspaceFileEntrySchema),
+});
+export type ListWorkspaceFilesResponse = z.infer<typeof listWorkspaceFilesResponseSchema>;
+
+export const readWorkspaceFileQuerySchema = z.object({
+  path: z
+    .string()
+    .min(1)
+    .max(1024)
+    .refine(rejectsControlChars, "Path contains invalid characters"),
+  workspaceId: z.string().optional(),
+});
+export type ReadWorkspaceFileQuery = z.infer<typeof readWorkspaceFileQuerySchema>;
+
+export const readWorkspaceFileResponseSchema = z.object({
+  relPath: z.string(),
+  // UTF-8 text content. Empty string when `binary` is true.
+  content: z.string(),
+  size: z.number().int().nonnegative(),
+  // true when the file exceeded the preview byte cap and `content` is a prefix.
+  truncated: z.boolean(),
+  // true when the file appears to be binary (NUL byte detected); the client
+  // renders a "binary file" notice instead of the content.
+  binary: z.boolean(),
+});
+export type ReadWorkspaceFileResponse = z.infer<typeof readWorkspaceFileResponseSchema>;
+
+// ---------------------------------------------------------------------------
 // Context search endpoint (autocomplete)
 // ---------------------------------------------------------------------------
 

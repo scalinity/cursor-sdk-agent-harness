@@ -149,6 +149,8 @@ export class ProviderRunController implements CancelableRun {
         gitMetadata: null,
         durationMs,
         usage: tokenUsage,
+        lastTurnInputTokens: null,
+        lastTurnOutputTokens: null,
       });
     }
     // onTerminate owns cleanup (unregister from activeRuns + pipeline.dropRun).

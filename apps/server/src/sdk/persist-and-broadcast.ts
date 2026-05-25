@@ -1,7 +1,8 @@
 import type { FastifyBaseLogger } from "fastify";
-import type { AgentMode, EventRow, SDKMessage } from "@harness/shared";
-import { sdkMessageSchema } from "@harness/shared";
+import type { AgentMode, EventRow, SDKMessage, SdkRunStatus } from "@harness/shared";
+import { sdkMessageSchema, subagentLifecyclePayloadSchema } from "@harness/shared";
 import type { EventsRepo } from "../db/repositories/events.repo.js";
+import type { RunsRepo } from "../db/repositories/runs.repo.js";
 import {
   NOOP_PERF_COUNTERS,
   type PerfCounters,
@@ -24,6 +25,8 @@ import type { StreamSink } from "./stream-stub.js";
  */
 export interface PipelineDeps {
   events: EventsRepo;
+  /** Phase 24: optional in tests, required in production for child sub-agent rows. */
+  runs?: RunsRepo;
   bus: RunBus;
   logger: FastifyBaseLogger;
   /**
@@ -186,6 +189,10 @@ export function createPersistAndBroadcast(
         return;
       }
 
+      if (!prepareSubagentLifecycleRows(deps, drafts, args)) {
+        return;
+      }
+
       // Persist each draft. EventsRepo.appendCanonicalEvent owns the
       // transaction that allocates the seq AND inserts the row, so each
       // iteration here either fully commits or rolls back. If any draft
@@ -207,7 +214,7 @@ export function createPersistAndBroadcast(
             raw: draft.raw,
             occurredAt: draft.occurredAt,
             receivedAt: draft.receivedAt,
-          });
+          }, subagentLifecycleSync(deps, draft, args));
           perf.observe(
             "sdk_event_received_to_db_commit_ms",
             performance.now() - commitStart,
@@ -341,6 +348,73 @@ export function createPersistAndBroadcast(
         performance.now() - broadcastStart,
       );
     },
+  };
+}
+
+function terminalSubagentStatus(status: SdkRunStatus | undefined): Extract<SdkRunStatus, "FINISHED" | "ERROR" | "CANCELLED" | "EXPIRED"> {
+  if (status === "ERROR" || status === "CANCELLED" || status === "EXPIRED") return status;
+  return "FINISHED";
+}
+
+function prepareSubagentLifecycleRows(
+  deps: PipelineDeps,
+  drafts: Array<{ kind: string; payload: unknown }>,
+  args: IngestArgs,
+): boolean {
+  if (!deps.runs) return true;
+  for (const draft of drafts) {
+    if (draft.kind !== "subagent.spawned" && draft.kind !== "subagent.completed") continue;
+    const parsed = subagentLifecyclePayloadSchema.safeParse(draft.payload);
+    if (!parsed.success) {
+      deps.logger.error(
+        { runId: args.runId, kind: draft.kind, issues: parsed.error.issues },
+        "persist-and-broadcast: invalid subagent lifecycle payload; skipping draft batch",
+      );
+      return false;
+    }
+    const parent = deps.runs.getById(parsed.data.parent_run_id);
+    if (!parent) {
+      deps.logger.warn(
+        { runId: args.runId, parentRunId: parsed.data.parent_run_id },
+        "persist-and-broadcast: subagent parent run not found; skipping draft batch",
+      );
+      return false;
+    }
+  }
+  return true;
+}
+
+function subagentLifecycleSync(
+  deps: PipelineDeps,
+  draft: { kind: string; payload: unknown },
+  args: IngestArgs,
+): (() => void) | undefined {
+  const runs = deps.runs;
+  if (!runs) return undefined;
+  if (draft.kind !== "subagent.spawned" && draft.kind !== "subagent.completed") return undefined;
+  const parsed = subagentLifecyclePayloadSchema.parse(draft.payload);
+  return () => {
+    const parent = runs.getById(parsed.parent_run_id);
+    if (!parent) {
+      throw new Error(`subagent parent run not found id=${parsed.parent_run_id}`);
+    }
+    runs.ensureSubagentRun({
+      id: parsed.child_run_id,
+      parentRunId: parent.id,
+      agentId: args.agentId,
+      name: parsed.subagent_name,
+      modelId: parent.modelId,
+      mode: parent.mode ?? args.agentMode,
+      executionMode: parent.executionMode,
+      workspaceId: parent.workspaceId,
+    });
+
+    if (draft.kind === "subagent.completed") {
+      runs.completeSubagentRun(
+        parsed.child_run_id,
+        terminalSubagentStatus(parsed.status),
+      );
+    }
   };
 }
 
