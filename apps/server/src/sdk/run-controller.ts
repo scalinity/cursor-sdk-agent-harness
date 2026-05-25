@@ -237,6 +237,15 @@ export class RunController {
     try {
       for await (const event of run.stream()) {
         if (this.abortController.signal.aborted) break;
+        if (
+          this.receivedThinkingFromDelta &&
+          event !== null &&
+          typeof event === "object" &&
+          (event as unknown as Record<string, unknown>).type === "thinking"
+        ) {
+          this.observeStatusFromEvent(event);
+          continue;
+        }
         try {
           await this.init.sink(event);
         } catch (sinkErr) {
@@ -351,19 +360,62 @@ export class RunController {
   }
 
   private onDeltaParseFailureLogged = false;
+  private receivedThinkingFromDelta = false;
 
   private onDelta(update: unknown): void {
     if (update === null || typeof update !== "object") return;
     const rec = update as Record<string, unknown>;
+
+    if (rec.type === "thinking-delta") {
+      const text = typeof rec.text === "string" ? rec.text : "";
+      if (text.length > 0) {
+        this.receivedThinkingFromDelta = true;
+        try {
+          this.init.sink({
+            type: "thinking",
+            agent_id: this.agentId,
+            run_id: this.runId,
+            text,
+          });
+        } catch (err) {
+          this.init.logger.error(
+            { err, runId: this.runId },
+            "sink threw on thinking delta from onDelta",
+          );
+        }
+      }
+      return;
+    }
+
+    if (rec.type === "thinking-completed") {
+      this.receivedThinkingFromDelta = true;
+      const durationMs =
+        typeof rec.thinkingDurationMs === "number" ? rec.thinkingDurationMs : undefined;
+      if (durationMs !== undefined) {
+        try {
+          this.init.sink({
+            type: "thinking",
+            agent_id: this.agentId,
+            run_id: this.runId,
+            text: "",
+            thinking_duration_ms: durationMs,
+          });
+        } catch (err) {
+          this.init.logger.error(
+            { err, runId: this.runId },
+            "sink threw on thinking-completed from onDelta",
+          );
+        }
+      }
+      return;
+    }
+
     if (rec.type === "turn-ended") {
       const next = accumulateTurnEndedUsage(
         this.accumulatedUsage,
         (rec as { usage?: unknown }).usage,
       );
       if (next === this.accumulatedUsage && this.accumulatedUsage !== null) {
-        // accumulator returned the previous snapshot unchanged → the new
-        // payload failed Zod parse. Log once per run to surface SDK shape
-        // drift without flooding logs on every turn.
         if (!this.onDeltaParseFailureLogged) {
           this.onDeltaParseFailureLogged = true;
           this.init.logger.warn(
