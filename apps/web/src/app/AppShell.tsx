@@ -17,9 +17,9 @@ import { useNativeMenuActions } from "../hooks/useNativeMenuActions.js";
 import { useEnsureDefaultAgent } from "../hooks/useEnsureDefaultAgent.js";
 import { useErrorReporter } from "../hooks/useErrorReporter.js";
 import { useGitStatus } from "../hooks/useGitStatus.js";
+import { useRulesCount } from "../hooks/useRulesCount.js";
 import { useUiStore } from "../state/ui-store.js";
 import { useRunStore } from "../state/run-store.js";
-import { useAgentStore } from "../state/agent-store.js";
 import { Titlebar } from "../components/shell/Titlebar.js";
 import { SessionsRail } from "../components/shell/SessionsRail.js";
 import { CenterPane } from "../components/shell/CenterPane.js";
@@ -30,9 +30,8 @@ import { Toaster } from "../components/shell/Toaster.js";
 import { NewAgentDialog } from "../components/agents/NewAgentDialog.js";
 import { WorkspaceRequiredModal } from "../components/workspace/WorkspaceRequiredModal.js";
 import { cn } from "../lib/cn.js";
-import { MODEL_LABELS, type ExecutionMode, type SdkImage } from "@harness/shared";
+import { MODEL_LABELS, type ContextMention, type SdkImage } from "@harness/shared";
 import { describeModel } from "../lib/model-label.js";
-import { mutatingRequest } from "../lib/http-client.js";
 
 export function AppShell() {
   const csrf = useCsrfToken();
@@ -55,6 +54,7 @@ export function AppShell() {
   const selectedModelId = useUiStore((s) => s.selectedModelId);
   const setComposerDraft = useUiStore((s) => s.setComposerDraft);
   const gitStatus = useGitStatus();
+  const rulesCount = useRulesCount();
 
   // Auto-provision a universal default "Coding Agent" for the active
   // workspace + selected model so the user never has to create an agent
@@ -107,22 +107,6 @@ export function AppShell() {
     setComposerDraft("");
   }, [setActiveRunId, setComposerDraft]);
 
-  const onExecutionModeChange = useCallback(
-    (mode: ExecutionMode) => {
-      if (!activeAgent) return;
-      // Optimistic update: the agent-store is hydrated from the server
-      // response on reload, but we want instant UI feedback.
-      useAgentStore.getState().upsertAgent({ ...activeAgent, executionMode: mode });
-      void mutatingRequest(`/api/agents/${activeAgent.id}`, {
-        method: "PATCH",
-        body: { executionMode: mode },
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken: () => csrf.refresh(),
-      });
-    },
-    [activeAgent, csrf],
-  );
-
   const onRenameRun = useCallback(
     (_runId: string, _name: string) => {
       void reloadRuns();
@@ -145,7 +129,7 @@ export function AppShell() {
   );
 
   const onSubmit = useCallback(
-    async (input: { prompt: string; agentId: string; images?: SdkImage[] }) => {
+    async (input: { prompt: string; agentId: string; images?: SdkImage[]; mentions?: ContextMention[] }) => {
       const runId = await submitUserInput(input);
       setActiveRunId(runId);
       return runId;
@@ -164,7 +148,7 @@ export function AppShell() {
     "menu:new-session": newSession,
     "menu:open-workspace": () => void workspacePicker.pick(),
     "menu:toggle-code-pane": () => toggleCodeHidden(),
-    "menu:preferences": () => navigate("/settings/mcp-servers"),
+    "menu:preferences": () => navigate("/settings"),
   });
 
   useKeyboardShortcuts(
@@ -255,8 +239,6 @@ export function AppShell() {
           onSubmit={onSubmit}
           onApprovalResolve={onApprovalResolve}
           cancelUnavailable={cancelUnavailable}
-          executionMode={activeAgent?.executionMode}
-          onExecutionModeChange={onExecutionModeChange}
         />
         <RightPane activeRunId={activeRunId} />
         <Statusbar
@@ -267,6 +249,7 @@ export function AppShell() {
           runningRunId={activeRunId}
           workspaceName={activeWorkspace.workspace?.label ?? activeWorkspace.workspace?.path ?? null}
           gitStatus={gitStatus}
+          rulesCount={rulesCount}
         />
         <NewAgentDialog
           open={newAgentOpen}

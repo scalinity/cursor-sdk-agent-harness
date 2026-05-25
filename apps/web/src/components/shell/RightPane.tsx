@@ -10,6 +10,7 @@ import { Breadcrumbs } from "./Breadcrumbs.js";
 import { TerminalSurface } from "./TerminalSurface.js";
 import { FilesIcon, type IconProps } from "./ToolbarIcons.js";
 import { BrowserPane } from "../browser/BrowserPane.js";
+import { SearchPanel } from "../SearchPanel.js";
 
 export interface RightPaneProps {
   activeRunId: string | null;
@@ -35,6 +36,7 @@ export function RightPane({ activeRunId }: RightPaneProps) {
       {rightPanelTab === "diff" ? <DiffSurface activeRunId={activeRunId} /> : null}
       {rightPanelTab === "files" ? <PlaceholderSurface tab="files" /> : null}
       {rightPanelTab === "browser" ? <BrowserPane activeRunId={activeRunId} /> : null}
+      {rightPanelTab === "search" ? <SearchPanel /> : null}
       {terminalOpenedRef.current ? (
         <div
           className={cn("terminal-mount", rightPanelTab !== "terminal" && "terminal-mount--hidden")}

@@ -25,6 +25,8 @@ export interface StatusbarProps {
   workspaceName?: string | null;
   /** Phase 19 — git status for the active workspace. */
   gitStatus?: GitStatusInfo;
+  /** Phase 20 — number of active project rules in the workspace. */
+  rulesCount?: number;
 }
 
 function GitBranchIcon({ className }: { className?: string }) {
@@ -44,6 +46,7 @@ export function Statusbar({
   runningRunId,
   workspaceName,
   gitStatus,
+  rulesCount,
 }: StatusbarProps) {
   return (
     <div className="statusbar">
@@ -65,6 +68,14 @@ export function Statusbar({
           <span className="size-2 rounded-full bg-accent-primary" aria-hidden="true" />
           {modelLabel ?? "no model"}
         </span>
+        {rulesCount != null && rulesCount > 0 ? (
+          <>
+            <span className="text-text-tertiary">·</span>
+            <span className="inline-flex items-center gap-1 text-text-tertiary" title="Active project rules">
+              Rules: {rulesCount}
+            </span>
+          </>
+        ) : null}
         <span className="text-text-tertiary">·</span>
         <span className="inline-flex items-center gap-1.5">
           ws <span className={connectionState === "open" ? "text-success" : "text-warning"}>{connectionState}</span>

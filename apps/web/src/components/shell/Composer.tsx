@@ -2,16 +2,18 @@ import { useCallback, useRef, useState } from "react";
 import {
   MODEL_LABELS,
   type AgentSummary,
-  type ExecutionMode,
+  type ContextMention,
   type ModelId,
   type SdkImage,
 } from "@harness/shared";
 import { useUiStore } from "../../state/ui-store.js";
 import { useErrorReporter } from "../../hooks/useErrorReporter.js";
 import { useSpeechToText } from "../../hooks/useSpeechToText.js";
+import { useMentionAutocomplete } from "../../hooks/useMentionAutocomplete.js";
 import { cn } from "../../lib/cn.js";
 import { Select, type SelectOption } from "../ui/Select.js";
-import { ModeToggle } from "../ModeToggle.js";
+import { MentionAutocomplete } from "../MentionAutocomplete.js";
+import { ContextChipBar } from "../ContextChipBar.js";
 import { ArrowUpIcon, MicIcon, PlusIcon, SparkIcon, XIcon } from "./ToolbarIcons.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import {
@@ -29,13 +31,9 @@ const MODEL_OPTIONS: ReadonlyArray<SelectOption<ModelId>> = (
 
 export interface ComposerProps {
   activeAgent: AgentSummary | null;
-  onSubmit: (input: { prompt: string; agentId: string; images?: SdkImage[] }) => Promise<string>;
+  onSubmit: (input: { prompt: string; agentId: string; images?: SdkImage[]; mentions?: ContextMention[] }) => Promise<string>;
   /** Centered "new session" presentation when the chat is empty and the right pane is collapsed. */
   heroMode?: boolean;
-  /** Current execution mode (ask / agent / yolo). */
-  executionMode?: ExecutionMode | undefined;
-  /** Callback when the user changes the execution mode via the ModeToggle. */
-  onExecutionModeChange?: ((mode: ExecutionMode) => void) | undefined;
 }
 
 /**
@@ -43,7 +41,7 @@ export interface ComposerProps {
  * Submits via the agent-stream hook; on submit the parent's `onSubmit`
  * is responsible for setting the active run id (it returns the runId).
  */
-export function Composer({ activeAgent, onSubmit, heroMode = false, executionMode, onExecutionModeChange }: ComposerProps) {
+export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerProps) {
   const draft = useUiStore((s) => s.composerDraft);
   const setDraft = useUiStore((s) => s.setComposerDraft);
   const selectedModelId = useUiStore((s) => s.selectedModelId);
@@ -78,6 +76,8 @@ export function Composer({ activeAgent, onSubmit, heroMode = false, executionMod
     }
     speech.toggle();
   }, [speech]);
+
+  const mention = useMentionAutocomplete();
 
   // The coding agent is auto-provisioned for the active workspace + selected
   // model (see useEnsureDefaultAgent). "Ready" means that provisioning has
@@ -144,29 +144,29 @@ export function Composer({ activeAgent, onSubmit, heroMode = false, executionMod
     // POST /api/runs requires a non-empty prompt (min length 1); if the user
     // attached only an image, synthesize a minimal instruction.
     const finalPrompt = promptText.length > 0 ? promptText : "(see attached image)";
+    const mentions: ContextMention[] = mention.chips.map((c) => c.mention);
     setBusy(true);
     try {
       await onSubmit({
         prompt: finalPrompt,
         agentId: activeAgent.id,
         ...(images.length > 0 ? { images } : {}),
+        ...(mentions.length > 0 ? { mentions } : {}),
       });
       setDraft("");
       setAttachments([]);
+      mention.clearChips();
     } catch (e) {
       report(e);
     } finally {
       setBusy(false);
     }
-  }, [activeAgent, selectedModelId, busy, onSubmit, setDraft, report, attachments]);
+  }, [activeAgent, selectedModelId, busy, onSubmit, setDraft, report, attachments, mention]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Guard against IME composition: during CJK/Korean candidate selection
-    // browsers dispatch a keydown with key="Enter" AND isComposing=true to
-    // commit the candidate; submitting here would burn API budget on the
-    // half-finished prompt. keyCode 229 is the legacy fallback some older
-    // mobile WebViews still emit during composition.
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    // Let the mention autocomplete handle navigation keys first
+    if (mention.onKeyDown(e)) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void submit();
@@ -222,14 +222,27 @@ export function Composer({ activeAgent, onSubmit, heroMode = false, executionMod
           tabIndex={-1}
           aria-hidden="true"
         />
-        <textarea
-          className="composer-textarea"
-          placeholder={placeholder}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={onKeyDown}
-          disabled={busy}
-        />
+        <ContextChipBar chips={mention.chips} onRemove={mention.removeChip} />
+        <div className="relative">
+          <textarea
+            className="composer-textarea"
+            placeholder={placeholder}
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              mention.onInputChange(e.target.value, e.target.selectionStart ?? e.target.value.length);
+            }}
+            onKeyDown={onKeyDown}
+            disabled={busy}
+          />
+          {mention.isOpen && mention.results ? (
+            <MentionAutocomplete
+              results={mention.results}
+              selectedIndex={mention.selectedIndex}
+              onSelect={mention.selectItem}
+            />
+          ) : null}
+        </div>
         {attachments.length > 0 ? (
           <div className="composer-attachments">
             {attachments.map((a) => (
@@ -263,13 +276,6 @@ export function Composer({ activeAgent, onSubmit, heroMode = false, executionMod
           >
             <PlusIcon className="size-4" />
           </button>
-          {executionMode && onExecutionModeChange ? (
-            <ModeToggle
-              value={executionMode}
-              onChange={onExecutionModeChange}
-              disabled={busy}
-            />
-          ) : null}
           <Select
             value={selectedModelId}
             options={MODEL_OPTIONS}

@@ -6,6 +6,7 @@ import {
   FilesIcon,
   TerminalIcon,
   GlobeIcon,
+  SearchIcon,
   type IconProps,
 } from "./ToolbarIcons.js";
 
@@ -18,6 +19,7 @@ const SURFACES: ReadonlyArray<{
   { tab: "files", label: "Files", Icon: FilesIcon },
   { tab: "terminal", label: "Terminal", Icon: TerminalIcon },
   { tab: "browser", label: "Browser", Icon: GlobeIcon },
+  { tab: "search", label: "Search", Icon: SearchIcon },
 ];
 
 /**

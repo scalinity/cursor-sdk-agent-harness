@@ -3,16 +3,24 @@ import type {
   AgentDetailResponse,
   AgentRow,
   AgentSummary,
+  ContextMention,
   CreateAgentRequest,
   CreateRunResponse,
   CreateRunRequest,
   ExecutionMode,
 } from "@harness/shared";
+import { resolveMention } from "../services/context.service.js";
+import {
+  readRulesFromWorkspace,
+  resolveRulesForRun,
+  assembleRulesBlock,
+} from "../services/rules.service.js";
 import type { AgentsRepo, CreateAgentInput } from "../db/repositories/agents.repo.js";
 import type { McpServersRepo } from "../db/repositories/mcp-servers.repo.js";
 import type { RunsRepo } from "../db/repositories/runs.repo.js";
 import type { SubagentDefinitionsRepo } from "../db/repositories/subagents.repo.js";
 import type { CursorApiKeyStore } from "../keychain/cursor-api-key.js";
+import type { WorkspaceAllowlistRepo } from "../db/repositories/workspace-allowlist.repo.js";
 import type { WorkspacePolicy } from "../security/workspace-policy.js";
 import { getSettingsSnapshot } from "../services/settings.service.js";
 import type { SettingsRepo } from "../db/repositories/settings.repo.js";
@@ -80,6 +88,7 @@ export interface AgentRuntimeDeps {
    * per-run text buffer doesn't leak.
    */
   pipeline: PersistAndBroadcastPipeline;
+  allowlistRepo: WorkspaceAllowlistRepo;
 }
 
 export interface AgentRuntime {
@@ -388,9 +397,65 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
       // Truncate at a word boundary so we don't chop mid-word.
       const lastSpace = rawName.length >= 60 ? rawName.lastIndexOf(" ") : -1;
       const autoName = (lastSpace > 0 ? rawName.slice(0, lastSpace) : rawName) || null;
-      const sdkPrompt = executionMode === "ask"
-        ? `${ASK_MODE_PREFIX}\n\n${input.prompt}`
-        : input.prompt;
+
+      // ── Phase 20: Context intelligence ──────────────────────────────
+      // Resolve @-mentions and project rules, then assemble the full
+      // prompt sent to the SDK. The original prompt (sans context) is
+      // stored in `runs.prompt_preview` for display; the assembled
+      // context metadata is stored in `runs.context_metadata`.
+      const mentions: ContextMention[] = input.mentions ?? [];
+      let rulesBlock = "";
+      let contextBlock = "";
+      let contextMetadata: unknown = null;
+
+      if (activeWorkspaceId && deps.allowlistRepo.findMatching(activeWorkspaceId)) {
+        // 1) Resolve project rules
+        const allRules = await readRulesFromWorkspace(activeWorkspaceId, deps.logger);
+        const mentionedPaths = mentions
+          .filter((m) => m.kind === "file" || m.kind === "folder")
+          .map((m) => m.value);
+        const mentionedRuleNames = mentions
+          .filter((m) => m.kind === "rules")
+          .map((m) => m.value);
+        const activeRulesForRun = resolveRulesForRun(allRules, mentionedPaths, mentionedRuleNames);
+        rulesBlock = assembleRulesBlock(activeRulesForRun);
+
+        // 2) Resolve @-mentions (file, folder, symbol, codebase)
+        const nonRuleMentions = mentions.filter((m) => m.kind !== "rules");
+        if (nonRuleMentions.length > 0) {
+          const resolved = await Promise.all(
+            nonRuleMentions.map((m) => resolveMention(m, activeWorkspaceId)),
+          );
+          const contextSections = resolved.map((r) => r.content);
+          contextBlock = `<context>\n${contextSections.join("\n---\n")}\n</context>`;
+
+          contextMetadata = {
+            mentions: resolved.map((r) => ({
+              kind: r.mention.kind,
+              value: r.mention.value,
+              tokenEstimate: r.tokenEstimate,
+              truncated: r.truncated,
+            })),
+            rules: activeRulesForRun.map((r) => r.name),
+            totalTokenEstimate: resolved.reduce((sum, r) => sum + r.tokenEstimate, 0),
+          };
+        } else if (activeRulesForRun.length > 0) {
+          contextMetadata = {
+            mentions: [],
+            rules: activeRulesForRun.map((r) => r.name),
+            totalTokenEstimate: 0,
+          };
+        }
+      }
+
+      // Assemble: rules → context → mode prefix → user prompt
+      const promptParts: string[] = [];
+      if (rulesBlock) promptParts.push(rulesBlock);
+      if (contextBlock) promptParts.push(contextBlock);
+      if (executionMode === "ask") promptParts.push(ASK_MODE_PREFIX);
+      promptParts.push(input.prompt);
+      const sdkPrompt = promptParts.join("\n\n");
+
       if (executionMode === "yolo") {
         deps.logger.warn(
           { runId, agentId: row.id },
@@ -407,6 +472,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
         mode: row.mode,
         executionMode,
         workspaceId: activeWorkspaceId,
+        contextMetadata,
       });
       const controller = new RunController(
         {

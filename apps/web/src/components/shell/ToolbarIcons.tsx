@@ -219,3 +219,43 @@ export function MicIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** File — single document reference. */
+export function FileIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...SVG_PROPS}>
+      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+    </svg>
+  );
+}
+
+/** Search — magnifying glass. */
+export function SearchIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...SVG_PROPS}>
+      <circle cx="11" cy="11" r="8" />
+      <path d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
+
+/** Code — curly braces (symbol reference). */
+export function CodeIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...SVG_PROPS}>
+      <path d="m18 16 4-4-4-4" />
+      <path d="m6 8-4 4 4 4" />
+      <path d="m14.5 4-5 16" />
+    </svg>
+  );
+}
+
+/** Book — rules/documentation reference. */
+export function BookIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...SVG_PROPS}>
+      <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20" />
+    </svg>
+  );
+}

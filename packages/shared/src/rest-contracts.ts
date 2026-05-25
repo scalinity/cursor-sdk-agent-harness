@@ -20,6 +20,7 @@ import {
   tokenUsageSchema,
 } from "./sdk-surface.js";
 import { workspaceAllowlistRowSchema, sdkImageSchema } from "./domain.js";
+import { contextMentionSchema } from "./context.js";
 
 // REST request/response contracts. Each route block below is paired with the
 // spec §4 REST endpoint list. Routes that have not yet been implemented are
@@ -141,6 +142,7 @@ export const createRunRequestSchema = z.object({
   prompt: z.string().min(1).max(64_000),
   executionMode: executionModeSchema.optional(),
   images: z.array(sdkImageSchema).max(MAX_IMAGE_ATTACHMENTS).optional(),
+  mentions: z.array(contextMentionSchema).max(50).optional(),
 });
 export type CreateRunRequest = z.infer<typeof createRunRequestSchema>;
 

@@ -227,6 +227,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     logger: app.log,
     activeRuns,
     pipeline,
+    allowlistRepo: repos.workspaceAllowlist,
   });
 
   const approvalResponder =
@@ -311,6 +312,18 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     files: {
       settingsRepo: repos.settings,
       workspaceAllowlist: repos.workspaceAllowlist,
+    },
+    context: {
+      settingsRepo: repos.settings,
+      allowlistRepo: repos.workspaceAllowlist,
+    },
+    search: {
+      settingsRepo: repos.settings,
+      allowlistRepo: repos.workspaceAllowlist,
+    },
+    rules: {
+      settingsRepo: repos.settings,
+      allowlistRepo: repos.workspaceAllowlist,
     },
   });
 

@@ -22,6 +22,7 @@ export interface CreateRunInput {
   mode?: AgentMode | null;
   executionMode?: ExecutionMode | null;
   workspaceId?: string | null;
+  contextMetadata?: unknown;
 }
 
 export interface SetFinalResultInput {
@@ -56,6 +57,7 @@ interface RunDbRow {
   usage_source: string | null;
   error_json: string | null;
   interrupted_reason: string | null;
+  context_metadata: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -256,6 +258,7 @@ function rowToDomain(row: RunDbRow): RunRow {
     usageSource: row.usage_source === null ? null : (row.usage_source as UsageSource),
     error: parseJsonOrNull(row.error_json),
     interruptedReason: row.interrupted_reason,
+    contextMetadata: parseJsonOrNull(row.context_metadata),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -271,10 +274,10 @@ export class RunsRepo {
       .prepare(
         `INSERT INTO runs (
             id, agent_id, status, prompt_preview, name, model_id, mode, execution_mode,
-            started_at, last_seq, created_at, updated_at, workspace_id
+            started_at, last_seq, created_at, updated_at, workspace_id, context_metadata
           ) VALUES (
             @id, @agent_id, @status, @prompt_preview, @name, @model_id, @mode, @execution_mode,
-            @started_at, 0, @created_at, @updated_at, @workspace_id
+            @started_at, 0, @created_at, @updated_at, @workspace_id, @context_metadata
           )`,
       )
       .run({
@@ -290,6 +293,7 @@ export class RunsRepo {
         created_at: now,
         updated_at: now,
         workspace_id: input.workspaceId ?? null,
+        context_metadata: input.contextMetadata != null ? JSON.stringify(input.contextMetadata) : null,
       });
     const row = this.getById(id);
     if (!row) {

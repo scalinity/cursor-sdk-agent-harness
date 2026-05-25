@@ -30,6 +30,18 @@ import {
   registerWorkspaceAllowlistRoutes,
   type WorkspaceAllowlistRoutesDeps,
 } from "./workspace-allowlist.routes.js";
+import {
+  registerContextRoutes,
+  type ContextRoutesDeps,
+} from "./context.routes.js";
+import {
+  registerSearchRoutes,
+  type SearchRoutesDeps,
+} from "./search.routes.js";
+import {
+  registerRulesRoutes,
+  type RulesRoutesDeps,
+} from "./rules.routes.js";
 
 export interface RouteDeps {
   security: SecurityRoutesDeps;
@@ -44,6 +56,9 @@ export interface RouteDeps {
   observability: ObservabilityRoutesDeps;
   git: GitRoutesDeps;
   files: FilesRoutesDeps;
+  context: ContextRoutesDeps;
+  search: SearchRoutesDeps;
+  rules: RulesRoutesDeps;
 }
 
 export async function registerRoutes(
@@ -63,4 +78,7 @@ export async function registerRoutes(
   await registerObservabilityRoutes(app, deps.observability);
   await registerGitRoutes(app, deps.git);
   await registerFilesRoutes(app, deps.files);
+  await registerContextRoutes(app, deps.context);
+  await registerSearchRoutes(app, deps.search);
+  await registerRulesRoutes(app, deps.rules);
 }

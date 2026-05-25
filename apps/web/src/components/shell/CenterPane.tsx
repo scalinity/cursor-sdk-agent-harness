@@ -1,4 +1,4 @@
-import type { AgentSummary, ExecutionMode, RunSummary, SdkImage } from "@harness/shared";
+import type { AgentSummary, RunSummary, SdkImage } from "@harness/shared";
 import { useRunStore } from "../../state/run-store.js";
 import { useUiStore } from "../../state/ui-store.js";
 import { EventTimeline } from "./EventTimeline.js";
@@ -26,10 +26,6 @@ export interface CenterPaneProps {
   ) => void;
   /** Phase 13 — non-null when a CANCEL_UNAVAILABLE error frame arrived. */
   cancelUnavailable?: { message: string } | null;
-  /** Phase 19 — current execution mode for the ModeToggle. */
-  executionMode?: ExecutionMode | undefined;
-  /** Phase 19 — callback when user changes execution mode. */
-  onExecutionModeChange?: ((mode: ExecutionMode) => void) | undefined;
 }
 
 export function CenterPane({
@@ -40,8 +36,6 @@ export function CenterPane({
   onSubmit,
   onApprovalResolve,
   cancelUnavailable,
-  executionMode,
-  onExecutionModeChange,
 }: CenterPaneProps) {
   // eventCount drives heroMode (empty-state) detection; maintained incrementally
   // in the store (RV2-S4) so we read it directly instead of scanning seqList.
@@ -58,7 +52,7 @@ export function CenterPane({
     return (
       <main className="center-pane">
         <div className="center-hero">
-          <Composer activeAgent={activeAgent} onSubmit={onSubmit} heroMode executionMode={executionMode} onExecutionModeChange={onExecutionModeChange} />
+          <Composer activeAgent={activeAgent} onSubmit={onSubmit} heroMode />
         </div>
       </main>
     );
@@ -84,7 +78,7 @@ export function CenterPane({
           />
         </StreamingSurfaceBoundary>
       </div>
-      <Composer activeAgent={activeAgent} onSubmit={onSubmit} executionMode={executionMode} onExecutionModeChange={onExecutionModeChange} />
+      <Composer activeAgent={activeAgent} onSubmit={onSubmit} />
     </main>
   );
 }

@@ -77,6 +77,7 @@ export const runs = sqliteTable(
     usageSource: text("usage_source"),
     errorJson: text("error_json"),
     interruptedReason: text("interrupted_reason"),
+    contextMetadata: text("context_metadata"),
     createdAt: text("created_at").notNull().default(nowDefault),
     updatedAt: text("updated_at").notNull().default(nowDefault),
   },
