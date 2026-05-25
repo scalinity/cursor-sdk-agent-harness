@@ -54,6 +54,23 @@ export function microsToDollars(valueMicros: number): number {
   return valueMicros / 1_000_000;
 }
 
+/**
+ * Cursor Composer 2.5 official pricing (cursor.com/docs/models-and-pricing).
+ * Values are micro-USD per million tokens. Update when Cursor publishes new rates.
+ */
+export const DEFAULT_PRICING_MICROS = {
+  composer25Fast: {
+    inputPerMillionUsdMicros: dollarsPerMillionToMicros(3.0),
+    outputPerMillionUsdMicros: dollarsPerMillionToMicros(15.0),
+    cachedInputPerMillionUsdMicros: dollarsPerMillionToMicros(0.5),
+  },
+  composer25: {
+    inputPerMillionUsdMicros: dollarsPerMillionToMicros(0.5),
+    outputPerMillionUsdMicros: dollarsPerMillionToMicros(2.5),
+    cachedInputPerMillionUsdMicros: dollarsPerMillionToMicros(0.2),
+  },
+} as const;
+
 export function pricingKeyForModel(
   modelId: ModelId,
   field: "input" | "output" | "cachedInput",

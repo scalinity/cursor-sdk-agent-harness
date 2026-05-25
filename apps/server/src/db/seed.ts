@@ -1,5 +1,5 @@
 import type { Database as BetterSqlite3Database } from "better-sqlite3";
-import { PRICING_SETTING_KEYS } from "@harness/shared";
+import { DEFAULT_PRICING_MICROS, PRICING_SETTING_KEYS } from "@harness/shared";
 
 // Default settings seed — spec §8 → Default Settings Seed. Inserts only when
 // the settings table is empty so we never overwrite a user-edited value.
@@ -105,32 +105,29 @@ export const DEFAULT_SETTING_KEYS: ReadonlyArray<string> = DEFAULT_SEED.map(
 );
 
 /**
- * Official Cursor Composer pricing in micro-USD per million tokens.
- *
- * Source: https://cursor.com/blog/composer-2 (verified via Ref MCP on
- * 2026-05-24). Composer 2.5 (standard) is $0.50/M input, $2.50/M output;
- * the fast variant is $1.50/M input, $7.50/M output. Cursor publishes no
- * separate cached-input rate for Composer, so cached input is priced at the
- * regular input rate (conservative — never underestimates cost). $1.00 =
- * 1_000_000 micro-USD, so $0.50/M = 500_000.
+ * Official Cursor Composer 2.5 pricing in micro-USD per million tokens.
+ * Source: cursor.com/docs/models-and-pricing (verified 2026-05-24).
+ * Derived from the shared DEFAULT_PRICING_MICROS constant.
  */
-const COMPOSER_PRICING_MICROS = {
-  [PRICING_SETTING_KEYS.fastInput]: 1_500_000,
-  [PRICING_SETTING_KEYS.fastOutput]: 7_500_000,
-  [PRICING_SETTING_KEYS.fastCachedInput]: 1_500_000,
-  [PRICING_SETTING_KEYS.standardInput]: 500_000,
-  [PRICING_SETTING_KEYS.standardOutput]: 2_500_000,
-  [PRICING_SETTING_KEYS.standardCachedInput]: 500_000,
-} as const;
+const COMPOSER_PRICING_MICROS: Record<string, number> = {
+  [PRICING_SETTING_KEYS.fastInput]: DEFAULT_PRICING_MICROS.composer25Fast.inputPerMillionUsdMicros,
+  [PRICING_SETTING_KEYS.fastOutput]: DEFAULT_PRICING_MICROS.composer25Fast.outputPerMillionUsdMicros,
+  [PRICING_SETTING_KEYS.fastCachedInput]: DEFAULT_PRICING_MICROS.composer25Fast.cachedInputPerMillionUsdMicros,
+  [PRICING_SETTING_KEYS.standardInput]: DEFAULT_PRICING_MICROS.composer25.inputPerMillionUsdMicros,
+  [PRICING_SETTING_KEYS.standardOutput]: DEFAULT_PRICING_MICROS.composer25.outputPerMillionUsdMicros,
+  [PRICING_SETTING_KEYS.standardCachedInput]: DEFAULT_PRICING_MICROS.composer25.cachedInputPerMillionUsdMicros,
+};
+
+// Stale Composer 2 prices that a prior backfill may have written.
+const STALE_COMPOSER_2_PRICES = new Set([1_500_000, 7_500_000]);
 
 const PRICING_PRICE_KEYS: ReadonlyArray<string> = Object.keys(COMPOSER_PRICING_MICROS);
 
 /**
- * Fill in real Composer pricing when the DB is still at the pristine default
- * (every price key === 0 AND last_verified_at === null). Idempotent: once the
- * real prices are written (and last_verified_at stamped) the guard fails on
- * every subsequent boot, so a user who later edits pricing is never
- * overwritten. Returns true when a backfill was performed.
+ * Fill in real Composer 2.5 pricing when the DB is at a pristine default
+ * (every price key === 0) OR still holds stale Composer 2 prices from an
+ * earlier backfill. Idempotent: once the current prices are written the guard
+ * fails on subsequent boots, so user-edited pricing is never overwritten.
  */
 export function backfillPricingDefaultsIfUnconfigured(
   raw: BetterSqlite3Database,
@@ -145,11 +142,16 @@ export function backfillPricingDefaultsIfUnconfigured(
   for (const row of rows) current.set(row.key, JSON.parse(row.value_json));
 
   const allPricesZero = PRICING_PRICE_KEYS.every((key) => current.get(key) === 0);
-  const lastVerified = current.get(PRICING_SETTING_KEYS.lastVerifiedAt);
-  const neverVerified = lastVerified === null || lastVerified === undefined;
-  if (!allPricesZero || !neverVerified) {
-    return false;
-  }
+  const hasStaleComposer2 = !allPricesZero && PRICING_PRICE_KEYS.every((key) => {
+    const v = current.get(key);
+    return v === 0 || STALE_COMPOSER_2_PRICES.has(v as number) || v === 500_000 || v === 2_500_000;
+  });
+  const alreadyCurrent = PRICING_PRICE_KEYS.every(
+    (key) => current.get(key) === COMPOSER_PRICING_MICROS[key],
+  );
+
+  if (alreadyCurrent) return false;
+  if (!allPricesZero && !hasStaleComposer2) return false;
 
   const upsert = raw.prepare(
     `INSERT INTO settings (key, value_json, description, updated_at) VALUES (?, ?, ?, ?)
