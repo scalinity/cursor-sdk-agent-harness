@@ -21,11 +21,12 @@
  * replaced binary.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const desktopDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(desktopDir, "../..");
 const venvDir = path.join(desktopDir, ".gyp-venv");
 const venvPython = path.join(venvDir, "bin", "python");
 
@@ -38,6 +39,26 @@ function run(cmd, args, opts = {}) {
   if (res.status !== 0) {
     throw new Error(`${cmd} ${args.join(" ")} exited with ${res.status ?? res.signal}`);
   }
+}
+
+function findBetterSqlite3BindingGyp(version) {
+  const pnpmDir = path.join(repoRoot, "node_modules/.pnpm");
+  const exact = path.join(
+    pnpmDir,
+    `better-sqlite3@${version}`,
+    "node_modules/better-sqlite3/binding.gyp",
+  );
+  if (existsSync(exact)) return exact;
+
+  const prefix = `better-sqlite3@${version}`;
+  const candidateDir = readdirSync(pnpmDir).find((entry) => entry.startsWith(prefix));
+  if (!candidateDir) return null;
+  const candidate = path.join(
+    pnpmDir,
+    candidateDir,
+    "node_modules/better-sqlite3/binding.gyp",
+  );
+  return existsSync(candidate) ? candidate : null;
 }
 
 if (!existsSync(venvPython)) {
@@ -76,6 +97,20 @@ const betterSqlite3Dir = path.join(
 );
 
 if (existsSync(betterSqlite3Dir)) {
+  const packagedPackageJson = JSON.parse(
+    readFileSync(path.join(betterSqlite3Dir, "package.json"), "utf8"),
+  );
+  const packagedBindingGyp = path.join(betterSqlite3Dir, "binding.gyp");
+  if (!existsSync(packagedBindingGyp)) {
+    const sourceBindingGyp = findBetterSqlite3BindingGyp(packagedPackageJson.version);
+    if (!sourceBindingGyp) {
+      throw new Error(
+        `[package-mac] cannot find source binding.gyp for better-sqlite3 ${packagedPackageJson.version}`,
+      );
+    }
+    copyFileSync(sourceBindingGyp, packagedBindingGyp);
+  }
+
   console.log(
     `[package-mac] force-rebuilding better-sqlite3 for Electron ${ELECTRON_VERSION} (ABI 130)`,
   );

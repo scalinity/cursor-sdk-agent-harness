@@ -3467,3 +3467,23 @@ Fixed the search routes' active workspace resolver so it treats `app.activeWorks
 - `pnpm typecheck` ✅
 - `pnpm lint` ✅
 - `pnpm test` ✅ — 64 server test files / 450 passed + 1 skipped, 27 web test files / 127 passed, 4 shared test files / 39 passed, 3 eslint-plugin test files / 6 passed, scripts 11 passed
+
+---
+
+## Post-Phase 24 Instruction Update — Desktop Completion Workflow
+
+### Summary
+
+Updated `AGENTS.md` so future completed codebase work must run the unsigned desktop rebuild and replace `/Applications/Cursor SDK Agent Harness.app` with the freshly packaged app before reporting completion. While verifying the workflow, fixed `package:mac` so it restores `better-sqlite3`'s `binding.gyp` from the pnpm source package before the post-package Electron rebuild.
+
+### Files modified
+
+- `AGENTS.md` — added `build:desktop` and reinstall commands plus a phase-discipline completion rule
+- `apps/desktop/scripts/package-mac.mjs` — copies `better-sqlite3`'s missing `binding.gyp` into the packaged app before forced native rebuild
+- `docs/IMPLEMENTATION_STATUS.md` — recorded this instruction update
+
+### Verification
+
+- `pnpm typecheck && pnpm lint && pnpm test` ✅ — 64 server test files / 450 passed + 1 skipped, 27 web test files / 127 passed, 4 shared test files / 39 passed, 3 eslint-plugin test files / 6 passed, scripts 11 passed
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` ✅
+- Replaced `/Applications/Cursor SDK Agent Harness.app` with `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` ✅ — installed timestamp May 25 17:46:26
