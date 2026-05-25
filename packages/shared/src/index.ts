@@ -38,6 +38,7 @@ export {
   SDK_RUN_TERMINAL_STATUSES,
   agentModeSchema,
   agentStatusSchema,
+  executionModeSchema,
   mcpValidationStatusSchema,
   modelIdSchema,
   knownLanguageSchema,
@@ -49,6 +50,7 @@ export {
 export type {
   AgentMode,
   AgentStatus,
+  ExecutionMode,
   McpValidationStatus,
   ModelId,
   KnownLanguage,
@@ -217,6 +219,12 @@ export {
   pricingFreshnessSchema,
   activeWorkspaceResponseSchema,
   setActiveWorkspaceRequestSchema,
+  fileWriteRequestSchema,
+  fileWriteResponseSchema,
+  gitStatusResponseSchema,
+  runSearchQuerySchema,
+  runSearchResultSchema,
+  runPatchSchema,
 } from "./rest-contracts.js";
 export type {
   AgentDetailResponse,
@@ -255,6 +263,12 @@ export type {
   UsageSummary,
   ActiveWorkspaceResponse,
   SetActiveWorkspaceRequest,
+  FileWriteRequest,
+  FileWriteResponse,
+  GitStatusResponse,
+  RunSearchQuery,
+  RunSearchResult,
+  RunPatch,
 } from "./rest-contracts.js";
 
 export {

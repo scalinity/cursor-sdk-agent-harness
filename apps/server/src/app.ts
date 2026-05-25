@@ -292,7 +292,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       policy: workspacePolicy,
       settings: repos.settings,
     },
-    agents: { runtime: agentRuntime },
+    agents: { runtime: agentRuntime, agentsRepo: repos.agents },
     runs: {
       runtime: agentRuntime,
       runsRepo: repos.runs,
@@ -304,6 +304,14 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     mcpServers: { mcpServers: repos.mcpServers },
     subagents: { subagents: repos.subagents, mcpServers: repos.mcpServers },
     observability: { perfCounters },
+    git: {
+      settingsRepo: repos.settings,
+      workspaceAllowlist: repos.workspaceAllowlist,
+    },
+    files: {
+      settingsRepo: repos.settings,
+      workspaceAllowlist: repos.workspaceAllowlist,
+    },
   });
 
   return {

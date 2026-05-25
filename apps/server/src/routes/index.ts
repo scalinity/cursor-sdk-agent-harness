@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { registerAgentsRoutes, type AgentsRoutesDeps } from "./agents.routes.js";
 import { registerEventsRoutes, type EventsRoutesDeps } from "./events.routes.js";
+import { registerFilesRoutes, type FilesRoutesDeps } from "./files.routes.js";
+import { registerGitRoutes, type GitRoutesDeps } from "./git.routes.js";
 import { registerHealthRoutes } from "./health.js";
 import {
   registerMcpServersRoutes,
@@ -40,6 +42,8 @@ export interface RouteDeps {
   mcpServers: McpServersRoutesDeps;
   subagents: SubagentsRoutesDeps;
   observability: ObservabilityRoutesDeps;
+  git: GitRoutesDeps;
+  files: FilesRoutesDeps;
 }
 
 export async function registerRoutes(
@@ -57,4 +61,6 @@ export async function registerRoutes(
   await registerEventsRoutes(app, deps.events);
   await registerUsageRoutes(app, deps.usage);
   await registerObservabilityRoutes(app, deps.observability);
+  await registerGitRoutes(app, deps.git);
+  await registerFilesRoutes(app, deps.files);
 }

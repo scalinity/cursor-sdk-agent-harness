@@ -37,9 +37,9 @@ export function buildAppMenu(getWindow: () => BrowserWindow | null): void {
       label: "File",
       submenu: [
         {
-          label: "New Agent",
+          label: "New Session",
           accelerator: "CmdOrCtrl+N",
-          click: () => send("menu:new-agent"),
+          click: () => send("menu:new-session"),
         },
         {
           label: "Open Workspace…",

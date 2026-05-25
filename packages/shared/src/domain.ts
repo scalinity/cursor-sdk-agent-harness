@@ -12,6 +12,7 @@ import {
 import {
   agentModeSchema,
   agentStatusSchema,
+  executionModeSchema,
   mcpValidationStatusSchema,
   sdkRunStatusSchema,
   settingSourceSchema,
@@ -32,6 +33,7 @@ export const agentRowSchema = z.object({
   name: z.string().min(1),
   status: agentStatusSchema,
   mode: agentModeSchema,
+  executionMode: executionModeSchema,
   modelId: z.string().min(1),
   cwd: z.array(z.string()).nullable(),
   settingSources: z.array(settingSourceSchema).nullable(),
@@ -53,8 +55,10 @@ export const runRowSchema = z.object({
   agentId: agentIdSchema,
   status: sdkRunStatusSchema,
   promptPreview: z.string(),
+  name: z.string().nullable(),
   modelId: z.string().nullable(),
   mode: agentModeSchema.nullable(),
+  executionMode: executionModeSchema.nullable(),
   /** Workspace active when the run was created (null for legacy/untagged runs). */
   workspaceId: z.string().nullable(),
   startedAt: isoDateTimeSchema,

@@ -9,6 +9,7 @@ import type { SettingsRepo } from "../db/repositories/settings.repo.js";
 
 const TOP_LEVEL_KEYS = {
   defaultModelId: "defaultModelId",
+  defaultExecutionMode: "app.defaultExecutionMode",
   defaultSettingSources: "defaultSettingSources",
   sandboxEnabledByDefault: "sandboxEnabledByDefault",
   defaultReplaySpeed: "defaultReplaySpeed",
@@ -17,6 +18,7 @@ const TOP_LEVEL_KEYS = {
 
 const SNAPSHOT_KEYS: ReadonlyArray<string> = [
   TOP_LEVEL_KEYS.defaultModelId,
+  TOP_LEVEL_KEYS.defaultExecutionMode,
   TOP_LEVEL_KEYS.defaultSettingSources,
   TOP_LEVEL_KEYS.sandboxEnabledByDefault,
   TOP_LEVEL_KEYS.defaultReplaySpeed,
@@ -78,6 +80,11 @@ export function getSettingsSnapshot(repo: SettingsRepo): SettingsSnapshot {
       TOP_LEVEL_KEYS.defaultModelId,
       "composer-2-5-fast",
     ),
+    defaultExecutionMode: pickString<SettingsSnapshot["defaultExecutionMode"]>(
+      m,
+      TOP_LEVEL_KEYS.defaultExecutionMode,
+      "agent",
+    ),
     defaultSettingSources: pickStringArray<
       SettingsSnapshot["defaultSettingSources"][number]
     >(m, TOP_LEVEL_KEYS.defaultSettingSources, ["project", "user"]),
@@ -128,6 +135,9 @@ export function applySettingsUpdate(
 ): SettingsSnapshot {
   if (patch.defaultModelId !== undefined) {
     repo.set(TOP_LEVEL_KEYS.defaultModelId, patch.defaultModelId);
+  }
+  if (patch.defaultExecutionMode !== undefined) {
+    repo.set(TOP_LEVEL_KEYS.defaultExecutionMode, patch.defaultExecutionMode);
   }
   if (patch.defaultSettingSources !== undefined) {
     repo.set(TOP_LEVEL_KEYS.defaultSettingSources, patch.defaultSettingSources);

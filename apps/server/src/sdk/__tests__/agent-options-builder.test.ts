@@ -17,6 +17,7 @@ function agentRow(over: Partial<AgentRow> = {}): AgentRow {
     name: "test-agent",
     status: "creating",
     mode: "local",
+    executionMode: "agent",
     modelId: "composer-2-5-fast",
     cwd: null,
     settingSources: null,

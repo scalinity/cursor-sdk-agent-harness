@@ -31,6 +31,7 @@ export function useNativeMenuActions(handlers: MenuActionHandlers): void {
     if (!bridge) return;
     const channels: MenuActionChannel[] = [
       "menu:new-agent",
+      "menu:new-session",
       "menu:open-workspace",
       "menu:toggle-code-pane",
       "menu:preferences",

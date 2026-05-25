@@ -4,6 +4,7 @@ import { eventSdkTypeSchema } from "./domain.js";
 import {
   agentModeSchema,
   agentStatusSchema,
+  executionModeSchema,
   mcpValidationStatusSchema,
   modelIdSchema,
   replaySpeedSchema,
@@ -97,6 +98,7 @@ export type CreateAgentRequest = z.infer<typeof createAgentRequestSchema>;
 
 export const updateAgentRequestSchema = z.object({
   name: z.string().min(1).max(256).optional(),
+  executionMode: executionModeSchema.optional(),
 });
 export type UpdateAgentRequest = z.infer<typeof updateAgentRequestSchema>;
 
@@ -105,6 +107,7 @@ export const agentSummarySchema = z.object({
   name: z.string(),
   status: agentStatusSchema,
   mode: agentModeSchema,
+  executionMode: executionModeSchema,
   modelId: z.string(),
   runCount: z.number().int().nonnegative(),
   activeRunCount: z.number().int().nonnegative(),
@@ -136,6 +139,7 @@ export type AgentDetailResponse = z.infer<typeof agentDetailResponseSchema>;
 export const createRunRequestSchema = z.object({
   agentId: z.string().min(1),
   prompt: z.string().min(1).max(64_000),
+  executionMode: executionModeSchema.optional(),
   images: z.array(sdkImageSchema).max(MAX_IMAGE_ATTACHMENTS).optional(),
 });
 export type CreateRunRequest = z.infer<typeof createRunRequestSchema>;
@@ -200,7 +204,9 @@ export const runSummarySchema = z.object({
   id: z.string(),
   agentId: z.string(),
   agentName: z.string().nullable(),
+  name: z.string().nullable(),
   status: sdkRunStatusSchema,
+  executionMode: executionModeSchema.nullable(),
   promptPreview: z.string(),
   modelId: z.string().nullable(),
   workspaceId: z.string().nullable(),
@@ -310,6 +316,7 @@ export const eventEnvelopeSchema = z.object({
 
 export const settingsSnapshotSchema = z.object({
   defaultModelId: modelIdSchema,
+  defaultExecutionMode: executionModeSchema,
   defaultSettingSources: z.array(settingSourceSchema),
   sandboxEnabledByDefault: z.boolean(),
   defaultReplaySpeed: replaySpeedSchema,
@@ -333,6 +340,7 @@ export type SettingsSnapshot = z.infer<typeof settingsSnapshotSchema>;
 
 export const updateSettingsRequestSchema = z.object({
   defaultModelId: modelIdSchema.optional(),
+  defaultExecutionMode: executionModeSchema.optional(),
   defaultSettingSources: z.array(settingSourceSchema).optional(),
   sandboxEnabledByDefault: z.boolean().optional(),
   defaultReplaySpeed: replaySpeedSchema.optional(),
@@ -576,6 +584,72 @@ export const setActiveWorkspaceRequestSchema = z.object({
   id: z.string().nullable(),
 });
 export type SetActiveWorkspaceRequest = z.infer<typeof setActiveWorkspaceRequestSchema>;
+
+// ============================================================================
+// Phase 19 — Git Status
+// ============================================================================
+
+export const gitStatusResponseSchema = z.object({
+  isGitRepo: z.boolean(),
+  branch: z.string().nullable(),
+  isDirty: z.boolean(),
+  ahead: z.number().int().nonnegative(),
+  behind: z.number().int().nonnegative(),
+});
+export type GitStatusResponse = z.infer<typeof gitStatusResponseSchema>;
+
+// ============================================================================
+// Phase 19 — File Write (Apply to File)
+// ============================================================================
+
+export const fileWriteRequestSchema = z.object({
+  path: z.string().min(1),
+  content: z.string(),
+  workspaceId: z.string().optional(),
+});
+export type FileWriteRequest = z.infer<typeof fileWriteRequestSchema>;
+
+export const fileWriteResponseSchema = z.object({
+  absolutePath: z.string(),
+  bytesWritten: z.number().int().nonnegative(),
+});
+export type FileWriteResponse = z.infer<typeof fileWriteResponseSchema>;
+
+// ============================================================================
+// Phase 19 — Run Search (FTS)
+// ============================================================================
+
+export const runSearchQuerySchema = z.object({
+  q: z.string().min(2).max(500),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+export type RunSearchQuery = z.infer<typeof runSearchQuerySchema>;
+
+export const runSearchResultSchema = z.object({
+  results: z.array(
+    z.object({
+      runId: z.string(),
+      name: z.string().nullable(),
+      prompt: z.string(),
+      snippet: z.string(),
+      rank: z.number(),
+      createdAt: isoDateTimeSchema,
+      agentId: z.string(),
+      executionMode: executionModeSchema.nullable(),
+      status: sdkRunStatusSchema,
+    }),
+  ),
+});
+export type RunSearchResult = z.infer<typeof runSearchResultSchema>;
+
+// ============================================================================
+// Phase 19 — Run Rename
+// ============================================================================
+
+export const runPatchSchema = z.object({
+  name: z.string().max(200).optional(),
+});
+export type RunPatch = z.infer<typeof runPatchSchema>;
 
 // CSRF bootstrap — Phase 05.
 export const csrfTokenResponseSchema = z.object({

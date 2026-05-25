@@ -4,6 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type { RunSummary, SdkRunStatus } from "@harness/shared";
 import { useAgents } from "../hooks/useAgents.js";
 import { useRunHistory, type RunHistoryCostFilter, type RunHistorySort } from "../hooks/useRunHistory.js";
+import { useRunSearch } from "../hooks/useRunSearch.js";
 import { useSettings } from "../hooks/useSettings.js";
 import { dateRangeForPreset, formatDuration, formatMicros, formatRelativeTime, formatTokens, isoDateInput, tokenTotal } from "../lib/format.js";
 import { RunHistoryRow } from "../components/history/RunHistoryRow.js";
@@ -95,6 +96,9 @@ export function RunHistory() {
   const [params, setParams] = useSearchParams();
   const parentRef = useRef<HTMLDivElement | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const search = useRunSearch(searchQuery);
+  const isSearchActive = searchQuery.length >= 2;
   const selectedAgents = listParam(params, "agents");
   const selectedStatuses = listParam(params, "status").filter(isStatus);
   const selectedModels = listParam(params, "models");
@@ -196,6 +200,18 @@ export function RunHistory() {
         </header>
 
         <section className="grid gap-3 border border-border-subtle bg-surface-1 p-3">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              className="h-control-md flex-1 rounded-sm border border-border-subtle bg-background px-2 text-sm text-text-primary placeholder:text-text-tertiary"
+              placeholder="Search runs..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery.length > 0 ? (
+              <button type="button" className="text-text-tertiary hover:text-text-primary" onClick={() => setSearchQuery("")} aria-label="Clear search">✕</button>
+            ) : null}
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             {["24h", "7d", "30d"].map((value) => (
               <button key={value} className={preset === value ? "h-control-md rounded-sm bg-accent-bg px-3 text-sm text-accent-primary" : "h-control-md rounded-sm border border-border-subtle px-3 text-sm text-text-secondary"} type="button" onClick={() => applyPreset(value as Exclude<RangePreset, "custom">)}>{value}</button>
@@ -277,10 +293,22 @@ export function RunHistory() {
           </div>
 
           {history.error ? <div className="border-b border-danger bg-danger-bg p-3 text-sm text-danger">{history.error}</div> : null}
-          {history.loading ? <div className="p-4 text-sm text-text-tertiary">Loading runs...</div> : null}
-          {!history.loading && history.runs.length === 0 ? <div className="p-4 text-sm text-text-tertiary">No runs found. Try adjusting filters or start a new agent.</div> : null}
+          {history.loading && !isSearchActive ? <div className="p-4 text-sm text-text-tertiary">Loading runs...</div> : null}
 
-          {history.runs.length > 200 ? (
+          {isSearchActive ? (
+            <div className="p-2">
+              {search.isSearching ? <div className="p-2 text-sm text-text-tertiary">Searching...</div> : null}
+              {!search.isSearching && search.results.length === 0 ? <div className="p-2 text-sm text-text-tertiary">No results found for &quot;{searchQuery}&quot;</div> : null}
+              {search.results.map((r) => (
+                <Link key={r.runId} to={`/runs/${r.runId}/replay`} className="flex flex-col gap-0.5 border-b border-border-subtle p-2 text-sm hover:bg-surface-2">
+                  <span className="text-text-primary">{r.name ?? r.prompt}</span>
+                  <span className="text-text-tertiary" dangerouslySetInnerHTML={{ __html: r.snippet }} />
+                </Link>
+              ))}
+            </div>
+          ) : !history.loading && history.runs.length === 0 ? <div className="p-4 text-sm text-text-tertiary">No runs found. Try adjusting filters or start a new agent.</div> : null}
+
+          {isSearchActive ? null : history.runs.length > 200 ? (
             <div ref={parentRef} className="run-history-virtual">
               <div className="grid grid-cols-12 gap-2 border-b border-border-subtle px-2 py-2 text-xs uppercase tracking-uppercase text-text-tertiary">
                 <span className="col-span-1">Sel</span><span className="col-span-2">Status</span><span className="col-span-3">Title</span><span className="col-span-1">Agent</span><span className="col-span-1">Model</span><span className="col-span-1">Started</span><span className="col-span-1">Duration</span><span className="col-span-1">Tool calls</span><span className="col-span-1">Cost</span><span className="col-span-1">Tokens</span><span className="col-span-1">Cache</span>

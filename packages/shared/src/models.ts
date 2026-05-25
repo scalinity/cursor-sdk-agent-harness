@@ -48,6 +48,9 @@ export type AgentStatus = z.infer<typeof agentStatusSchema>;
 export const agentModeSchema = z.enum(["local", "cloud"]);
 export type AgentMode = z.infer<typeof agentModeSchema>;
 
+export const executionModeSchema = z.enum(["ask", "agent", "yolo"]);
+export type ExecutionMode = z.infer<typeof executionModeSchema>;
+
 export const usageSourceSchema = z.enum([
   "sdk_final_result",
   "derived",

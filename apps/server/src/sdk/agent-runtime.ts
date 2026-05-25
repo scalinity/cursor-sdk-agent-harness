@@ -6,6 +6,7 @@ import type {
   CreateAgentRequest,
   CreateRunResponse,
   CreateRunRequest,
+  ExecutionMode,
 } from "@harness/shared";
 import type { AgentsRepo, CreateAgentInput } from "../db/repositories/agents.repo.js";
 import type { McpServersRepo } from "../db/repositories/mcp-servers.repo.js";
@@ -25,6 +26,11 @@ import {
 import { RunController, newRunId } from "./run-controller.js";
 import type { SDKAgent, SdkAdapter } from "./sdk-adapter.js";
 import { ACTIVE_WORKSPACE_SETTING_KEY } from "../config/settings-keys.js";
+
+const ASK_MODE_PREFIX =
+  "IMPORTANT: You are in Ask Mode. Answer the user's question about the codebase. " +
+  "Do NOT make any file changes, do NOT run any terminal commands, do NOT use any " +
+  "tools that modify files or execute code. Only read files and answer questions.";
 
 /**
  * Application-layer error codes surfaced to REST routes. Routes map these
@@ -332,13 +338,26 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
         typeof rawActiveWorkspaceId === "string" && rawActiveWorkspaceId.length > 0
           ? rawActiveWorkspaceId
           : null;
+      const executionMode: ExecutionMode = input.executionMode ?? row.executionMode;
+      const autoName = input.prompt.slice(0, 60).replace(/\n.*/s, "").trim() || null;
+      const sdkPrompt = executionMode === "ask"
+        ? `${ASK_MODE_PREFIX}\n\n${input.prompt}`
+        : input.prompt;
+      if (executionMode === "yolo") {
+        deps.logger.warn(
+          { runId, agentId: row.id },
+          "YOLO mode active but approval auto-resolve unavailable (OQ-10 unresolved)",
+        );
+      }
       const runRow = deps.runsRepo.create({
         id: runId,
         agentId: row.id,
         status: "CREATING",
         promptPreview: input.prompt.slice(0, 256),
+        name: autoName,
         modelId: row.modelId,
         mode: row.mode,
+        executionMode,
         workspaceId: activeWorkspaceId,
       });
       const controller = new RunController(
@@ -347,7 +366,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
           agentId: row.id,
           modelId: row.modelId,
           mode: row.mode,
-          prompt: input.prompt,
+          prompt: sdkPrompt,
           ...(input.images && input.images.length > 0 ? { images: input.images } : {}),
           agent: handle,
           sdk: deps.sdk,
@@ -451,6 +470,7 @@ function buildSummary(
     name: row.name,
     status: row.status,
     mode: row.mode,
+    executionMode: row.executionMode,
     modelId: row.modelId,
     runCount: aggregates?.runCount ?? 0,
     activeRunCount: aggregates?.activeRunCount ?? 0,

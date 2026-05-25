@@ -11,6 +11,7 @@ function fixtureAgent(overrides: Partial<AgentSummary> = {}): AgentSummary {
     name: "Local agent",
     status: "active",
     mode: "local",
+    executionMode: "agent",
     modelId: "composer-2-5-fast",
     runCount: 0,
     activeRunCount: 0,
