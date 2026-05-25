@@ -146,4 +146,15 @@ describe("isDangerous", () => {
     expect(isDangerous('find . -name "*.ts"')).toBe(false);
     expect(isDangerous("git status")).toBe(false);
   });
+
+  it("does not flag the benign /dev/null redirect idiom", () => {
+    expect(isDangerous("some-cmd 2>/dev/null")).toBe(false);
+    expect(isDangerous("some-cmd > /dev/null 2>&1")).toBe(false);
+  });
+
+  it("flags redirecting output onto a raw block device", () => {
+    expect(isDangerous("echo x > /dev/sda")).toBe(true);
+    expect(isDangerous("cat img > /dev/disk2")).toBe(true);
+    expect(isDangerous("foo >/dev/nvme0n1")).toBe(true);
+  });
 });

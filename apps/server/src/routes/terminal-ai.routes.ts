@@ -19,7 +19,9 @@ const DANGEROUS_PATTERNS = [
   /\bgit\s+clean\s+-fd\b/i,
   /\bgit\s+push\s+--force\b/i,
   /\bgit\s+push\s+-f\b/i,
-  />\s*\/dev\/null/i,
+  // Redirecting output onto a raw block device clobbers it. Plain
+  // `2>/dev/null` / `>/dev/null` is benign and must NOT match.
+  />\s*\/dev\/(?:sd|disk|nvme|hd|mapper)/i,
   /\bmkfs\b/i,
   /\bdd\s+if=/i,
 ];
