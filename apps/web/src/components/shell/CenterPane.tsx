@@ -79,6 +79,8 @@ export function CenterPane({
             subagents={subagentMonitor.subagents}
             activeCount={subagentMonitor.activeCount}
             completedCount={subagentMonitor.completedCount}
+            totalTokens={subagentMonitor.totalTokens}
+            totalCostMicros={subagentMonitor.totalCostMicros}
             loading={subagentMonitor.loading}
             error={subagentMonitor.error}
             onRetry={() => {

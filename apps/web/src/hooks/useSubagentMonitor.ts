@@ -11,6 +11,9 @@ export interface UseSubagentMonitorResult {
   subagents: SubagentDashboardItem[];
   activeCount: number;
   completedCount: number;
+  totalTokens: number;
+  totalCostMicros: number | null;
+  hasSubagents: boolean;
   loading: boolean;
   error: string | null;
   reload: () => Promise<void>;
@@ -20,12 +23,16 @@ interface SubagentSnapshot {
   subagents: SubagentListItem[];
   activeCount: number;
   completedCount: number;
+  totalTokens: number;
+  totalCostMicros: number | null;
 }
 
 const EMPTY_SNAPSHOT: SubagentSnapshot = {
   subagents: [],
   activeCount: 0,
   completedCount: 0,
+  totalTokens: 0,
+  totalCostMicros: null,
 };
 
 function eventPreview(events: string[] | undefined): string[] {
@@ -46,6 +53,14 @@ function formatLifecycleEvent(event: { seq: number; kind: string; payload: unkno
   return `${event.seq} ${event.kind}${typeof status === "string" ? ` ${status}` : ""}`;
 }
 
+function elapsedMsFor(subagent: SubagentListItem, nowMs: number): number {
+  const startedMs = Date.parse(subagent.startedAt);
+  if (!Number.isFinite(startedMs)) return 0;
+  const completedMs = subagent.completedAt ? Date.parse(subagent.completedAt) : nowMs;
+  if (!Number.isFinite(completedMs)) return 0;
+  return Math.max(0, completedMs - startedMs);
+}
+
 async function fetchSubagents(parentRunId: string): Promise<SubagentSnapshot> {
   return httpRequest(`/api/runs/${parentRunId}/subagents`, {
     responseSchema: subagentListResponseSchema,
@@ -56,6 +71,7 @@ export function useSubagentMonitor(parentRunId: string | null): UseSubagentMonit
   const [snapshot, setSnapshot] = useState<SubagentSnapshot>(EMPTY_SNAPSHOT);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const lifecycleKey = useRunStore((state) => {
     if (!parentRunId) return "";
@@ -155,20 +171,30 @@ export function useSubagentMonitor(parentRunId: string | null): UseSubagentMonit
     };
   }, [parentRunId, lifecycleKey, snapshot.activeCount]);
 
+  useEffect(() => {
+    if (snapshot.activeCount === 0) return;
+    const interval = window.setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, [snapshot.activeCount]);
+
   const subagents = useMemo(
     () =>
       snapshot.subagents.map((subagent) => ({
         ...subagent,
+        elapsedMs: elapsedMsFor(subagent, nowMs),
         eventPreview: eventPreview(eventStreamsByRunId[subagent.runId]),
         events: eventStreamsByRunId[subagent.runId] ?? [],
       })),
-    [eventStreamsByRunId, snapshot.subagents],
+    [eventStreamsByRunId, nowMs, snapshot.subagents],
   );
 
   return {
     subagents,
     activeCount: snapshot.activeCount,
     completedCount: snapshot.completedCount,
+    totalTokens: snapshot.totalTokens,
+    totalCostMicros: snapshot.totalCostMicros,
+    hasSubagents: snapshot.subagents.length > 0,
     loading,
     error,
     reload,

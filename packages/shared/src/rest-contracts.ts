@@ -243,6 +243,12 @@ export const subagentListItemSchema = z.object({
   completedAt: isoDateTimeSchema.nullable(),
   tokenCount: z.number().int().nonnegative(),
   costMicros: z.number().int().nonnegative().nullable(),
+  lastEvents: z.array(z.object({
+    seq: z.number().int().nonnegative().optional(),
+    kind: z.string(),
+    summary: z.string(),
+    timestamp: isoDateTimeSchema,
+  })).max(5),
 });
 export type SubagentListItem = z.infer<typeof subagentListItemSchema>;
 
@@ -250,6 +256,8 @@ export const subagentListResponseSchema = z.object({
   subagents: z.array(subagentListItemSchema),
   activeCount: z.number().int().nonnegative(),
   completedCount: z.number().int().nonnegative(),
+  totalTokens: z.number().int().nonnegative(),
+  totalCostMicros: z.number().int().nonnegative().nullable(),
 });
 export type SubagentListResponse = z.infer<typeof subagentListResponseSchema>;
 

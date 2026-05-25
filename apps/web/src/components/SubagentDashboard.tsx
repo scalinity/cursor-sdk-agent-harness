@@ -4,6 +4,7 @@ import { cn } from "../lib/cn.js";
 import { formatDuration, formatMicros, formatTokens } from "../lib/format.js";
 
 export interface SubagentDashboardItem extends SubagentListItem {
+  elapsedMs?: number;
   eventPreview?: string[];
   events?: string[];
 }
@@ -12,6 +13,8 @@ export interface SubagentDashboardProps {
   subagents: SubagentDashboardItem[];
   activeCount: number;
   completedCount: number;
+  totalTokens?: number;
+  totalCostMicros?: number | null;
   loading?: boolean;
   error?: string | null;
   onRetry?: () => void;
@@ -26,11 +29,21 @@ const STATUS_CLASS: Record<SdkRunStatus, string> = {
   EXPIRED: "text-text-tertiary",
 };
 
-function pluralize(count: number, singular: string, plural = `${singular}s`): string {
-  return `${formatTokens(count)} ${count === 1 ? singular : plural}`;
+const CARD_BORDER_CLASS: Record<SdkRunStatus, string> = {
+  CREATING: "border-l-border-subtle",
+  RUNNING: "border-l-accent-primary",
+  FINISHED: "border-l-success",
+  ERROR: "border-l-danger",
+  CANCELLED: "border-l-border-subtle",
+  EXPIRED: "border-l-border-subtle",
+};
+
+function subagentLabel(count: number): string {
+  return `${formatTokens(count)} ${count === 1 ? "sub-agent" : "sub-agents"}`;
 }
 
 function elapsedFor(item: SubagentDashboardItem, now: number): string {
+  if (typeof item.elapsedMs === "number") return formatDuration(Math.max(0, item.elapsedMs));
   const start = Date.parse(item.startedAt);
   if (!Number.isFinite(start)) return "--";
   const end = item.completedAt ? Date.parse(item.completedAt) : now;
@@ -38,21 +51,71 @@ function elapsedFor(item: SubagentDashboardItem, now: number): string {
   return formatDuration(Math.max(0, end - start));
 }
 
+function truncate(value: string, max = 40): string {
+  return value.length > max ? `${value.slice(0, max - 1)}...` : value;
+}
+
+function eventLines(item: SubagentDashboardItem): string[] {
+  const structured = (item.lastEvents ?? []).map((event) => `${event.kind}: ${truncate(event.summary)}`);
+  if (structured.length > 0) return structured.slice(-5);
+  return item.eventPreview?.slice(-5) ?? [];
+}
+
 export function SubagentDashboard({
   subagents,
   activeCount,
   completedCount,
+  totalTokens: totalTokensProp,
+  totalCostMicros: totalCostMicrosProp,
   loading = false,
   error = null,
   onRetry,
 }: SubagentDashboardProps) {
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [manualExpanded, setManualExpanded] = useState(false);
+  const [manualCollapsed, setManualCollapsed] = useState(false);
   const now = Date.now();
   const totalTokens = useMemo(
-    () => subagents.reduce((sum, item) => sum + item.tokenCount, 0),
-    [subagents],
+    () => totalTokensProp ?? subagents.reduce((sum, item) => sum + item.tokenCount, 0),
+    [subagents, totalTokensProp],
   );
-  const summary = `${pluralize(activeCount, "agent")} active, ${formatTokens(completedCount)} completed`;
+  const totalCostMicros = useMemo(() => {
+    if (totalCostMicrosProp !== undefined) return totalCostMicrosProp;
+    const costs = subagents
+      .map((item) => item.costMicros)
+      .filter((cost): cost is number => cost !== null);
+    return costs.length > 0 ? costs.reduce((sum, cost) => sum + cost, 0) : null;
+  }, [subagents, totalCostMicrosProp]);
+  const summary = `${formatTokens(activeCount)} running, ${formatTokens(completedCount)} completed — ${formatTokens(totalTokens)} tokens`;
+  const autoCollapsed = !loading && !error && activeCount === 0 && completedCount > 0 && subagents.length > 0;
+  const collapsed = manualCollapsed || (autoCollapsed && !manualExpanded);
+  const visibleSubagents = subagents.slice(0, 12);
+  const overflowCount = Math.max(0, subagents.length - visibleSubagents.length);
+  const collapsedSummary = activeCount > 0
+    ? summary
+    : `${subagentLabel(completedCount)} completed (${formatTokens(totalTokens)} tokens)`;
+
+  if (collapsed) {
+    return (
+      <section
+        aria-label="Sub-agent dashboard"
+        className="subagent-dashboard border-b border-border-subtle bg-background px-4 py-3"
+      >
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-3 rounded-md border border-border-subtle bg-surface-1 px-3 py-2 text-left text-sm text-text-primary"
+          aria-label="Expand sub-agent dashboard"
+          onClick={() => {
+            setManualExpanded(true);
+            setManualCollapsed(false);
+          }}
+        >
+          <span>{collapsedSummary}</span>
+          <span className="mono text-xs text-text-tertiary" aria-hidden="true">v</span>
+        </button>
+      </section>
+    );
+  }
 
   return (
     <section
@@ -65,9 +128,20 @@ export function SubagentDashboard({
           <div className="mt-1 text-sm text-text-primary">{summary}</div>
         </div>
         <div className="mono flex items-center gap-2 text-xs text-text-tertiary">
-          <span>{formatTokens(totalTokens)} tokens</span>
+          <span>{formatMicros(totalCostMicros)}</span>
           <span aria-hidden="true">·</span>
           <span>{formatTokens(subagents.length)} total</span>
+          <button
+            type="button"
+            className="rounded-sm border border-border-subtle bg-surface-1 px-2 py-1 text-text-secondary"
+            aria-label="Collapse sub-agent dashboard"
+            onClick={() => {
+              setManualCollapsed(true);
+              setManualExpanded(false);
+            }}
+          >
+            ^
+          </button>
         </div>
       </div>
 
@@ -88,13 +162,19 @@ export function SubagentDashboard({
       ) : null}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {subagents.map((item) => {
+        {visibleSubagents.map((item) => {
           const expanded = expandedRunId === item.runId;
-          const preview = item.eventPreview?.slice(-3) ?? [];
+          const preview = eventLines(item).slice(-5);
+          const streamLines = item.events && item.events.length > 0 ? item.events : preview;
+          const longRunning = item.completedAt === null && Date.parse(item.startedAt) + 300_000 < now;
           return (
             <article
               key={item.runId}
-              className="subagent-dashboard__card rounded-md border border-border-subtle bg-surface-1 p-3 shadow-1 transition"
+              data-testid="subagent-card"
+              className={cn(
+                "subagent-dashboard__card rounded-md border border-l-2 border-border-subtle bg-surface-1 p-3 shadow-1 transition",
+                CARD_BORDER_CLASS[item.status],
+              )}
             >
               <button
                 type="button"
@@ -131,9 +211,14 @@ export function SubagentDashboard({
                   <div className="mono mt-1 text-text-primary">{formatMicros(item.costMicros)}</div>
                 </div>
               </div>
+              {longRunning ? (
+                <div className="mono mt-2 rounded-sm border border-warning bg-surface-2 px-2 py-1 text-xs text-warning">
+                  long-running
+                </div>
+              ) : null}
 
               <div className="mt-3 border-t border-border-subtle pt-2">
-                <div className="mb-1 text-xs uppercase tracking-uppercase text-text-tertiary">Events</div>
+                <div className="mb-1 text-xs uppercase tracking-uppercase text-text-tertiary">Recent events</div>
                 {preview.length > 0 ? (
                   <ul className="space-y-1">
                     {preview.map((event, index) => (
@@ -149,12 +234,12 @@ export function SubagentDashboard({
                   <div className="mt-2 rounded-sm border border-border-subtle bg-surface-2 p-2">
                     <div className="mb-1 text-xs uppercase tracking-uppercase text-text-tertiary">Event stream</div>
                     <div className="space-y-1">
-                      {(item.events ?? []).map((event, index) => (
+                      {streamLines.map((event, index) => (
                         <div key={`${item.runId}-stream-${event}-${index}`} className="mono text-xs text-text-secondary">
                           {event}
                         </div>
                       ))}
-                      {(item.events ?? []).length === 0 ? (
+                      {streamLines.length === 0 ? (
                         <div className="mono text-xs text-text-tertiary">waiting for events</div>
                       ) : null}
                     </div>
@@ -164,6 +249,11 @@ export function SubagentDashboard({
             </article>
           );
         })}
+        {overflowCount > 0 ? (
+          <div className="mono flex min-h-24 items-center justify-center rounded-md border border-dashed border-border-subtle bg-surface-1 text-sm text-text-secondary">
+            +{formatTokens(overflowCount)} more
+          </div>
+        ) : null}
       </div>
     </section>
   );

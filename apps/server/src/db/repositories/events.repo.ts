@@ -26,6 +26,14 @@ export interface AppendableEvent {
   receivedAt?: string;
 }
 
+export interface RecentEventPreviewRow {
+  seq: number;
+  kind: string;
+  status: string | null;
+  payload: unknown;
+  occurredAt: string;
+}
+
 interface EventDbRow {
   id: string;
   run_id: string;
@@ -222,6 +230,31 @@ export class EventsRepo {
       .prepare("SELECT * FROM events WHERE run_id = ? ORDER BY seq ASC")
       .all(runId) as EventDbRow[];
     return rows.map(rowToDomain);
+  }
+
+  getRecentPreviewByRunId(runId: string, limit = 5): RecentEventPreviewRow[] {
+    const rows = this.raw
+      .prepare(
+        `SELECT seq, kind, status, payload_json, occurred_at
+           FROM events
+          WHERE run_id = ?
+          ORDER BY seq DESC
+          LIMIT ?`,
+      )
+      .all(runId, limit) as Array<{
+      seq: number;
+      kind: string;
+      status: string | null;
+      payload_json: string;
+      occurred_at: string;
+    }>;
+    return rows.reverse().map((row) => ({
+      seq: row.seq,
+      kind: row.kind,
+      status: row.status,
+      payload: JSON.parse(row.payload_json),
+      occurredAt: row.occurred_at,
+    }));
   }
 
   /**

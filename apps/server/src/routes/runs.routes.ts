@@ -170,6 +170,26 @@ function toolNameFromPayload(payload: unknown): string | null {
   return typeof name === "string" ? name : null;
 }
 
+function summarizeSubagentEvent(row: ReturnType<EventsRepo["getRecentPreviewByRunId"]>[number]): string {
+  const text = textFromPayload(row.payload);
+  if (text) return text;
+  const toolName = toolNameFromPayload(row.payload);
+  if (toolName) return toolName;
+  if (typeof row.status === "string") return row.status;
+  return row.kind;
+}
+
+function subagentLastEvents(eventsRepo: EventsRepo, runId: string) {
+  return eventsRepo
+    .getRecentPreviewByRunId(runId, 5)
+    .map((row) => ({
+      seq: row.seq,
+      kind: row.kind,
+      summary: summarizeSubagentEvent(row).slice(0, 160),
+      timestamp: row.occurredAt,
+    }));
+}
+
 function isTerminalStatus(status: string): boolean {
   return status === "FINISHED" || status === "ERROR" || status === "CANCELLED" || status === "EXPIRED";
 }
@@ -254,7 +274,20 @@ export async function registerRunsRoutes(
       const subagents = deps.runsRepo.listSubagents(parent.id);
       const activeCount = subagents.filter((subagent) => isActiveSubagentStatus(subagent.status)).length;
       const completedCount = subagents.length - activeCount;
-      return subagentListResponseSchema.parse({ subagents, activeCount, completedCount });
+      const totalTokens = subagents.reduce((sum, subagent) => sum + subagent.tokenCount, 0);
+      const totalCostMicros = subagents.length > 0 && subagents.every((subagent) => subagent.costMicros !== null)
+        ? subagents.reduce((sum, subagent) => sum + (subagent.costMicros ?? 0), 0)
+        : null;
+      return subagentListResponseSchema.parse({
+        subagents: subagents.map((subagent) => ({
+          ...subagent,
+          lastEvents: subagentLastEvents(deps.eventsRepo, subagent.runId),
+        })),
+        activeCount,
+        completedCount,
+        totalTokens,
+        totalCostMicros,
+      });
     },
   );
 

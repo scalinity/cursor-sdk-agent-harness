@@ -3487,3 +3487,35 @@ Updated `AGENTS.md` so future completed codebase work must run the unsigned desk
 - `pnpm typecheck && pnpm lint && pnpm test` ✅ — 64 server test files / 450 passed + 1 skipped, 27 web test files / 127 passed, 4 shared test files / 39 passed, 3 eslint-plugin test files / 6 passed, scripts 11 passed
 - `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` ✅
 - Replaced `/Applications/Cursor SDK Agent Harness.app` with `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` ✅ — installed timestamp May 25 17:46:26
+
+---
+
+## Phase 24D Follow-up — Sub-agent Dashboard Contract Completion
+
+### Summary
+
+Tightened the Priority 1 sub-agent dashboard slice against the standalone Phase 24D prompt: added a dedicated detector module/test, completed the REST response contract with child-run event previews and aggregate totals, and expanded the dashboard/hook behavior for recovery, elapsed time, collapse, and overflow handling.
+
+### Files modified
+
+- `packages/shared/src/rest-contracts.ts` — sub-agent list `lastEvents`, `totalTokens`, and `totalCostMicros` schemas
+- `apps/server/src/sdk/subagent-detector.ts` — standalone MCP spawn detector for canonical tool-call events
+- `apps/server/src/sdk/__tests__/subagent-detector.test.ts` — detector coverage for MCP sub-agent and non-sub-agent calls
+- `apps/server/src/routes/runs.routes.ts` — `/api/runs/:runId/subagents` event previews and aggregate totals
+- `apps/server/src/routes/__tests__/runs-subagents.test.ts` — REST contract regression coverage
+- `apps/web/src/hooks/useSubagentMonitor.ts` — aggregate state, `hasSubagents`, and live `elapsedMs`
+- `apps/web/src/hooks/__tests__/useSubagentMonitor.test.tsx` — recovery and elapsed timer coverage
+- `apps/web/src/components/SubagentDashboard.tsx` — summary wording, collapse/expand, visible card cap, overflow badge, status borders, and structured event preview lines
+- `apps/web/src/components/SubagentDashboard.test.tsx` — dashboard collapse and overflow coverage
+- `apps/web/src/components/shell/CenterPane.tsx` — passes monitor aggregate totals to the dashboard
+
+### Review and address notes
+
+- `review-2` found sensitive tool-arg leakage in event previews, partial cost totals, unbounded child event scans, active-collapse copy, REST-backed expanded-event fallback, ignored `elapsedMs`, and the standalone detector not being used in production.
+- `address` fixes landed for all blocking findings: previews now omit args, cost totals are null unless complete, recent events use a bounded query with optional seq, dashboard collapse/expand stays honest, expanded streams fall back to REST `lastEvents`, dashboard elapsed uses hook-owned `elapsedMs`, and normalizer calls the standalone detector module.
+
+### Final verification
+
+- `pnpm typecheck && pnpm lint && pnpm test` ✅ — 65 server test files / 454 passed + 1 skipped, 31 web test files / 139 passed, 4 shared test files / 39 passed, 3 eslint-plugin test files / 6 passed, scripts 11 passed
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop && (pkill -f "Cursor SDK Agent Harness" 2>/dev/null; sleep 1) && rm -rf "/Applications/Cursor SDK Agent Harness.app" && mv "apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app" /Applications/` ✅
+- Installed app timestamp: `May 25 18:21:26 2026 /Applications/Cursor SDK Agent Harness.app` ✅

@@ -5,7 +5,7 @@ import type {
   ToolUseBlock,
 } from "@harness/shared";
 import { extractCodeEdit } from "./code-edit-extractors/index.js";
-import { createHash } from "node:crypto";
+import { detectSubagentToolCall } from "./subagent-detector.js";
 
 /**
  * Phase 07 — pure normalization from raw SDK message to one or more canonical
@@ -347,91 +347,6 @@ function extractToolUses(
     }
   }
   return out;
-}
-
-interface SubagentLifecycleDetection {
-  childRunId: string;
-  name: string;
-  status: "RUNNING" | "FINISHED" | "ERROR";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function getStringAt(value: unknown, path: ReadonlyArray<string>): string | null {
-  let current: unknown = value;
-  for (const key of path) {
-    if (!isRecord(current)) return null;
-    current = current[key];
-  }
-  return typeof current === "string" && current.trim().length > 0 ? current.trim() : null;
-}
-
-function childRunIdFor(parentRunId: string, callId: string): string {
-  const digest = createHash("sha256")
-    .update(`${parentRunId}:${callId}`)
-    .digest("hex")
-    .slice(0, 32);
-  return `subagent-${digest}`;
-}
-
-function lifecycleStatus(status: "running" | "completed" | "error"): SubagentLifecycleDetection["status"] {
-  if (status === "completed") return "FINISHED";
-  if (status === "error") return "ERROR";
-  return "RUNNING";
-}
-
-function looksLikeSubagentMcpName(...values: Array<string | null>): boolean {
-  return values.some((value) => {
-    if (value === null) return false;
-    return /(^|[_:/\s-])(subagent|sub-agent|agent)([_:/\s-]|$)/iu.test(value);
-  });
-}
-
-function boundedSubagentName(value: string): string {
-  const trimmed = value.trim();
-  return (trimmed.length > 0 ? trimmed : "Sub-agent").slice(0, 256);
-}
-
-function taskSubagentName(args: unknown): string | null {
-  return (
-    getStringAt(args, ["subagentType", "name"]) ??
-    getStringAt(args, ["subagent_type", "name"]) ??
-    getStringAt(args, ["subagent", "name"]) ??
-    getStringAt(args, ["subagentType", "kind"]) ??
-    getStringAt(args, ["subagent_type", "kind"])
-  );
-}
-
-function detectSubagentToolCall(
-  raw: Extract<SDKMessage, { type: "tool_call" }>,
-  runContext: RunContext,
-): SubagentLifecycleDetection | null {
-  let name: string | null = null;
-  if (raw.name === "task") {
-    name = taskSubagentName(raw.args);
-  } else if (raw.name === "mcp") {
-    const provider = getStringAt(raw.args, ["providerIdentifier"]);
-    const toolName = getStringAt(raw.args, ["toolName"]);
-    if (looksLikeSubagentMcpName(provider, toolName)) {
-      name = provider ?? toolName ?? "MCP sub-agent";
-    }
-  } else if (raw.name.startsWith("mcp__")) {
-    const [, provider, toolName] = raw.name.split("__");
-    const providerName = provider ?? null;
-    const tool = toolName ?? null;
-    if (looksLikeSubagentMcpName(providerName, tool)) {
-      name = providerName ?? tool ?? "MCP sub-agent";
-    }
-  }
-
-  if (name === null) return null;
-  return {
-    childRunId: childRunIdFor(runContext.runId, raw.call_id),
-    name: boundedSubagentName(name),
-    status: lifecycleStatus(raw.status),
-  };
 }
 
 export interface DerivedTextMode {

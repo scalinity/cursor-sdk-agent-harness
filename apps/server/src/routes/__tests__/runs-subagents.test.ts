@@ -82,6 +82,78 @@ describe("GET /api/runs/:runId/subagents", () => {
       cost_usd_micros: 900,
       usage_source: "sdk_final_result",
     });
+    repos.events.appendCanonicalEvent({
+      runId: completed.id,
+      agentId: agent.id,
+      sdkType: "tool_call",
+      kind: "tool_call.running",
+      callId: "read-1",
+      requestId: null,
+      status: "running",
+      payload: { name: "read_file", args: { path: "src/app.ts" } },
+      raw: null,
+      occurredAt: "2026-05-25T12:00:00.000Z",
+    });
+    repos.events.appendCanonicalEvent({
+      runId: completed.id,
+      agentId: agent.id,
+      sdkType: "tool_call",
+      kind: "tool_call.running",
+      callId: "mcp-redaction",
+      requestId: null,
+      status: "running",
+      payload: { name: "mcp", args: { credential: "fake-redaction-value" } },
+      raw: null,
+      occurredAt: "2026-05-25T12:00:01.000Z",
+    });
+    repos.events.appendCanonicalEvent({
+      runId: completed.id,
+      agentId: agent.id,
+      sdkType: "assistant",
+      kind: "assistant.delta",
+      callId: null,
+      requestId: null,
+      status: null,
+      payload: { text_delta: "Looking at the server route now." },
+      raw: null,
+      occurredAt: "2026-05-25T12:00:02.000Z",
+    });
+    repos.events.appendCanonicalEvent({
+      runId: completed.id,
+      agentId: agent.id,
+      sdkType: "task",
+      kind: "task.updated",
+      callId: null,
+      requestId: null,
+      status: "running",
+      payload: { status: "running" },
+      raw: null,
+      occurredAt: "2026-05-25T12:00:03.000Z",
+    });
+    repos.events.appendCanonicalEvent({
+      runId: completed.id,
+      agentId: agent.id,
+      sdkType: "status",
+      kind: "status.changed",
+      callId: null,
+      requestId: null,
+      status: "RUNNING",
+      payload: { status: "RUNNING" },
+      raw: null,
+      occurredAt: "2026-05-25T12:00:04.000Z",
+    });
+    repos.events.appendCanonicalEvent({
+      runId: completed.id,
+      agentId: agent.id,
+      sdkType: "tool_call",
+      kind: "tool_call.completed",
+      callId: "read-1",
+      requestId: null,
+      status: "completed",
+      payload: { name: "read_file", result: "ok" },
+      raw: null,
+      occurredAt: "2026-05-25T12:00:05.000Z",
+    });
 
     const app = await buildRunsApp(repos);
     const res = await app.inject({ method: "GET", url: `/api/runs/${parent.id}/subagents` });
@@ -90,6 +162,8 @@ describe("GET /api/runs/:runId/subagents", () => {
     const parsed = subagentListResponseSchema.parse(res.json());
     expect(parsed.activeCount).toBe(1);
     expect(parsed.completedCount).toBe(1);
+    expect(parsed.totalTokens).toBe(165);
+    expect(parsed.totalCostMicros).toBeNull();
     expect(parsed.subagents).toEqual([
       expect.objectContaining({
         runId: running.id,
@@ -105,8 +179,41 @@ describe("GET /api/runs/:runId/subagents", () => {
         status: "FINISHED",
         tokenCount: 165,
         costMicros: 900,
+        lastEvents: [
+          {
+            kind: "tool_call.running",
+            summary: "mcp",
+            timestamp: "2026-05-25T12:00:01.000Z",
+            seq: 2,
+          },
+          {
+            kind: "assistant.delta",
+            summary: "Looking at the server route now.",
+            timestamp: "2026-05-25T12:00:02.000Z",
+            seq: 3,
+          },
+          {
+            kind: "task.updated",
+            summary: "running",
+            timestamp: "2026-05-25T12:00:03.000Z",
+            seq: 4,
+          },
+          {
+            kind: "status.changed",
+            summary: "RUNNING",
+            timestamp: "2026-05-25T12:00:04.000Z",
+            seq: 5,
+          },
+          {
+            kind: "tool_call.completed",
+            summary: "read_file",
+            timestamp: "2026-05-25T12:00:05.000Z",
+            seq: 6,
+          },
+        ],
       }),
     ]);
+    expect(JSON.stringify(parsed.subagents)).not.toContain("fake-redaction-value");
 
     await app.close();
     db.close();
