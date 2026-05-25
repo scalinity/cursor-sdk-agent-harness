@@ -67,8 +67,7 @@ export async function registerDocsRoutes(
           .send({ code: "NOT_FOUND", message: "Docs source not found" });
       }
 
-      deps.docsRepo.deletePagesBySource(source.id);
-      deps.docsRepo.updateSourcePageCount(source.id, 0);
+      deps.docsRepo.resetForRecrawl(source.id);
 
       crawlDocumentation(
         source.id,

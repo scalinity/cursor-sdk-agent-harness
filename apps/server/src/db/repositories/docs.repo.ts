@@ -131,6 +131,26 @@ export class DocsRepo {
     return result.changes;
   }
 
+  /**
+   * Atomically prepare a source for re-crawl: flip status to 'crawling',
+   * zero the page count, and clear existing pages in one transaction. Setting
+   * 'crawling' first (rather than leaving it 'indexed' until the async crawl
+   * starts) closes the window where the UI shows 'indexed' with 0 pages, and
+   * a crash mid-recrawl leaves a recoverable 'crawling' state instead of a
+   * stale 'indexed' with an empty index.
+   */
+  resetForRecrawl(sourceId: string): void {
+    const tx = this.raw.transaction((id: string) => {
+      this.raw
+        .prepare(
+          "UPDATE docs_sources SET status = 'crawling', page_count = 0, error_message = NULL WHERE id = ?",
+        )
+        .run(id);
+      this.raw.prepare("DELETE FROM docs_pages WHERE source_id = ?").run(id);
+    });
+    tx(sourceId);
+  }
+
   search(
     query: string,
     maxResults: number,
