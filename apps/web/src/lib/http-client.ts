@@ -183,10 +183,16 @@ export interface MutatingRequestOptions<TResp extends ZodTypeAny | undefined = u
 }
 
 /**
- * Issues a mutating request, retrying once on CSRF failure after refreshing
- * the token. This centralizes the cold-load race (user clicks Send before
- * CSRF bootstrap completes) and the 4h-expiry recovery in one place so
- * mutating callers stay free of CSRF lifecycle logic.
+ * Issues a mutating request with automatic CSRF token resolution and retry.
+ *
+ * On cold boot, the CSRF token may not be in the store yet when the first
+ * mutation fires (e.g. agent auto-provision races the CSRF fetch). Instead
+ * of making a doomed request that immediately throws CSRF_TOKEN_MISSING and
+ * then retrying, we proactively await the token before the first attempt.
+ * This eliminates the spurious "CSRF token missing" toasts on app startup.
+ *
+ * The retry path (token present but server-rejected) still fires once for
+ * 4h-expiry recovery.
  */
 export async function mutatingRequest<TResp extends ZodTypeAny | undefined = undefined>(
   path: string,
@@ -205,14 +211,29 @@ export async function mutatingRequest<TResp extends ZodTypeAny | undefined = und
     return next;
   };
 
+  // Proactively resolve the CSRF token before making the request. If the
+  // token isn't in the store yet (cold boot race), wait for the bootstrap
+  // fetch to complete rather than making a doomed request.
+  let token = getCsrfToken();
+  if (!token) {
+    token = await refreshCsrfToken();
+    if (!token) {
+      throw new HttpError(
+        `CSRF token unavailable for ${rest.method ?? "POST"} ${path}`,
+        0,
+        "CSRF_TOKEN_MISSING",
+        null,
+      );
+    }
+  }
+
   try {
-    return await httpRequest(path, buildRequest(getCsrfToken()));
+    return await httpRequest(path, buildRequest(token));
   } catch (e) {
     if (!(e instanceof HttpError) || !e.code || !CSRF_RECOVERABLE_CODES.has(e.code)) {
       throw e;
     }
-    // Refresh-and-retry exactly once. If the refresh fails or yields no
-    // token, surface the original error so the caller can show a banner.
+    // Token was present but rejected (expired / invalidated) — refresh once.
     const refreshed = await refreshCsrfToken();
     if (!refreshed) throw e;
     return await httpRequest(path, buildRequest(refreshed));

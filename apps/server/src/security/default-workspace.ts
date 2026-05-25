@@ -51,8 +51,7 @@ export async function ensureDefaultWorkspace(
 
     deps.settings.set(ACTIVE_WORKSPACE_SETTING_KEY, entry.id);
     deps.allowlist.markUsed(entry.id);
-  } catch {
-    // Non-fatal: a missing/unreadable home dir is pathological. Leave the
-    // pointer unset so the renderer prompts the user to pick a workspace.
+  } catch (e) {
+    console.warn("[ensureDefaultWorkspace] failed to provision home directory:", e);
   }
 }

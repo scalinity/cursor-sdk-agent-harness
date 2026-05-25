@@ -10,6 +10,7 @@ import { z } from "zod";
 import type { SettingsRepo } from "../db/repositories/settings.repo.js";
 import type { WorkspaceAllowlistRepo } from "../db/repositories/workspace-allowlist.repo.js";
 import type { WorkspacePolicy } from "../security/workspace-policy.js";
+import { ensureDefaultWorkspace } from "../security/default-workspace.js";
 import { ACTIVE_WORKSPACE_SETTING_KEY } from "../config/settings-keys.js";
 export { ACTIVE_WORKSPACE_SETTING_KEY };
 
@@ -53,26 +54,42 @@ export async function registerWorkspaceAllowlistRoutes(
   // `/:entryId` route so Fastify's matcher doesn't mistake `/active`
   // for an entry id.
   app.get("/api/workspace-allowlist/active", async () => {
-    const id = readActiveWorkspaceId(deps.settings);
-    if (!id) {
-      return activeWorkspaceResponseSchema.parse({
-        activeWorkspaceId: null,
-        workspace: null,
-      });
-    }
-    const entry = deps.allowlist.getById(id);
-    if (!entry) {
-      // Stale id (e.g. the allowlist row was deleted). Clear it and
-      // surface null so the renderer prompts the user to pick again.
+    let id = readActiveWorkspaceId(deps.settings);
+
+    if (id) {
+      const entry = deps.allowlist.getById(id);
+      if (entry) {
+        return activeWorkspaceResponseSchema.parse({
+          activeWorkspaceId: id,
+          workspace: workspaceAllowlistRowSchema.parse(entry),
+        });
+      }
+      // Stale id (e.g. the allowlist row was deleted) — clear and fall through.
       deps.settings.set(ACTIVE_WORKSPACE_SETTING_KEY, null);
-      return activeWorkspaceResponseSchema.parse({
-        activeWorkspaceId: null,
-        workspace: null,
-      });
+      id = null;
     }
+
+    // Self-heal: no active workspace — try provisioning the home directory.
+    // This covers boot-time failures, DB resets, and stale pointers without
+    // requiring the user to manually pick a folder.
+    await ensureDefaultWorkspace({
+      allowlist: deps.allowlist,
+      settings: deps.settings,
+    });
+    id = readActiveWorkspaceId(deps.settings);
+    if (id) {
+      const entry = deps.allowlist.getById(id);
+      if (entry) {
+        return activeWorkspaceResponseSchema.parse({
+          activeWorkspaceId: id,
+          workspace: workspaceAllowlistRowSchema.parse(entry),
+        });
+      }
+    }
+
     return activeWorkspaceResponseSchema.parse({
-      activeWorkspaceId: id,
-      workspace: workspaceAllowlistRowSchema.parse(entry),
+      activeWorkspaceId: null,
+      workspace: null,
     });
   });
 

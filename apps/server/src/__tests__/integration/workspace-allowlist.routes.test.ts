@@ -212,20 +212,19 @@ describe("workspace-allowlist routes", () => {
     expect((list.json() as { items: unknown[] }).items).toHaveLength(1);
   });
 
-  it("active workspace: GET defaults to null, PUT sets, PUT null clears", async () => {
+  it("active workspace: GET self-heals to home, PUT sets, PUT null clears", async () => {
     h = await build();
 
-    // Initially unset.
-    const empty = await h.app.inject({
+    // Initially unset — GET self-heals by provisioning the home directory.
+    const initial = await h.app.inject({
       method: "GET",
       url: "/api/workspace-allowlist/active",
       headers: { origin: "http://127.0.0.1:5173" },
     });
-    expect(empty.statusCode).toBe(200);
-    expect(empty.json()).toMatchObject({
-      activeWorkspaceId: null,
-      workspace: null,
-    });
+    expect(initial.statusCode).toBe(200);
+    const initialBody = initial.json() as { activeWorkspaceId: string | null; workspace: { label?: string } | null };
+    expect(initialBody.activeWorkspaceId).toBeTruthy();
+    expect(initialBody.workspace).toBeTruthy();
 
     // Create an allowlist entry, then promote it to active.
     const dir = path.join(h.tmpRoot, "active-proj");
@@ -337,13 +336,17 @@ describe("workspace-allowlist routes", () => {
     });
     expect(del.statusCode).toBe(204);
 
-    // The active pointer must NOT dangle at the deleted id.
+    // The active pointer must NOT dangle at the deleted id. GET /active
+    // self-heals by provisioning the home directory, so the response may
+    // have a *different* activeWorkspaceId — the key invariant is that it
+    // must NOT equal the deleted entry.
     const after = await h.app.inject({
       method: "GET",
       url: "/api/workspace-allowlist/active",
       headers: { origin: "http://127.0.0.1:5173" },
     });
     expect(after.statusCode).toBe(200);
-    expect(after.json()).toMatchObject({ activeWorkspaceId: null, workspace: null });
+    const afterBody = after.json() as { activeWorkspaceId: string | null };
+    expect(afterBody.activeWorkspaceId).not.toBe(id);
   });
 });
