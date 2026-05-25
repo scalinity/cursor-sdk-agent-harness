@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import dns from "node:dns/promises";
 import { addProviderRequestSchema } from "@harness/shared";
 import type { ModelProviderSummary, UnifiedModel } from "@harness/shared";
 import type { FastifyInstance, FastifyBaseLogger } from "fastify";
+import { isBlockedIp } from "../services/docs-crawler.service.js";
 import type {
   ModelProvidersRepo,
   ModelProviderRow,
@@ -20,6 +22,30 @@ export interface ProvidersRoutesDeps {
   providerKeyStore: ProviderKeyStore;
   modelRouter: ModelRouter;
   logger: FastifyBaseLogger;
+}
+
+/**
+ * P23-C3 (CWE-918): guard a user-supplied provider base URL before the server
+ * ever fetches it. Cloud providers must resolve to a public address (reject
+ * loopback/link-local/metadata/private); Ollama is a local server so its base
+ * URL must be loopback (which also blocks the 169.254.169.254 metadata vector).
+ */
+async function assertSafeBaseUrl(provider: string, raw: string): Promise<void> {
+  const u = new URL(raw);
+  if (u.protocol !== "http:" && u.protocol !== "https:") {
+    throw new Error(`Blocked protocol: ${u.protocol}`);
+  }
+  const { address } = await dns.lookup(u.hostname);
+  if (provider === "ollama") {
+    const loopback = address === "::1" || address === "127.0.0.1" || address.startsWith("127.");
+    if (!loopback) {
+      throw new Error("Ollama base URL must be loopback (127.0.0.1 / localhost / ::1)");
+    }
+    return;
+  }
+  if (isBlockedIp(address)) {
+    throw new Error(`Blocked base URL: ${u.hostname} resolves to a private/loopback address`);
+  }
 }
 
 async function toSummary(
@@ -54,6 +80,16 @@ export async function registerProvidersRoutes(
       return reply.code(422).send({ code: "VALIDATION_ERROR", details: parsed.error.issues });
     }
     const { name, provider, apiKey, baseUrl } = parsed.data;
+    if (baseUrl) {
+      try {
+        await assertSafeBaseUrl(provider, baseUrl);
+      } catch (err) {
+        return reply.code(400).send({
+          code: "UNSAFE_BASE_URL",
+          message: err instanceof Error ? err.message : "Unsafe base URL",
+        });
+      }
+    }
     const id = randomUUID();
     if (apiKey) await deps.providerKeyStore.set(id, apiKey);
 

@@ -158,4 +158,43 @@ describe("/api/providers", () => {
     });
     expect(res.statusCode).toBe(422);
   });
+
+  // P23-C3: SSRF guard on baseUrl (literal IPs avoid real DNS lookups).
+  it("rejects a cloud provider baseUrl pointing at a metadata/private IP", async () => {
+    const { app } = await register();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/providers",
+      payload: { name: "evil", provider: "openai", baseUrl: "http://169.254.169.254/" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("UNSAFE_BASE_URL");
+  });
+
+  it("rejects an Ollama baseUrl pointing at a non-loopback host", async () => {
+    const { app } = await register();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/providers",
+      payload: { name: "remote-ollama", provider: "ollama", baseUrl: "http://1.2.3.4:11434/" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("UNSAFE_BASE_URL");
+  });
+
+  it("allows a loopback Ollama baseUrl and a public cloud baseUrl", async () => {
+    const { app } = await register();
+    const ollama = await app.inject({
+      method: "POST",
+      url: "/api/providers",
+      payload: { name: "local", provider: "ollama", baseUrl: "http://127.0.0.1:11434/" },
+    });
+    expect(ollama.statusCode).toBe(201);
+    const cloud = await app.inject({
+      method: "POST",
+      url: "/api/providers",
+      payload: { name: "proxy", provider: "openai", baseUrl: "http://1.2.3.4/" },
+    });
+    expect(cloud.statusCode).toBe(201);
+  });
 });
