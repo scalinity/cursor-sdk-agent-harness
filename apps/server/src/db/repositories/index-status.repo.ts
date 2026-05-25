@@ -103,4 +103,9 @@ export class IndexStatusRepo {
       )
       .run(workspaceId);
   }
+
+  /** P23-C1: drop the status row when a workspace is removed. */
+  delete(workspaceId: string): void {
+    this.raw.prepare("DELETE FROM index_status WHERE workspace_id = ?").run(workspaceId);
+  }
 }

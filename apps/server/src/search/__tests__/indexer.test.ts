@@ -6,6 +6,7 @@ import Fastify from "fastify";
 import { openTestDb } from "../../db/__tests__/helpers.js";
 import { createRepositories, type Repositories } from "../../db/repositories/index.js";
 import { WorkspaceIndexer } from "../indexer.js";
+import { SearchService } from "../search-service.js";
 import { FakeEmbedder } from "../fake-embedder.js";
 
 class CountingEmbedder extends FakeEmbedder {
@@ -82,6 +83,21 @@ describe("WorkspaceIndexer", () => {
     const files = new Set(repos.embeddings.listIndexedFiles(tmp).map((f) => f.filePath));
     expect(files.has(path.join("src", "math.ts"))).toBe(true);
     expect(files.has(path.join("src", "auth.ts"))).toBe(false); // pruned
+  });
+
+  it("P23-C1: purgeWorkspace deletes embeddings + index status for a removed workspace", async () => {
+    await makeIndexer().indexWorkspace(tmp, tmp);
+    expect(repos.embeddings.countByWorkspace(tmp)).toBeGreaterThan(0);
+    expect(repos.indexStatus.get(tmp)).not.toBeNull();
+    const service = new SearchService({
+      embeddingsRepo: repos.embeddings,
+      indexStatusRepo: repos.indexStatus,
+      logger,
+      embedder: new FakeEmbedder(),
+    });
+    service.purgeWorkspace(tmp);
+    expect(repos.embeddings.countByWorkspace(tmp)).toBe(0);
+    expect(repos.indexStatus.get(tmp)).toBeNull();
   });
 
   it("does not run two concurrent indexes for the same workspace", async () => {

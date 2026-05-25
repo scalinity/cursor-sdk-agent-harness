@@ -50,6 +50,11 @@ export class WorkspaceWatcher {
     }
   }
 
+  /** Stop only if currently watching this workspace (P23-C1 purge). */
+  stopIfWatching(workspaceId: string): void {
+    if (this.workspaceId === workspaceId) this.stop();
+  }
+
   stop(): void {
     if (this.watcher) {
       this.watcher.close();

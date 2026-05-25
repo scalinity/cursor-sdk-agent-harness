@@ -111,4 +111,14 @@ export class SearchService {
   stopWatching(): void {
     this.watcher.stop();
   }
+
+  /**
+   * P23-C1: forget a removed workspace — delete its embeddings + index status
+   * and stop watching it. Called by the allowlist DELETE route.
+   */
+  purgeWorkspace(workspaceId: string): void {
+    this.deps.embeddingsRepo.deleteWorkspace(workspaceId);
+    this.deps.indexStatusRepo.delete(workspaceId);
+    this.watcher.stopIfWatching(workspaceId);
+  }
 }
