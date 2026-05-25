@@ -1,12 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type {
+  ListModelsOptions,
   ModelProvider,
   ProviderClientConfig,
   ProviderEvent,
-  ProviderModelInfo,
   ProviderOptions,
+  ProviderModelInfo,
 } from "./provider.js";
-import { DEFAULT_MAX_TOKENS } from "./provider.js";
+import { DEFAULT_MAX_TOKENS, PROVIDER_CHAT_TIMEOUT_MS } from "./provider.js";
 import { FALLBACK_MODELS } from "./model-registry.js";
 
 /** Chat-only Anthropic provider (Claude Opus / Sonnet / Haiku). */
@@ -17,6 +18,8 @@ export class AnthropicProvider implements ModelProvider {
   constructor(private readonly config: ProviderClientConfig) {
     this.client = new Anthropic({
       apiKey: config.apiKey || "__missing__",
+      timeout: PROVIDER_CHAT_TIMEOUT_MS, // P23-C5
+      maxRetries: 1,
       ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
     });
   }
@@ -63,14 +66,23 @@ export class AnthropicProvider implements ModelProvider {
     }
   }
 
-  async listModels(): Promise<ProviderModelInfo[]> {
-    try {
+  async listModels(options?: ListModelsOptions): Promise<ProviderModelInfo[]> {
+    const fetchReal = async (): Promise<ProviderModelInfo[]> => {
       const page = await this.client.models.list();
       const data = (page as { data?: Array<{ id: string; display_name?: string }> }).data ?? [];
-      const out = data.map((m) => ({ id: m.id, name: m.display_name ?? m.id }));
+      return data.map((m) => ({ id: m.id, name: m.display_name ?? m.id }));
+    };
+    // P23-W3: validation mode lets auth/network errors propagate so a bad key
+    // fails the connection test instead of silently degrading to the static list.
+    if (options?.validate) {
+      const out = await fetchReal();
+      return out.length > 0 ? out : FALLBACK_MODELS.anthropic.map((m) => ({ id: m.name, name: m.label }));
+    }
+    try {
+      const out = await fetchReal();
       if (out.length > 0) return out;
     } catch {
-      // Fall through to the static list (key may be invalid — surfaced by test).
+      // Populating mode — degrade to the static list.
     }
     return FALLBACK_MODELS.anthropic.map((m) => ({ id: m.name, name: m.label }));
   }

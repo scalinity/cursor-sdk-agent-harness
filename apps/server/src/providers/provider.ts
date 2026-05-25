@@ -34,6 +34,15 @@ export interface ProviderModelInfo {
   name: string;
 }
 
+export interface ListModelsOptions {
+  /**
+   * P23-W3: when true, the connection test wants real validation — providers
+   * must let API/auth errors propagate instead of falling back to a static
+   * list, so an invalid key surfaces as a failed test rather than fake success.
+   */
+  validate?: boolean;
+}
+
 export interface ModelProvider {
   /** The provider config row id (or the literal "cursor"). */
   readonly id: string;
@@ -41,8 +50,12 @@ export interface ModelProvider {
   readonly name: string;
   sendMessage(prompt: string, options: ProviderOptions): AsyncIterable<ProviderEvent>;
   /** List available models — used by the test-connection endpoint + /api/models. */
-  listModels(): Promise<ProviderModelInfo[]>;
+  listModels(options?: ListModelsOptions): Promise<ProviderModelInfo[]>;
 }
+
+/** P23-C5: bounded timeouts so a wedged provider can't hang a run/endpoint forever. */
+export const PROVIDER_CHAT_TIMEOUT_MS = 120_000;
+export const PROVIDER_LIST_TIMEOUT_MS = 15_000;
 
 export interface ProviderClientConfig {
   id: string;

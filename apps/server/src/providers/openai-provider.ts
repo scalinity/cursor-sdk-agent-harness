@@ -1,11 +1,13 @@
 import OpenAI from "openai";
 import type {
+  ListModelsOptions,
   ModelProvider,
   ProviderClientConfig,
   ProviderEvent,
   ProviderModelInfo,
   ProviderOptions,
 } from "./provider.js";
+import { PROVIDER_CHAT_TIMEOUT_MS } from "./provider.js";
 import { FALLBACK_MODELS } from "./model-registry.js";
 
 /** Chat-only OpenAI provider (GPT-5 / GPT-4.1 / …). */
@@ -16,6 +18,8 @@ export class OpenAIProvider implements ModelProvider {
   constructor(private readonly config: ProviderClientConfig) {
     this.client = new OpenAI({
       apiKey: config.apiKey || "__missing__",
+      timeout: PROVIDER_CHAT_TIMEOUT_MS, // P23-C5
+      maxRetries: 1,
       ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
     });
   }
@@ -64,13 +68,21 @@ export class OpenAIProvider implements ModelProvider {
     }
   }
 
-  async listModels(): Promise<ProviderModelInfo[]> {
-    try {
+  async listModels(options?: ListModelsOptions): Promise<ProviderModelInfo[]> {
+    const fetchReal = async (): Promise<ProviderModelInfo[]> => {
       const page = await this.client.models.list();
-      const out = page.data.map((m) => ({ id: m.id, name: m.id }));
+      return page.data.map((m) => ({ id: m.id, name: m.id }));
+    };
+    // P23-W3: validation mode surfaces auth errors instead of degrading.
+    if (options?.validate) {
+      const out = await fetchReal();
+      return out.length > 0 ? out : FALLBACK_MODELS.openai.map((m) => ({ id: m.name, name: m.label }));
+    }
+    try {
+      const out = await fetchReal();
       if (out.length > 0) return out;
     } catch {
-      // Fall through to the static list.
+      // Populating mode — degrade to the static list.
     }
     return FALLBACK_MODELS.openai.map((m) => ({ id: m.name, name: m.label }));
   }

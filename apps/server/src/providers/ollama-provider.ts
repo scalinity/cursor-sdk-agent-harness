@@ -1,12 +1,20 @@
 import type {
+  ListModelsOptions,
   ModelProvider,
   ProviderClientConfig,
   ProviderEvent,
   ProviderModelInfo,
   ProviderOptions,
 } from "./provider.js";
+import { PROVIDER_CHAT_TIMEOUT_MS, PROVIDER_LIST_TIMEOUT_MS } from "./provider.js";
 
 const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
+
+/** Combine the caller's abort signal (if any) with a hard timeout. P23-C5. */
+function withTimeout(timeoutMs: number, caller?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return caller ? AbortSignal.any([caller, timeout]) : timeout;
+}
 
 interface OllamaChatLine {
   message?: { content?: string };
@@ -42,7 +50,7 @@ export class OllamaProvider implements ModelProvider {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ model: options.model, stream: true, messages }),
-        ...(options.signal ? { signal: options.signal } : {}),
+        signal: withTimeout(PROVIDER_CHAT_TIMEOUT_MS, options.signal),
       });
     } catch (err) {
       yield { type: "error", message: err instanceof Error ? err.message : String(err) };
@@ -66,7 +74,14 @@ export class OllamaProvider implements ModelProvider {
           const line = buf.slice(0, nl).trim();
           buf = buf.slice(nl + 1);
           if (!line) continue;
-          const obj = JSON.parse(line) as OllamaChatLine;
+          // P23-W6: a single malformed line (proxy keep-alive, partial chunk)
+          // must not kill an otherwise-good stream — skip it and continue.
+          let obj: OllamaChatLine;
+          try {
+            obj = JSON.parse(line) as OllamaChatLine;
+          } catch {
+            continue;
+          }
           if (obj.message?.content) {
             yield { type: "text_delta", content: obj.message.content };
           }
@@ -84,15 +99,26 @@ export class OllamaProvider implements ModelProvider {
       yield { type: "done" };
     } catch (err) {
       yield { type: "error", message: err instanceof Error ? err.message : String(err) };
+    } finally {
+      // P23-W4: release the underlying socket on every exit path.
+      await reader.cancel().catch(() => {});
     }
   }
 
-  async listModels(): Promise<ProviderModelInfo[]> {
-    try {
-      const res = await fetch(`${this.baseUrl}/api/tags`);
-      if (!res.ok) return [];
+  async listModels(options?: ListModelsOptions): Promise<ProviderModelInfo[]> {
+    const fetchTags = async (): Promise<ProviderModelInfo[]> => {
+      const res = await fetch(`${this.baseUrl}/api/tags`, {
+        signal: withTimeout(PROVIDER_LIST_TIMEOUT_MS),
+      });
+      if (!res.ok) throw new Error(`Ollama /api/tags failed (${res.status})`);
       const json = (await res.json()) as { models?: Array<{ name: string }> };
       return (json.models ?? []).map((m) => ({ id: m.name, name: m.name }));
+    };
+    // P23-W3: validation mode lets connection failures surface; populating
+    // mode degrades to an empty list (no daemon running yet is not fatal).
+    if (options?.validate) return fetchTags();
+    try {
+      return await fetchTags();
     } catch {
       return [];
     }

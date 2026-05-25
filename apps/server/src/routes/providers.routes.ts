@@ -134,7 +134,9 @@ export async function registerProvidersRoutes(
       return reply.send({ ok: false, models: [], error: "Provider disabled or unbuildable" });
     }
     try {
-      const models = (await provider.listModels()).map((m) => m.id);
+      // P23-W3: validate mode lets a bad key / unreachable host fail the test
+      // instead of silently degrading to a static fallback list.
+      const models = (await provider.listModels({ validate: true })).map((m) => m.id);
       if (models.length > 0) deps.modelProvidersRepo.updateModels(id, models);
       return reply.send({ ok: true, models, error: null });
     } catch (err) {

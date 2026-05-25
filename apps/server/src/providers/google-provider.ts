@@ -1,11 +1,13 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import type {
+  ListModelsOptions,
   ModelProvider,
   ProviderClientConfig,
   ProviderEvent,
   ProviderModelInfo,
   ProviderOptions,
 } from "./provider.js";
+import { PROVIDER_CHAT_TIMEOUT_MS, PROVIDER_LIST_TIMEOUT_MS } from "./provider.js";
 import { FALLBACK_MODELS } from "./model-registry.js";
 
 /** Chat-only Google Gemini provider. */
@@ -32,7 +34,7 @@ export class GoogleProvider implements ModelProvider {
       });
       const result = await model.generateContentStream(
         { contents: [{ role: "user", parts: [{ text: prompt }] }] },
-        options.signal ? { signal: options.signal } : {},
+        { timeout: PROVIDER_CHAT_TIMEOUT_MS, ...(options.signal ? { signal: options.signal } : {}) },
       );
       for await (const chunk of result.stream) {
         let text = "";
@@ -60,9 +62,19 @@ export class GoogleProvider implements ModelProvider {
     }
   }
 
-  listModels(): Promise<ProviderModelInfo[]> {
-    // @google/generative-ai 0.24 has no first-class list helper; use the
-    // known set. Key validity is exercised on first send.
-    return Promise.resolve(FALLBACK_MODELS.google.map((m) => ({ id: m.name, name: m.label })));
+  async listModels(options?: ListModelsOptions): Promise<ProviderModelInfo[]> {
+    const known = FALLBACK_MODELS.google.map((m) => ({ id: m.name, name: m.label }));
+    // @google/generative-ai 0.24 has no list endpoint. P23-W3: in validation
+    // mode, do a cheap countTokens ping so a bad key fails the test (throws);
+    // otherwise return the known set (validity is exercised on first send).
+    if (options?.validate) {
+      const first = FALLBACK_MODELS.google[0]?.name ?? "gemini-2.5-flash";
+      const model = this.genAI.getGenerativeModel({ model: first });
+      await model.countTokens(
+        { contents: [{ role: "user", parts: [{ text: "ping" }] }] },
+        { timeout: PROVIDER_LIST_TIMEOUT_MS },
+      );
+    }
+    return known;
   }
 }
