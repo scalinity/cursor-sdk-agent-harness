@@ -34,7 +34,11 @@ interface Harness {
   sends: Array<{ prompt: string; images?: SdkImage[] }>;
 }
 
-async function buildHarness(): Promise<Harness> {
+interface BuildHarnessOptions {
+  sdkOverride?: ReturnType<typeof createStubSdkAdapter>;
+}
+
+async function buildHarness(options?: BuildHarnessOptions): Promise<Harness> {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "harness-ar-"));
   const allowedDir = path.join(tmpDir, "ws");
   await fs.mkdir(allowedDir);
@@ -43,19 +47,14 @@ async function buildHarness(): Promise<Harness> {
   const env = loadEnv(BASE_ENV);
   const dbClient = openTestDb();
   const repos = createRepositories(dbClient.raw);
-  // Pre-allowlist the workspace path so create/startRun can succeed.
   repos.workspaceAllowlist.create({ path: realAllowed, recursive: true });
 
-  // Pre-seed an API key so startRun's MISSING_API_KEY guard doesn't trip.
   const apiKeyStore = new CursorApiKeyStore({ service: env.KEYCHAIN_SERVICE });
   await apiKeyStore.setApiKey("sk-test-12345678");
 
   const sends: Array<{ prompt: string; images?: SdkImage[] }> = [];
-  const sdk = createStubSdkAdapter({
+  const sdk = options?.sdkOverride ?? createStubSdkAdapter({
     onSend: ({ agent, prompt, images, idempotencyKey }) => {
-      // Fire a synthetic turn-ended delta so the runtime persists usage.
-      // The stub's deltasBeforeEach hook fires through the same onDelta the
-      // runtime passed in via SendOptions.
       void prompt;
       sends.push({ prompt, ...(images ? { images } : {}) });
       return {
@@ -448,139 +447,111 @@ describe("agents + runs REST routes", () => {
   });
 
   it("thinking-delta from onDelta is persisted and visible in events", async () => {
-    const sdk = createStubSdkAdapter({
-      onSend: ({ agent, idempotencyKey }) => ({
-        runId: idempotencyKey ?? "think-run",
-        agentId: agent.agentId,
-        deltasOnce: [
-          { type: "thinking-delta", text: "Let me " },
-          { type: "thinking-delta", text: "reason about this." },
-          { type: "thinking-completed", thinkingDurationMs: 1200 },
-          {
-            type: "turn-ended",
-            usage: {
-              inputTokens: 100,
-              outputTokens: 50,
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
+    h = await buildHarness({
+      sdkOverride: createStubSdkAdapter({
+        onSend: ({ agent, idempotencyKey }) => ({
+          runId: idempotencyKey ?? "think-run",
+          agentId: agent.agentId,
+          deltasOnce: [
+            { type: "thinking-delta", text: "Let me " },
+            { type: "thinking-delta", text: "reason about this." },
+            { type: "thinking-completed", thinkingDurationMs: 1200 },
+            {
+              type: "turn-ended",
+              usage: {
+                inputTokens: 100,
+                outputTokens: 50,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+              },
             },
-          },
-        ],
-        events: [
-          { type: "status", agent_id: agent.agentId, run_id: idempotencyKey, status: "RUNNING" },
-          {
-            type: "assistant",
-            agent_id: agent.agentId,
-            run_id: idempotencyKey,
-            message: { role: "assistant", content: [{ type: "text", text: "done" }] },
-          },
-          { type: "status", agent_id: agent.agentId, run_id: idempotencyKey, status: "FINISHED" },
-        ],
-        finalResult: { status: "finished", result: "done", durationMs: 2000 },
+          ],
+          events: [
+            { type: "status", agent_id: agent.agentId, run_id: idempotencyKey, status: "RUNNING" },
+            {
+              type: "assistant",
+              agent_id: agent.agentId,
+              run_id: idempotencyKey,
+              message: { role: "assistant", content: [{ type: "text", text: "done" }] },
+            },
+            { type: "status", agent_id: agent.agentId, run_id: idempotencyKey, status: "FINISHED" },
+          ],
+          finalResult: { status: "finished", result: "done", durationMs: 2000 },
+        }),
       }),
     });
+    const token = await h.csrfToken();
 
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "harness-think-"));
-    const allowedDir = path.join(tmpDir, "ws");
-    await fs.mkdir(allowedDir);
-    const realAllowed = await fs.realpath(allowedDir);
-
-    const env = loadEnv(BASE_ENV);
-    const dbClient = openTestDb();
-    const repos = createRepositories(dbClient.raw);
-    repos.workspaceAllowlist.create({ path: realAllowed, recursive: true });
-
-    const apiKeyStore = new CursorApiKeyStore({ service: env.KEYCHAIN_SERVICE });
-    await apiKeyStore.setApiKey("sk-test-12345678");
-
-    const { app } = await buildApp({
-      env,
-      repos,
-      apiKeyStore,
-      csrfSecretStore: new CsrfSecretStore({ service: env.KEYCHAIN_SERVICE }),
-      sdk,
+    const createRes = await h.app.inject({
+      method: "POST",
+      url: "/api/agents",
+      payload: {
+        name: "thinker",
+        mode: "local",
+        modelId: "composer-2-5",
+        cwd: [h.allowedDir],
+        mcpServerIds: [],
+        subagentDefinitionIds: [],
+      },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": token,
+        "content-type": "application/json",
+      },
     });
+    const agentId = (createRes.json() as { id: string }).id;
 
-    try {
-      const token = await (async () => {
-        const res = await app.inject({
-          method: "GET",
-          url: "/api/security/csrf-token",
-          headers: { origin: "http://127.0.0.1:5173" },
-        });
-        return (res.json() as { token: string }).token;
-      })();
+    const runRes = await h.app.inject({
+      method: "POST",
+      url: "/api/runs",
+      payload: { agentId, prompt: "think for me" },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": token,
+        "content-type": "application/json",
+      },
+    });
+    expect(runRes.statusCode).toBe(201);
+    const { runId } = runRes.json() as { runId: string };
 
-      const createRes = await app.inject({
-        method: "POST",
-        url: "/api/agents",
-        payload: {
-          name: "thinker",
-          mode: "local",
-          modelId: "composer-2-5",
-          cwd: [realAllowed],
-          mcpServerIds: [],
-          subagentDefinitionIds: [],
-        },
-        headers: {
-          origin: "http://127.0.0.1:5173",
-          "x-csrf-token": token,
-          "content-type": "application/json",
-        },
-      });
-      const agentId = (createRes.json() as { id: string }).id;
-
-      const runRes = await app.inject({
-        method: "POST",
-        url: "/api/runs",
-        payload: { agentId, prompt: "think for me" },
-        headers: {
-          origin: "http://127.0.0.1:5173",
-          "x-csrf-token": token,
-          "content-type": "application/json",
-        },
-      });
-      expect(runRes.statusCode).toBe(201);
-      const { runId } = runRes.json() as { runId: string };
-
-      // Wait for run to settle
-      await new Promise((r) => setTimeout(r, 200));
-
-      const eventsRes = await app.inject({
+    for (let i = 0; i < 40; i++) {
+      const poll = await h.app.inject({
         method: "GET",
-        url: `/api/runs/${runId}/events`,
+        url: `/api/runs/${runId}`,
         headers: { origin: "http://127.0.0.1:5173" },
       });
-      type ThinkingFrame = {
-        type: string;
-        event: {
-          sdk_type: string;
-          kind: string;
-          payload: { text_delta: string; thinking_duration_ms?: number };
-        };
-      };
-      const frames = (eventsRes.json() as { items: ThinkingFrame[] }).items;
-      const thinkingFrames = frames.filter((f) => f.type === "sdk.thinking");
-
-      expect(thinkingFrames.length).toBeGreaterThanOrEqual(2);
-      const firstDelta = thinkingFrames[0]!;
-      expect(firstDelta.event.kind).toBe("thinking.delta");
-      expect(firstDelta.event.payload.text_delta).toBe("Let me ");
-
-      const secondDelta = thinkingFrames[1]!;
-      expect(secondDelta.event.kind).toBe("thinking.delta");
-      expect(secondDelta.event.payload.text_delta).toBe("reason about this.");
-
-      const completedFrames = thinkingFrames.filter(
-        (f) => f.event.payload.thinking_duration_ms !== undefined,
-      );
-      expect(completedFrames.length).toBe(1);
-      expect(completedFrames[0]!.event.payload.thinking_duration_ms).toBe(1200);
-    } finally {
-      await app.close();
-      dbClient.raw.close();
-      await fs.rm(tmpDir, { recursive: true, force: true });
+      const status = (poll.json() as { status: string }).status;
+      if (status === "FINISHED" || status === "ERROR" || status === "CANCELLED") break;
+      await new Promise((r) => setTimeout(r, 50));
     }
+
+    const eventsRes = await h.app.inject({
+      method: "GET",
+      url: `/api/runs/${runId}/events`,
+      headers: { origin: "http://127.0.0.1:5173" },
+    });
+    type ThinkingFrame = {
+      type: string;
+      event: {
+        sdk_type: string;
+        kind: string;
+        payload: { text_delta: string; thinking_duration_ms?: number };
+      };
+    };
+    const frames = (eventsRes.json() as { items: ThinkingFrame[] }).items;
+    const thinkingFrames = frames.filter((f) => f.type === "sdk.thinking");
+
+    expect(thinkingFrames.length).toBeGreaterThanOrEqual(2);
+    expect(thinkingFrames[0]!.event.kind).toBe("thinking.delta");
+    expect(thinkingFrames[0]!.event.payload.text_delta).toBe("Let me ");
+    expect(thinkingFrames[1]!.event.kind).toBe("thinking.delta");
+    expect(thinkingFrames[1]!.event.payload.text_delta).toBe("reason about this.");
+
+    const completedFrames = thinkingFrames.filter(
+      (f) => f.event.payload.thinking_duration_ms !== undefined,
+    );
+    expect(completedFrames.length).toBe(1);
+    expect(completedFrames[0]!.event.payload.thinking_duration_ms).toBe(1200);
   });
 });
 

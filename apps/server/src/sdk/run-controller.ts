@@ -238,13 +238,12 @@ export class RunController {
       for await (const event of run.stream()) {
         if (this.abortController.signal.aborted) break;
         if (
-          this.receivedThinkingFromDelta &&
           event !== null &&
           typeof event === "object" &&
           (event as unknown as Record<string, unknown>).type === "thinking"
         ) {
-          this.observeStatusFromEvent(event);
-          continue;
+          if (this.receivedThinkingFromDelta) continue;
+          this.receivedThinkingFromStream = true;
         }
         try {
           await this.init.sink(event);
@@ -361,52 +360,39 @@ export class RunController {
 
   private onDeltaParseFailureLogged = false;
   private receivedThinkingFromDelta = false;
+  private receivedThinkingFromStream = false;
 
   private onDelta(update: unknown): void {
     if (update === null || typeof update !== "object") return;
     const rec = update as Record<string, unknown>;
 
     if (rec.type === "thinking-delta") {
+      if (this.receivedThinkingFromStream) return;
       const text = typeof rec.text === "string" ? rec.text : "";
       if (text.length > 0) {
         this.receivedThinkingFromDelta = true;
-        try {
-          this.init.sink({
-            type: "thinking",
-            agent_id: this.agentId,
-            run_id: this.runId,
-            text,
-          });
-        } catch (err) {
-          this.init.logger.error(
-            { err, runId: this.runId },
-            "sink threw on thinking delta from onDelta",
-          );
-        }
+        this.safeSink({
+          type: "thinking",
+          agent_id: this.agentId,
+          run_id: this.runId,
+          text,
+        }, "thinking delta from onDelta");
       }
       return;
     }
 
     if (rec.type === "thinking-completed") {
+      if (this.receivedThinkingFromStream) return;
       this.receivedThinkingFromDelta = true;
       const durationMs =
         typeof rec.thinkingDurationMs === "number" ? rec.thinkingDurationMs : undefined;
-      if (durationMs !== undefined) {
-        try {
-          this.init.sink({
-            type: "thinking",
-            agent_id: this.agentId,
-            run_id: this.runId,
-            text: "",
-            thinking_duration_ms: durationMs,
-          });
-        } catch (err) {
-          this.init.logger.error(
-            { err, runId: this.runId },
-            "sink threw on thinking-completed from onDelta",
-          );
-        }
-      }
+      this.safeSink({
+        type: "thinking",
+        agent_id: this.agentId,
+        run_id: this.runId,
+        text: "",
+        ...(durationMs !== undefined ? { thinking_duration_ms: durationMs } : {}),
+      }, "thinking-completed from onDelta");
       return;
     }
 
@@ -425,6 +411,25 @@ export class RunController {
         }
       }
       this.accumulatedUsage = next;
+    }
+  }
+
+  private safeSink(event: unknown, label: string): void {
+    try {
+      const result = this.init.sink(event);
+      if (result instanceof Promise) {
+        result.catch((err: unknown) => {
+          this.init.logger.error(
+            { err, runId: this.runId },
+            `sink rejected on ${label}`,
+          );
+        });
+      }
+    } catch (err) {
+      this.init.logger.error(
+        { err, runId: this.runId },
+        `sink threw on ${label}`,
+      );
     }
   }
 
