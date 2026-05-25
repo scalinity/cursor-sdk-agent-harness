@@ -24,7 +24,7 @@ export type ConnectionState =
  * (CodeEditPreviewPanel); the rest render honest "not yet available"
  * placeholders.
  */
-export type RightPanelTab = "diff" | "files" | "terminal" | "browser";
+export type RightPanelTab = "diff" | "files" | "terminal" | "browser" | "search";
 
 export interface Toast {
   id: string;

@@ -76,6 +76,7 @@ export const runRowSchema = z.object({
   usageSource: usageSourceSchema.nullable(),
   error: z.unknown().nullable(),
   interruptedReason: z.string().nullable(),
+  contextMetadata: z.unknown().nullable(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
 });

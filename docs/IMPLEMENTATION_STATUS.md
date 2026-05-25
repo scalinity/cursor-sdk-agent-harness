@@ -27,6 +27,7 @@ each phase. Use it as the single source of truth for "what is decided" vs
 | 17 | Cursor-style Shell Redesign + Attachments | ✅ complete | Titlebar reworked into a Cursor-style toolbar: left rail-collapse toggle, Diff/Files/Terminal/Browser surface toggles (Diff = real code-edit preview; others honest "not yet available" placeholders), `+` new-agent, right-pane collapse; workspace crumb removed from the top. New `ToolbarIcons` stroke-icon set (no new dep). `ui-store` gains `railHidden` + `rightPanelTab`; grid collapses the left rail. SessionsRail rebuilt: New Agent action, search, **workspaces as collapsible groups with chats nested by `run.workspaceId`** (+ Unassigned group), Open Workspace, per-run delete. Runs now carry `workspace_id` (migration `0002`, tagged with the active workspace at creation, surfaced on `RunSummary`). Composer gains a `+` attach button, drag-and-drop, attachment chips, and a centered "new session" hero when the right pane is collapsed on a fresh session. **Image attachment pipeline** (ledger OQ-23): `POST /api/runs` accepts `images: SdkImage[]` → `startRun` → `RunController` → `agent.send(SDKUserMessage{text,images})`; non-image files embedded as `@path`/name references. Coexists with a concurrent model-dropdown change (Composer model `Select`, `selectedModelId`). `pnpm typecheck && pnpm lint && pnpm test` all green: 262 server tests (+1 image-attachment test), 93 web tests, 2 shared tests, 11 scripts tests. |
 | 18 | Embedded Browser Pane (WebContentsView + built-in MCP) | 🟡 in progress |
 | 19 | Execution Modes, Git Status, and Chat UX | ✅ complete | Three-mode execution system (Ask/Agent/YOLO), git branch+dirty in statusbar, code block copy+apply buttons, session rename, Cmd+N new session, FTS run search. Migration 0003, 7 new shared schemas, 4 new server routes, 7 new frontend components/hooks. 431 tests (282 server, 122 web, 10 shared, 6 eslint, 11 scripts). | **Milestone 1 — manual driving — complete & user-verified (browser fully functional).** Electron `WebContentsView` browser in the right-pane Browser tab, one isolated `persist:agent-<id>` session per agent (+ a standalone `manual` session so the tab works as a browser without an agent), driven manually (URL bar, back/fwd/reload/stop). Built-in browser MCP server + agent control + action visualization + console/network drawers + replay are **Milestone 2** (in progress). See the Phase 18 section below. |
+| 20 | Context Intelligence and Rules | ✅ complete | @-mention system (file/folder/symbol/codebase/rules), project rules (.harness/rules/ with always/glob/manual scopes), codebase search (grep+file via ripgrep with fallback). Migration 0004, 16 new shared schemas, 3 new server routes, 3 new services, 6 new frontend components/hooks, Search tab in right pane. 464 tests (306 server, 122 web, 30 shared, 6 eslint, 11 scripts). |
 
 ---
 
@@ -3005,3 +3006,112 @@ Docs:
 ### Release
 
 This is the v1.1 release. Tag with `git tag v1.1.0`.
+
+---
+
+## Phase 20 Outcomes — Context Intelligence and Rules
+
+### Summary
+
+Added the three features that close the biggest gap between CursorHarness
+and native Cursor: @-mentions for structured context injection, a project
+rules system, and codebase search. Every prompt can now carry relevant
+context instead of starting from zero.
+
+### Features delivered
+
+1. **@-Mention system** — Typing `@` in the Composer opens an
+   autocomplete dropdown listing files, folders, and symbols from the
+   active workspace. Selected items become context chips displayed above
+   the input with token estimates. On run start, the server resolves
+   each mention's content (file read, directory listing, symbol
+   extraction, or grep search) and injects it into the SDK prompt as a
+   `<context>` block.
+
+2. **Project rules** — `.harness/rules/*.md` files with YAML frontmatter
+   (name, scope, description, optional glob) shape agent behavior.
+   Three scopes: `always` (every run), `glob` (included when mentioned
+   file paths match), `manual` (only when explicitly @-mentioned by
+   name). Rules are assembled into a `<project-rules>` block prepended
+   to the prompt before mention context.
+
+3. **Codebase search** — grep (via ripgrep when available, falling back
+   to system grep) and file search endpoints power both the `@codebase`
+   mention kind and a new Search tab in the right pane. The Search panel
+   offers Text and Files modes with result counts and timing.
+
+### Schema changes
+
+- Migration `0004_context_intelligence.sql`:
+  - `ALTER TABLE runs ADD COLUMN context_metadata TEXT` with `json_valid` CHECK
+
+### Files created
+
+Shared:
+- `packages/shared/src/context.ts` — 16 new Zod schemas (mentions, chips, search, rules, grep)
+- `packages/shared/src/context.test.ts` — 20 schema validation tests
+
+Server:
+- `apps/server/src/db/migrations/0004_context_intelligence.sql`
+- `apps/server/src/services/rules.service.ts` — frontmatter parser, scope resolver, block assembler
+- `apps/server/src/services/search.service.ts` — grep search, file search, ripgrep detection
+- `apps/server/src/services/context.service.ts` — symbol scanner, content resolution, autocomplete
+- `apps/server/src/routes/context.routes.ts` — GET /api/context/search, POST /api/context/resolve
+- `apps/server/src/routes/search.routes.ts` — GET /api/search/grep, GET /api/search/files
+- `apps/server/src/routes/rules.routes.ts` — GET /api/rules, GET /api/rules/:name
+- `apps/server/src/routes/__tests__/context.routes.test.ts` — 5 integration tests
+- `apps/server/src/routes/__tests__/rules.routes.test.ts` — 5 integration tests
+- `apps/server/src/services/__tests__/rules.service.test.ts` — 10 unit tests
+
+Web:
+- `apps/web/src/hooks/useMentionAutocomplete.ts` — @ trigger, debounce, chip management
+- `apps/web/src/hooks/useCodebaseSearch.ts` — debounced grep/file search
+- `apps/web/src/hooks/useRulesCount.ts` — rules badge data
+- `apps/web/src/components/MentionAutocomplete.tsx` — floating dropdown with file/folder/symbol sections
+- `apps/web/src/components/ContextChipBar.tsx` — chip bar with token estimates
+- `apps/web/src/components/SearchPanel.tsx` — right-pane Search tab with Text/Files modes
+
+### Files modified (key changes)
+
+Shared:
+- `packages/shared/src/domain.ts` — `contextMetadata` field on `runRowSchema`
+- `packages/shared/src/rest-contracts.ts` — `mentions` field on `createRunRequestSchema`
+- `packages/shared/src/index.ts` — barrel exports for all 16 new context schemas
+
+Server:
+- `apps/server/src/db/schema.ts` — `contextMetadata` column on runs table
+- `apps/server/src/db/repositories/runs.repo.ts` — `context_metadata` in create/read/mapper
+- `apps/server/src/sdk/agent-runtime.ts` — context resolution and rules assembly in `startRun`
+- `apps/server/src/routes/index.ts` — registered context, search, rules routes
+- `apps/server/src/app.ts` — wired context/search/rules route deps
+
+Web:
+- `apps/web/src/components/shell/Composer.tsx` — mention autocomplete, chip bar, mentions in submit
+- `apps/web/src/components/shell/RightPane.tsx` — Search tab
+- `apps/web/src/components/shell/RightTabs.tsx` — Search tab toggle
+- `apps/web/src/components/shell/Statusbar.tsx` — rules count badge
+- `apps/web/src/components/shell/ToolbarIcons.tsx` — 4 new icons (FileIcon, SearchIcon, CodeIcon, BookIcon)
+- `apps/web/src/hooks/useAgentStream.ts` — mentions pass-through to POST /api/runs
+- `apps/web/src/app/AppShell.tsx` — rules count prop, mentions type
+- `apps/web/src/state/ui-store.ts` — `"search"` added to RightPanelTab union
+- `apps/web/src/styles/app-shell.css` — styles for mention autocomplete, context chips, search panel
+
+### Test results
+
+- 306 server tests ✅ (24 new)
+- 122 web tests ✅ (0 new — existing composer tests cover the integration)
+- 30 shared tests ✅ (20 new)
+- 6 eslint plugin tests ✅
+- 11 scripts tests ✅
+- **Total: 475 tests, all passing**
+
+### Acceptance gates
+
+- `pnpm typecheck` ✅
+- `pnpm lint` ✅
+- `pnpm test` ✅
+- Desktop build + install ✅ (May 25 11:55)
+
+### Next phase
+
+Phase 21 — Planning, Git Integration, and Session Diffs (`21_PLANNING_GIT_AND_SESSION_DIFFS.md`).

@@ -17,6 +17,7 @@ import { useNativeMenuActions } from "../hooks/useNativeMenuActions.js";
 import { useEnsureDefaultAgent } from "../hooks/useEnsureDefaultAgent.js";
 import { useErrorReporter } from "../hooks/useErrorReporter.js";
 import { useGitStatus } from "../hooks/useGitStatus.js";
+import { useRulesCount } from "../hooks/useRulesCount.js";
 import { useUiStore } from "../state/ui-store.js";
 import { useRunStore } from "../state/run-store.js";
 import { useAgentStore } from "../state/agent-store.js";
@@ -30,7 +31,7 @@ import { Toaster } from "../components/shell/Toaster.js";
 import { NewAgentDialog } from "../components/agents/NewAgentDialog.js";
 import { WorkspaceRequiredModal } from "../components/workspace/WorkspaceRequiredModal.js";
 import { cn } from "../lib/cn.js";
-import { MODEL_LABELS, type ExecutionMode, type SdkImage } from "@harness/shared";
+import { MODEL_LABELS, type ContextMention, type ExecutionMode, type SdkImage } from "@harness/shared";
 import { describeModel } from "../lib/model-label.js";
 import { mutatingRequest } from "../lib/http-client.js";
 
@@ -55,6 +56,7 @@ export function AppShell() {
   const selectedModelId = useUiStore((s) => s.selectedModelId);
   const setComposerDraft = useUiStore((s) => s.setComposerDraft);
   const gitStatus = useGitStatus();
+  const rulesCount = useRulesCount();
 
   // Auto-provision a universal default "Coding Agent" for the active
   // workspace + selected model so the user never has to create an agent
@@ -145,7 +147,7 @@ export function AppShell() {
   );
 
   const onSubmit = useCallback(
-    async (input: { prompt: string; agentId: string; images?: SdkImage[] }) => {
+    async (input: { prompt: string; agentId: string; images?: SdkImage[]; mentions?: ContextMention[] }) => {
       const runId = await submitUserInput(input);
       setActiveRunId(runId);
       return runId;
@@ -267,6 +269,7 @@ export function AppShell() {
           runningRunId={activeRunId}
           workspaceName={activeWorkspace.workspace?.label ?? activeWorkspace.workspace?.path ?? null}
           gitStatus={gitStatus}
+          rulesCount={rulesCount}
         />
         <NewAgentDialog
           open={newAgentOpen}

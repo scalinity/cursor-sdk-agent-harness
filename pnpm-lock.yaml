@@ -81,6 +81,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)
+      '@types/minimatch':
+        specifier: ^6.0.0
+        version: 6.0.0
       better-sqlite3:
         specifier: 12.10.0
         version: 12.10.0
@@ -99,6 +102,9 @@ importers:
       keytar:
         specifier: 7.9.0
         version: 7.9.0
+      minimatch:
+        specifier: ^10.2.5
+        version: 10.2.5
       node-pty:
         specifier: 1.1.0
         version: 1.1.0
@@ -1766,6 +1772,10 @@ packages:
 
   '@types/keyv@3.1.4':
     resolution: {integrity: sha512-BQ5aZNSCpj7D6K2ksrRCTmKRLEpnPvWDiLPfoGyhZ++8YtiK9d/3DBKPJgry359X/P1PfruyYwvnvwFjuEiEIg==}
+
+  '@types/minimatch@6.0.0':
+    resolution: {integrity: sha512-zmPitbQ8+6zNutpwgcQuLcsEpn/Cj54Kbn7L5pX0Os5kdWplB7xPgEh/g+SWOB/qmows2gpuCaPyduq8ZZRnxA==}
+    deprecated: This is a stub types definition. minimatch provides its own type definitions, so you do not need this installed.
 
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
@@ -6121,6 +6131,10 @@ snapshots:
   '@types/keyv@3.1.4':
     dependencies:
       '@types/node': 22.10.5
+
+  '@types/minimatch@6.0.0':
+    dependencies:
+      minimatch: 10.2.5
 
   '@types/ms@2.1.0': {}
 

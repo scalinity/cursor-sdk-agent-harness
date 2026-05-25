@@ -312,6 +312,18 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       settingsRepo: repos.settings,
       workspaceAllowlist: repos.workspaceAllowlist,
     },
+    context: {
+      settingsRepo: repos.settings,
+      allowlistRepo: repos.workspaceAllowlist,
+    },
+    search: {
+      settingsRepo: repos.settings,
+      allowlistRepo: repos.workspaceAllowlist,
+    },
+    rules: {
+      settingsRepo: repos.settings,
+      allowlistRepo: repos.workspaceAllowlist,
+    },
   });
 
   return {

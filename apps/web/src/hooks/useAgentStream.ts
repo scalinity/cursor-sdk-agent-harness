@@ -30,7 +30,7 @@ import { useUiStore, type ConnectionState } from "../state/ui-store.js";
 import { useWebSocket } from "./useWebSocket.js";
 import { useCsrfToken } from "./useCsrfToken.js";
 import { wsUrl } from "../lib/api-base.js";
-import type { SdkImage } from "@harness/shared";
+import type { ContextMention, SdkImage } from "@harness/shared";
 
 // Absolute `ws(s)://…/ws` in the packaged desktop app (renderer is on
 // app://harness and must reach the embedded server cross-origin); plain
@@ -46,7 +46,7 @@ export interface UseAgentStreamResult {
   connectionState: ConnectionState;
   activeRunId: string | null;
   submitUserInput: (
-    input: { prompt: string; agentId: string; images?: SdkImage[] },
+    input: { prompt: string; agentId: string; images?: SdkImage[]; mentions?: ContextMention[] },
   ) => Promise<string>;
   cancelRun: (runId: string) => void;
   subscribeRun: (runId: string) => void;
@@ -198,14 +198,21 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
       prompt,
       agentId,
       images,
+      mentions,
     }: {
       prompt: string;
       agentId: string;
       images?: SdkImage[];
+      mentions?: ContextMention[];
     }): Promise<string> => {
       const res = await mutatingRequest("/api/runs", {
         method: "POST",
-        body: { agentId, prompt, ...(images && images.length > 0 ? { images } : {}) },
+        body: {
+          agentId,
+          prompt,
+          ...(images && images.length > 0 ? { images } : {}),
+          ...(mentions && mentions.length > 0 ? { mentions } : {}),
+        },
         getCsrfToken: () => useUiStore.getState().csrfToken,
         refreshCsrfToken,
         responseSchema: createRunResponseSchema,

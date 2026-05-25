@@ -351,4 +351,41 @@ export type {
   TerminalServerFrame,
 } from "./terminal-protocol.js";
 
+// Context intelligence (Phase 20): @-mentions, rules, codebase search
+export {
+  contextMentionKindSchema,
+  contextMentionSchema,
+  contextChipSchema,
+  contextSearchResultSchema,
+  contextResolveRequestSchema,
+  contextResolveResponseSchema,
+  resolvedMentionSchema,
+  ruleScopeSchema,
+  projectRuleSchema,
+  grepSearchQuerySchema,
+  grepSearchResultItemSchema,
+  grepSearchResultSchema,
+  fileSearchQuerySchema,
+  fileSearchResultSchema,
+  contextSearchQuerySchema,
+  symbolKindSchema,
+} from "./context.js";
+export type {
+  ContextMentionKind,
+  ContextMention,
+  ContextChip,
+  ContextSearchResult,
+  ContextResolveRequest,
+  ContextResolveResponse,
+  ResolvedMention,
+  RuleScope,
+  ProjectRule,
+  GrepSearchQuery,
+  GrepSearchResult,
+  FileSearchQuery,
+  FileSearchResult,
+  ContextSearchQuery,
+  SymbolKind,
+} from "./context.js";
+
 export const HARNESS_VERSION = "0.0.0" as const;
