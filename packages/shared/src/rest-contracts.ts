@@ -603,7 +603,10 @@ export type GitStatusResponse = z.infer<typeof gitStatusResponseSchema>;
 // ============================================================================
 
 export const fileWriteRequestSchema = z.object({
-  path: z.string().min(1).max(1024).regex(/^[^\x00-\x1f]+$/, "Path contains invalid characters"),
+  path: z.string().min(1).max(1024).refine(
+    (v) => !Array.from(v).some((ch) => ch.charCodeAt(0) < 0x20),
+    "Path contains invalid characters",
+  ),
   content: z.string().max(10_485_760),
   workspaceId: z.string().optional(),
 });
