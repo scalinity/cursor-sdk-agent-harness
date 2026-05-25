@@ -6,6 +6,7 @@
  */
 export type MenuActionChannel =
   | "menu:new-agent"
+  | "menu:new-session"
   | "menu:open-workspace"
   | "menu:toggle-code-pane"
   | "menu:preferences";

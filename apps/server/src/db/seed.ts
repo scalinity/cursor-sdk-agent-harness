@@ -19,6 +19,11 @@ const DEFAULT_SEED: ReadonlyArray<SeedRow> = [
     description: "Default model for new agents",
   },
   {
+    key: "app.defaultExecutionMode",
+    valueJson: JSON.stringify("agent"),
+    description: "Default execution mode for new runs (ask/agent/yolo)",
+  },
+  {
     key: "defaultSettingSources",
     valueJson: JSON.stringify(["project", "user"]),
     description: "Default Cursor setting sources for local agents",

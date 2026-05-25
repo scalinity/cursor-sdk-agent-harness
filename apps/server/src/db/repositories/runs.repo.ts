@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import type {
   AgentMode,
+  ExecutionMode,
   RunRow,
   SdkRunStatus,
   TokenUsage,
@@ -15,8 +16,10 @@ export interface CreateRunInput {
   agentId: string;
   status: SdkRunStatus;
   promptPreview?: string;
+  name?: string | null;
   modelId?: string | null;
   mode?: AgentMode | null;
+  executionMode?: ExecutionMode | null;
   workspaceId?: string | null;
 }
 
@@ -32,8 +35,10 @@ interface RunDbRow {
   agent_id: string;
   status: string;
   prompt_preview: string;
+  name: string | null;
   model_id: string | null;
   mode: string | null;
+  execution_mode: string | null;
   workspace_id: string | null;
   started_at: string;
   finished_at: string | null;
@@ -230,8 +235,10 @@ function rowToDomain(row: RunDbRow): RunRow {
     agentId: row.agent_id,
     status: row.status as SdkRunStatus,
     promptPreview: row.prompt_preview,
+    name: row.name,
     modelId: row.model_id,
     mode: row.mode === null ? null : (row.mode as AgentMode),
+    executionMode: row.execution_mode === null ? null : (row.execution_mode as ExecutionMode),
     workspaceId: row.workspace_id,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
@@ -262,10 +269,10 @@ export class RunsRepo {
     this.raw
       .prepare(
         `INSERT INTO runs (
-            id, agent_id, status, prompt_preview, model_id, mode,
+            id, agent_id, status, prompt_preview, name, model_id, mode, execution_mode,
             started_at, last_seq, created_at, updated_at, workspace_id
           ) VALUES (
-            @id, @agent_id, @status, @prompt_preview, @model_id, @mode,
+            @id, @agent_id, @status, @prompt_preview, @name, @model_id, @mode, @execution_mode,
             @started_at, 0, @created_at, @updated_at, @workspace_id
           )`,
       )
@@ -274,8 +281,10 @@ export class RunsRepo {
         agent_id: input.agentId,
         status: input.status,
         prompt_preview: input.promptPreview ?? "",
+        name: input.name ?? null,
         model_id: input.modelId ?? null,
         mode: input.mode ?? null,
+        execution_mode: input.executionMode ?? "agent",
         started_at: now,
         created_at: now,
         updated_at: now,
@@ -821,6 +830,60 @@ export class RunsRepo {
       throw new Error(`RunsRepo.incrementLastSeq: run not found id=${id}`);
     }
     return row.last_seq;
+  }
+
+  updateName(id: string, name: string): void {
+    this.raw
+      .prepare(
+        `UPDATE runs SET name = ?, updated_at = ? WHERE id = ?`,
+      )
+      .run(name, isoNow(), id);
+  }
+
+  search(query: string, limit: number): Array<{
+    runId: string;
+    name: string | null;
+    prompt: string;
+    snippet: string;
+    rank: number;
+    createdAt: string;
+    agentId: string;
+    executionMode: string | null;
+    status: string;
+  }> {
+    const rows = this.raw
+      .prepare(
+        `SELECT r.id, r.name, r.prompt_preview, r.status, r.agent_id, r.execution_mode, r.created_at,
+                snippet(runs_fts, 1, '<mark>', '</mark>', '...', 32) as snippet,
+                rank
+           FROM runs_fts
+           JOIN runs r ON r.id = runs_fts.run_id
+          WHERE runs_fts MATCH ?
+          ORDER BY rank
+          LIMIT ?`,
+      )
+      .all(query, limit) as Array<{
+      id: string;
+      name: string | null;
+      prompt_preview: string;
+      status: string;
+      agent_id: string;
+      execution_mode: string | null;
+      created_at: string;
+      snippet: string;
+      rank: number;
+    }>;
+    return rows.map((row) => ({
+      runId: row.id,
+      name: row.name,
+      prompt: row.prompt_preview,
+      snippet: row.snippet,
+      rank: row.rank,
+      createdAt: row.created_at,
+      agentId: row.agent_id,
+      executionMode: row.execution_mode,
+      status: row.status,
+    }));
   }
 
   delete(id: string): void {

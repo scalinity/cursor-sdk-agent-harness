@@ -3,9 +3,11 @@ import {
   createAgentRequestSchema,
   listAgentsQuerySchema,
   listAgentsResponseSchema,
+  updateAgentRequestSchema,
 } from "@harness/shared";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { z } from "zod";
+import type { AgentsRepo } from "../db/repositories/agents.repo.js";
 import {
   AgentRuntimeError,
   WorkspaceRejectedError,
@@ -14,6 +16,7 @@ import {
 
 export interface AgentsRoutesDeps {
   runtime: AgentRuntime;
+  agentsRepo: AgentsRepo;
 }
 
 function send422(reply: FastifyReply, error: z.ZodError) {
@@ -127,6 +130,29 @@ export async function registerAgentsRoutes(
       try {
         await deps.runtime.terminate(req.params.agentId);
         return reply.code(200).send({ id: req.params.agentId, status: "terminated" });
+      } catch (err) {
+        if (err instanceof AgentRuntimeError) return sendRuntimeError(reply, err);
+        throw err;
+      }
+    },
+  );
+
+  // Phase 19: Update agent (name, executionMode)
+  app.patch<{ Params: { agentId: string } }>(
+    "/api/agents/:agentId",
+    async (req, reply) => {
+      const parsed = updateAgentRequestSchema.safeParse(req.body);
+      if (!parsed.success) return send422(reply, parsed.error);
+      const existing = deps.agentsRepo.getById(req.params.agentId);
+      if (!existing) {
+        return reply.code(404).send({ code: "AGENT_NOT_FOUND", message: `Agent ${req.params.agentId} not found.` });
+      }
+      if (parsed.data.executionMode !== undefined) {
+        deps.agentsRepo.updateExecutionMode(req.params.agentId, parsed.data.executionMode);
+      }
+      try {
+        const detail = deps.runtime.getById(req.params.agentId);
+        return agentDetailResponseSchema.parse(detail);
       } catch (err) {
         if (err instanceof AgentRuntimeError) return sendRuntimeError(reply, err);
         throw err;

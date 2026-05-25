@@ -5,8 +5,12 @@ import {
   getRunEventsResponseSchema,
   listRunsQuerySchema,
   listRunsResponseSchema,
+  runPatchSchema,
+  runSearchQuerySchema,
+  runSearchResultSchema,
   runSummarySchema,
   transcriptResponseSchema,
+  type ExecutionMode,
   type TokenUsage,
 } from "@harness/shared";
 import type { FastifyInstance, FastifyReply } from "fastify";
@@ -80,7 +84,9 @@ function toRunSummary(row: {
   id: string;
   agentId: string;
   agentName?: string | null;
+  name?: string | null;
   status: string;
+  executionMode?: ExecutionMode | null;
   promptPreview: string;
   modelId: string | null;
   workspaceId: string | null;
@@ -100,7 +106,9 @@ function toRunSummary(row: {
     id: row.id,
     agentId: row.agentId,
     agentName: row.agentName ?? null,
+    name: row.name ?? null,
     status: row.status,
+    executionMode: row.executionMode ?? null,
     promptPreview: row.promptPreview,
     modelId: row.modelId,
     workspaceId: row.workspaceId,
@@ -221,6 +229,14 @@ export async function registerRunsRoutes(
     return listRunsResponseSchema.parse({ items, total: result.total });
   });
 
+  // Phase 19: Full-text search across runs
+  app.get("/api/runs/search", async (req, reply) => {
+    const parsed = runSearchQuerySchema.safeParse(req.query);
+    if (!parsed.success) return send422(reply, parsed.error);
+    const results = deps.runsRepo.search(parsed.data.q, parsed.data.limit);
+    return runSearchResultSchema.parse({ results });
+  });
+
   app.get<{ Params: { runId: string } }>(
     "/api/runs/:runId",
     async (req, reply) => {
@@ -314,6 +330,30 @@ export async function registerRunsRoutes(
     deps.runsRepo.delete(req.params.runId);
     return reply.code(204).send();
   });
+
+  // Phase 19: Rename a run
+  app.patch<{ Params: { runId: string } }>(
+    "/api/runs/:runId",
+    async (req, reply) => {
+      const parsed = runPatchSchema.safeParse(req.body);
+      if (!parsed.success) return send422(reply, parsed.error);
+      const row = deps.runsRepo.getById(req.params.runId);
+      if (!row) return reply.code(404).send({ code: "RUN_NOT_FOUND" });
+      if (parsed.data.name !== undefined) {
+        deps.runsRepo.updateName(req.params.runId, parsed.data.name);
+      }
+      const updated = deps.runsRepo.getById(req.params.runId);
+      if (!updated) return reply.code(404).send({ code: "RUN_NOT_FOUND" });
+      return runSummarySchema.parse({
+        ...toRunSummary({
+          ...updated,
+          agentName: deps.agentsRepo.getById(updated.agentId)?.name ?? null,
+          toolCallCount: 0,
+          errorToolCallCount: 0,
+        }),
+      });
+    },
+  );
 
   app.post("/api/runs", async (req, reply) => {
     const parsed = createRunRequestSchema.safeParse(req.body);

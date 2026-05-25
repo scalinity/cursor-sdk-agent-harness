@@ -5,6 +5,8 @@ import { useRunStore } from "../../state/run-store.js";
 import { useWorkspaceAllowlist } from "../../hooks/useWorkspaceAllowlist.js";
 import { useActiveWorkspace } from "../../hooks/useActiveWorkspace.js";
 import { ChevronDownIcon, FolderIcon, PlusIcon, XIcon } from "./ToolbarIcons.js";
+import { mutatingRequest } from "../../lib/http-client.js";
+import { useUiStore } from "../../state/ui-store.js";
 
 /**
  * SessionsRail — left rail. Top action starts a new chat (a fresh session);
@@ -330,6 +332,42 @@ function RailItem({ run, isActive, onSelectRun, onDeleteRun }: RailItemProps) {
   // pointer leaves the row or the button loses focus — no timer, so the
   // component stays effect-free per the repo rule.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+
+  const label = run.name ?? run.promptPreview ?? run.id;
+
+  const startRename = () => {
+    setRenameValue(label);
+    setRenaming(true);
+    // Focus happens after the next paint when the input renders.
+    requestAnimationFrame(() => {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    });
+  };
+
+  const commitRename = () => {
+    const trimmed = renameValue.trim();
+    setRenaming(false);
+    if (trimmed.length === 0 || trimmed === label) return;
+    const token = useUiStore.getState().csrfToken;
+    void mutatingRequest(`/api/runs/${run.id}`, {
+      method: "PATCH",
+      body: { name: trimmed },
+      getCsrfToken: () => token,
+      refreshCsrfToken: async () => {
+        // CSRF refresh would require the hook, but here we just bail.
+        return null;
+      },
+    });
+  };
+
+  const cancelRename = () => {
+    setRenaming(false);
+  };
+
   return (
     <div
       className={cn("rail-item rail-item--nested", isActive && "rail-item--active")}
@@ -343,7 +381,31 @@ function RailItem({ run, isActive, onSelectRun, onDeleteRun }: RailItemProps) {
     >
       <span className={cn("rail-item__dot", dotClass(run.status))} aria-hidden="true" />
       <div className="min-w-0">
-        <div className="rail-item__title">{run.promptPreview || run.id}</div>
+        {renaming ? (
+          <input
+            ref={renameInputRef}
+            className="w-full bg-transparent text-md text-text-primary outline-none"
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") commitRename();
+              else if (e.key === "Escape") cancelRename();
+            }}
+            onBlur={commitRename}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <div
+            className="rail-item__title"
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              startRename();
+            }}
+          >
+            {label}
+          </div>
+        )}
         <div className="rail-item__meta">
           {run.status.toLowerCase()} · {new Date(run.startedAt).toLocaleTimeString()}
         </div>

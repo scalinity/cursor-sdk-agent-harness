@@ -25,7 +25,122 @@ each phase. Use it as the single source of truth for "what is decided" vs
 | 15 | Post-Build Remediation | ✅ complete | Six P0s found and fixed: F-001 Zustand `?? []` infinite render loop (blank screen), F-002 CSRF cold-start race tearing down WS, F-003 `.env` not loaded by dev orchestrator (API key never imported), F-004 harness model IDs (`composer-2-5-fast` / `composer-2-5`) not in `@cursor/sdk@1.0.13` enum, F-005 normalizer treating per-message deltas as snapshot replacements, F-006 streaming-text channel buffer wiped by StrictMode unsubscribe. Live smoke loop verified end-to-end through the UI: create agent → submit prompt → events stream → "SMOKE LOOP COMPLETE" rendered correctly → FINISHED status → run appears in `/runs` history with tokens → `/usage` totals roll up. Full ledger in `docs/POST_BUILD_REVIEW.md`. OQ-06 (assistant delta vs snapshot) now confirmed: per-message deltas. |
 | 16 | Desktop App + Workspace Selection | ✅ complete | Electron main process at `apps/desktop/` boots Fastify in-process via the new `apps/server/src/programmatic.ts`. Origin policy + WS upgrade accept both the dev Vite origin and the `app://harness` custom protocol when `HARNESS_DESKTOP=1`. New `app.activeWorkspaceId` setting + GET/PUT `/api/workspace-allowlist/active` endpoints; `useActiveWorkspace` + `useWorkspacePicker` hooks wire the native folder dialog (or `window.prompt` browser fallback) through the existing allowlist add path. `WorkspaceRequiredModal` blocks the shell until a workspace is chosen. Native menu bar with ⌘O Open Workspace, ⌘N New Agent, ⌘J Toggle Code Pane, ⌘, Preferences. Window state persisted to `userData/window-state.json`. Mockup remnants stripped from Titlebar (fake `cinder/api-gateway` crumb + `feat/pagination… +184 −72` branch slot + `12m 04s` timer pill), RightPane (synthetic `no-file-open` tab + breadcrumb), RightTabs (`Placeholder`), and Statusbar (unconditional `⌘. cancel` slot now context-sensitive). `pnpm typecheck && pnpm lint && pnpm test` all green: 256 server tests (including 2 new active-workspace route tests), 69 web tests, 6 plugin tests, 2 shared tests, 11 scripts tests. |
 | 17 | Cursor-style Shell Redesign + Attachments | ✅ complete | Titlebar reworked into a Cursor-style toolbar: left rail-collapse toggle, Diff/Files/Terminal/Browser surface toggles (Diff = real code-edit preview; others honest "not yet available" placeholders), `+` new-agent, right-pane collapse; workspace crumb removed from the top. New `ToolbarIcons` stroke-icon set (no new dep). `ui-store` gains `railHidden` + `rightPanelTab`; grid collapses the left rail. SessionsRail rebuilt: New Agent action, search, **workspaces as collapsible groups with chats nested by `run.workspaceId`** (+ Unassigned group), Open Workspace, per-run delete. Runs now carry `workspace_id` (migration `0002`, tagged with the active workspace at creation, surfaced on `RunSummary`). Composer gains a `+` attach button, drag-and-drop, attachment chips, and a centered "new session" hero when the right pane is collapsed on a fresh session. **Image attachment pipeline** (ledger OQ-23): `POST /api/runs` accepts `images: SdkImage[]` → `startRun` → `RunController` → `agent.send(SDKUserMessage{text,images})`; non-image files embedded as `@path`/name references. Coexists with a concurrent model-dropdown change (Composer model `Select`, `selectedModelId`). `pnpm typecheck && pnpm lint && pnpm test` all green: 262 server tests (+1 image-attachment test), 93 web tests, 2 shared tests, 11 scripts tests. |
-| 18 | Embedded Browser Pane (WebContentsView + built-in MCP) | 🟡 in progress | **Milestone 1 — manual driving — complete & user-verified (browser fully functional).** Electron `WebContentsView` browser in the right-pane Browser tab, one isolated `persist:agent-<id>` session per agent (+ a standalone `manual` session so the tab works as a browser without an agent), driven manually (URL bar, back/fwd/reload/stop). Built-in browser MCP server + agent control + action visualization + console/network drawers + replay are **Milestone 2** (in progress). See the Phase 18 section below. |
+| 18 | Embedded Browser Pane (WebContentsView + built-in MCP) | 🟡 in progress |
+| 19 | Execution Modes, Git Status, and Chat UX | ✅ complete | Three-mode execution system (Ask/Agent/YOLO), git branch+dirty in statusbar, code block copy+apply buttons, session rename, Cmd+N new session, FTS run search. Migration 0003, 7 new shared schemas, 4 new server routes, 7 new frontend components/hooks. 431 tests (282 server, 122 web, 10 shared, 6 eslint, 11 scripts). | **Milestone 1 — manual driving — complete & user-verified (browser fully functional).** Electron `WebContentsView` browser in the right-pane Browser tab, one isolated `persist:agent-<id>` session per agent (+ a standalone `manual` session so the tab works as a browser without an agent), driven manually (URL bar, back/fwd/reload/stop). Built-in browser MCP server + agent control + action visualization + console/network drawers + replay are **Milestone 2** (in progress). See the Phase 18 section below. |
+
+---
+
+## Phase 19 Outcomes — Execution Modes, Git Status, and Chat UX Quick Wins
+
+### Summary
+
+Added seven features that transform the harness from a raw SDK wrapper into a
+mode-aware agent interface with execution controls matching Cursor parity.
+
+### Features delivered
+
+1. **Execution mode system (Ask / Agent / YOLO)** — Three-pill `ModeToggle`
+   segmented control in the Composer. Per-agent `execution_mode` column
+   persisted via `PATCH /api/agents/:agentId`. Ask mode prepends a read-only
+   instruction to the SDK prompt. YOLO mode logs a warning since OQ-10
+   (approval auto-resolve) is still unresolved in `@cursor/sdk@1.0.13`.
+   Default mode (`app.defaultExecutionMode`) in settings seed.
+
+2. **Git status in statusbar** — `GET /api/git/status` runs `git rev-parse`,
+   `git status --porcelain`, `git rev-list --count` with 5s timeouts and 10s
+   in-memory cache. `useGitStatus` hook polls every 30s. Statusbar shows
+   branch name, dirty dot, ahead/behind badges.
+
+3. **Code block copy button** — `useCopyToClipboard` hook + `CodeBlock`
+   component extracted from `MarkdownBlockView`. Clipboard icon overlaid on
+   hover, checkmark feedback for 2s.
+
+4. **Code block "Apply to File"** — `POST /api/files/write` with realpath
+   traversal guard (prevents `../../etc/passwd`). Filename parsed from code
+   block info string. Apply button shown when filename is present.
+
+5. **Session rename** — `runs.name` column (migration 0003). Auto-generated
+   from first 60 chars of prompt on creation. `PATCH /api/runs/:runId` for
+   rename. SessionsRail shows `name ?? promptPreview`, double-click to edit.
+
+6. **Cmd+N new session** — Keyboard shortcut clears the active run. Desktop
+   menu updated from "New Agent" to "New Session" with the same accelerator.
+
+7. **Full-text search on Run History** — FTS5 virtual table `runs_fts` with
+   triggers (insert/update/delete + backfill). `GET /api/runs/search?q=`
+   returns `snippet()` highlighted matches. `useRunSearch` hook with 300ms
+   debounce. Search input at the top of the Run History page.
+
+### Schema changes
+
+- Migration `0003_execution_modes_and_ux.sql`:
+  - `ALTER TABLE agents ADD COLUMN execution_mode` (ask/agent/yolo, default 'agent')
+  - `ALTER TABLE runs ADD COLUMN execution_mode` (ask/agent/yolo, default 'agent')
+  - `ALTER TABLE runs ADD COLUMN name TEXT`
+  - `CREATE VIRTUAL TABLE runs_fts USING fts5(...)` + 4 triggers + backfill
+- Column name is `execution_mode` (not `mode`) because `mode` already stores
+  the agent deployment mode (local/cloud).
+
+### Files created
+
+Server:
+- `apps/server/src/db/migrations/0003_execution_modes_and_ux.sql`
+- `apps/server/src/routes/git.routes.ts`
+- `apps/server/src/routes/files.routes.ts`
+
+Web:
+- `apps/web/src/components/ModeToggle.tsx`
+- `apps/web/src/hooks/useCopyToClipboard.ts`
+- `apps/web/src/hooks/useGitStatus.ts`
+- `apps/web/src/hooks/useRunSearch.ts`
+
+### Files modified (key changes)
+
+Shared:
+- `packages/shared/src/models.ts` — `executionModeSchema` enum
+- `packages/shared/src/domain.ts` — `executionMode` on agent/run row schemas, `name` on run row
+- `packages/shared/src/rest-contracts.ts` — 7 new schemas (git status, file write, run search, run patch, execution mode on agent/run/settings)
+- `packages/shared/src/index.ts` — barrel exports
+
+Server:
+- `apps/server/src/db/repositories/agents.repo.ts` — `execution_mode` column + `updateExecutionMode`
+- `apps/server/src/db/repositories/runs.repo.ts` — `execution_mode` + `name` columns, `updateName`, `search`
+- `apps/server/src/sdk/agent-runtime.ts` — ask-mode prompt prefix, auto-name, YOLO warning
+- `apps/server/src/routes/runs.routes.ts` — PATCH rename, GET search, name/executionMode on summaries
+- `apps/server/src/routes/agents.routes.ts` — PATCH executionMode
+- `apps/server/src/services/settings.service.ts` — `defaultExecutionMode`
+- `apps/server/src/db/seed.ts` — `app.defaultExecutionMode` default
+- `apps/server/src/routes/index.ts` — git + files route registration
+- `apps/server/src/app.ts` — route deps wiring
+
+Web:
+- `apps/web/src/components/shell/Composer.tsx` — ModeToggle integration
+- `apps/web/src/components/shell/CenterPane.tsx` — executionMode prop passthrough
+- `apps/web/src/components/shell/Statusbar.tsx` — git status section
+- `apps/web/src/components/shell/SessionsRail.tsx` — name display + rename
+- `apps/web/src/components/streaming/MarkdownBlockView.tsx` — CodeBlock with copy/apply
+- `apps/web/src/pages/RunHistory.tsx` — search input + results
+- `apps/web/src/app/AppShell.tsx` — execution mode + git status wiring
+- `apps/desktop/src/menu.ts` — "New Session" (was "New Agent")
+
+### Commands run and results
+
+- `pnpm typecheck` — all 5 workspaces clean
+- `pnpm lint` — clean
+- `pnpm test` — 431 tests pass: shared 10, eslint-plugin 6, web 122, server 282, scripts 11
+- `pnpm build:desktop` — success, installed to `/Applications/Cursor SDK Agent Harness.app`
+
+### Spec deviation
+
+The phase prompt specified `mode` as the column name for execution modes, but
+agents and runs already have a `mode` column storing the deployment mode
+(local/cloud). Used `execution_mode` instead to avoid a column name collision.
+The TypeScript type is `executionMode: ExecutionMode` matching the new column.
+
+### Next phase
+
+Phase 20 — Context Intelligence: @-mentions, rules system, codebase search.
+Prompt file: `20_CONTEXT_INTELLIGENCE_AND_RULES.md`.
 
 ---
 

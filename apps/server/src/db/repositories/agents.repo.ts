@@ -5,6 +5,7 @@ import type {
   AgentRow,
   AgentStatus,
   CloudAgentOptions,
+  ExecutionMode,
   SettingSource,
 } from "@harness/shared";
 import {
@@ -21,6 +22,7 @@ export interface CreateAgentInput {
   name: string;
   status: AgentStatus;
   mode: AgentMode;
+  executionMode?: ExecutionMode;
   modelId: string;
   cwd?: ReadonlyArray<string> | null;
   settingSources?: ReadonlyArray<SettingSource> | null;
@@ -35,6 +37,7 @@ interface AgentDbRow {
   name: string;
   status: string;
   mode: string;
+  execution_mode: string;
   model_id: string;
   cwd_json: string | null;
   setting_sources_json: string | null;
@@ -56,6 +59,7 @@ function rowToDomain(row: AgentDbRow): AgentRow {
     name: row.name,
     status: row.status as AgentStatus,
     mode: row.mode as AgentMode,
+    executionMode: row.execution_mode as ExecutionMode,
     modelId: row.model_id,
     cwd: parseJsonOrNull<string[]>(row.cwd_json),
     settingSources: parseJsonOrNull<SettingSource[]>(row.setting_sources_json),
@@ -82,12 +86,12 @@ export class AgentsRepo {
     this.raw
       .prepare(
         `INSERT INTO agents (
-            id, name, status, mode, model_id,
+            id, name, status, mode, execution_mode, model_id,
             cwd_json, setting_sources_json, sandbox_enabled,
             cloud_options_json, mcp_server_ids_json, subagent_definition_ids_json,
             created_at, updated_at
           ) VALUES (
-            @id, @name, @status, @mode, @model_id,
+            @id, @name, @status, @mode, @execution_mode, @model_id,
             @cwd_json, @setting_sources_json, @sandbox_enabled,
             @cloud_options_json, @mcp_server_ids_json, @subagent_definition_ids_json,
             @created_at, @updated_at
@@ -98,6 +102,7 @@ export class AgentsRepo {
         name: input.name,
         status: input.status,
         mode: input.mode,
+        execution_mode: input.executionMode ?? "agent",
         model_id: input.modelId,
         cwd_json: stringifyOrNull(input.cwd ?? null),
         setting_sources_json: stringifyOrNull(input.settingSources ?? null),
@@ -156,6 +161,17 @@ export class AgentsRepo {
           WHERE id = ?`,
       )
       .run(iso, iso, id);
+  }
+
+  updateExecutionMode(id: string, executionMode: ExecutionMode): void {
+    this.raw
+      .prepare(
+        `UPDATE agents
+            SET execution_mode = ?,
+                updated_at = ?
+          WHERE id = ?`,
+      )
+      .run(executionMode, isoNow(), id);
   }
 
   terminate(id: string): void {

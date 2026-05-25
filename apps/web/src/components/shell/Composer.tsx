@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import {
   MODEL_LABELS,
   type AgentSummary,
+  type ExecutionMode,
   type ModelId,
   type SdkImage,
 } from "@harness/shared";
@@ -10,6 +11,7 @@ import { useErrorReporter } from "../../hooks/useErrorReporter.js";
 import { useSpeechToText } from "../../hooks/useSpeechToText.js";
 import { cn } from "../../lib/cn.js";
 import { Select, type SelectOption } from "../ui/Select.js";
+import { ModeToggle } from "../ModeToggle.js";
 import { ArrowUpIcon, MicIcon, PlusIcon, SparkIcon, XIcon } from "./ToolbarIcons.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import {
@@ -30,6 +32,10 @@ export interface ComposerProps {
   onSubmit: (input: { prompt: string; agentId: string; images?: SdkImage[] }) => Promise<string>;
   /** Centered "new session" presentation when the chat is empty and the right pane is collapsed. */
   heroMode?: boolean;
+  /** Current execution mode (ask / agent / yolo). */
+  executionMode?: ExecutionMode | undefined;
+  /** Callback when the user changes the execution mode via the ModeToggle. */
+  onExecutionModeChange?: ((mode: ExecutionMode) => void) | undefined;
 }
 
 /**
@@ -37,7 +43,7 @@ export interface ComposerProps {
  * Submits via the agent-stream hook; on submit the parent's `onSubmit`
  * is responsible for setting the active run id (it returns the runId).
  */
-export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerProps) {
+export function Composer({ activeAgent, onSubmit, heroMode = false, executionMode, onExecutionModeChange }: ComposerProps) {
   const draft = useUiStore((s) => s.composerDraft);
   const setDraft = useUiStore((s) => s.setComposerDraft);
   const selectedModelId = useUiStore((s) => s.selectedModelId);
@@ -257,6 +263,13 @@ export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerPr
           >
             <PlusIcon className="size-4" />
           </button>
+          {executionMode && onExecutionModeChange ? (
+            <ModeToggle
+              value={executionMode}
+              onChange={onExecutionModeChange}
+              disabled={busy}
+            />
+          ) : null}
           <Select
             value={selectedModelId}
             options={MODEL_OPTIONS}
