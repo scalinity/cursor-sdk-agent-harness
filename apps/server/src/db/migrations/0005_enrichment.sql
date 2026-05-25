@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS docs_sources (
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending', 'crawling', 'indexed', 'error')),
   page_count INTEGER NOT NULL DEFAULT 0,
-  max_pages INTEGER NOT NULL DEFAULT 100,
   last_crawled_at TEXT,
   error_message TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
