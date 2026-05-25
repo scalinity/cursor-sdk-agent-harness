@@ -7,122 +7,148 @@ import {
 } from "@huggingface/transformers";
 
 /**
- * Whisper speech-to-text, running entirely on-device inside this dedicated
- * worker. Two reasons it lives off the main thread:
- *  - inference (and the one-time model load) would otherwise block the UI;
- *  - it keeps the heavy `@huggingface/transformers` graph out of the main
- *    bundle — Vite emits this file as a separate chunk that is only fetched
- *    when the user first records.
+ * Whisper speech-to-text in a dedicated worker. Inference and the one-time model
+ * load run off the main thread, and Vite emits this as a separate chunk fetched
+ * only when the user first records.
  *
- * `allowLocalModels = false`: we don't ship the weights. The model is fetched
- * from the HF hub on first use, then served from the browser cache (offline
- * thereafter — no audio or text ever leaves the machine).
+ * Primary path is WebGPU (the desktop shell's `enable-unsafe-webgpu` switch
+ * exposes `navigator.gpu` to this worker) running large-v3-turbo — the highest-
+ * fidelity model that's practical on-device and ~10x faster than WASM on an
+ * Apple GPU. If WebGPU is unavailable the worker falls back to a small WASM
+ * model so dictation still works (slower, lower fidelity).
+ *
+ * `allowLocalModels = false`: weights are fetched from the HF hub on first use
+ * then served from the browser cache (offline thereafter — no audio or text
+ * ever leaves the machine).
  *
  * `numThreads = 1`: the packaged renderer's `app://harness` origin is not
- * cross-origin-isolated, so `SharedArrayBuffer` (multi-threaded WASM) is
- * unavailable. Pinning to one thread avoids ONNX Runtime probing for it and
- * logging a fallback warning on every load.
+ * cross-origin-isolated, so multi-threaded WASM (SharedArrayBuffer) is
+ * unavailable; pinning to one thread avoids a probe + fallback warning.
  */
 env.allowLocalModels = false;
 if (env.backends?.onnx?.wasm) {
   env.backends.onnx.wasm.numThreads = 1;
 }
 
-// English-only `tiny` model in full precision (fp32).
-//
-// Why fp32, not the smaller q8: the 8-bit `decoder_model_merged` export
-// contains `MatMulNBits` nodes that the WASM build of onnxruntime-web bundled
-// with @huggingface/transformers@4.2.0 cannot deserialize — session creation
-// aborts with "TransposeDQWeightsForMatMulNBits Missing required scale:
-// model.decoder.embed_tokens.weight_merged_0_scale". That was the "couldn't
-// download the model" error: the weights downloaded fine; *loading* them threw.
-// fp32 has no quantized matmuls, so the session always builds.
-//
-// `base.en` (not tiny): a clear accuracy jump for dictation — tiny.en's output
-// was too rough to be useful. The cost is a larger one-time fp32 download
-// (~290 MB) and heavier passes, which is why we prefer the WebGPU backend below
-// (≈10x WASM): on WebGPU, base stays fast enough for the live ~1s re-transcribe
-// cadence (see useSpeechToText). Without WebGPU it falls back to WASM (slower
-// interim passes, but the on-stop final pass is still accurate).
-const MODEL_ID = "Xenova/whisper-base.en";
+// Highest-fidelity on-device model. Multilingual, but used English-only here
+// (language is forced below). Encoder fp16 preserves acoustic fidelity; the
+// large decoder is q4f16 to cut the download (~600-800 MB) and VRAM while
+// staying fast on WebGPU — turbo is robust to 4-bit. Switch the decoder to
+// "fp16" for absolute-max fidelity at a ~1.5 GB download.
+const WEBGPU_MODEL = "onnx-community/whisper-large-v3-turbo";
 
-// Prefer WebGPU when the renderer exposes it; the WASM backend is the fallback.
-const PREFER_WEBGPU = typeof navigator !== "undefined" && "gpu" in navigator;
+// Reliable-everywhere fallback when there's no GPU. base.en in fp32 avoids the
+// MatMulNBits/WASM session-creation bug that the quantized exports trip.
+const WASM_MODEL = "Xenova/whisper-base.en";
 
 /** Main thread → worker. */
 export interface WhisperTranscribeRequest {
   readonly type: "transcribe";
   /** Mono PCM at 16 kHz — the sample rate Whisper expects. */
   readonly audio: Float32Array;
+  /** Monotonic id of the phrase this audio belongs to (see useSpeechToText). */
+  readonly phraseId: number;
   /**
-   * True only for the pass fired when recording stops: its result is the
-   * authoritative transcript and the signal that dictation is complete. False
-   * for the interim passes that run while the user is still speaking.
+   * True for the pass fired when the phrase ends (a pause): its result is
+   * committed permanently. False for the interim passes that refine the phrase
+   * live while it is still being spoken.
    */
   readonly final: boolean;
 }
 
-/** Worker → main thread. `final` echoes the request that produced it. */
+/** Worker → main thread. `phraseId`/`final` echo the request that produced it. */
 export type WhisperResponse =
   | { readonly type: "progress"; readonly progress: number }
-  // Streamed mid-inference: the transcript decoded so far in the current pass.
-  | { readonly type: "partial"; readonly text: string; readonly final: boolean }
-  | { readonly type: "result"; readonly text: string; readonly final: boolean }
-  | { readonly type: "error"; readonly message: string; readonly final: boolean };
+  | {
+      readonly type: "partial";
+      readonly text: string;
+      readonly phraseId: number;
+      readonly final: boolean;
+    }
+  | {
+      readonly type: "result";
+      readonly text: string;
+      readonly phraseId: number;
+      readonly final: boolean;
+    }
+  | {
+      readonly type: "error";
+      readonly message: string;
+      readonly phraseId: number;
+      readonly final: boolean;
+    };
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
-function buildPipeline(device: "webgpu" | "wasm"): Promise<AutomaticSpeechRecognitionPipeline> {
-  return pipeline("automatic-speech-recognition", MODEL_ID, {
-    dtype: "fp32",
-    device,
-    progress_callback: (info: unknown) => {
-      const progress = (info as { progress?: number }).progress;
-      if (typeof progress === "number" && Number.isFinite(progress)) {
-        ctx.postMessage({ type: "progress", progress } satisfies WhisperResponse);
-      }
-    },
-  });
+function postProgress(info: unknown): void {
+  const progress = (info as { progress?: number }).progress;
+  if (typeof progress === "number" && Number.isFinite(progress)) {
+    ctx.postMessage({ type: "progress", progress } satisfies WhisperResponse);
+  }
 }
 
 let asrPromise: Promise<AutomaticSpeechRecognitionPipeline> | null = null;
 function loadAsr(): Promise<AutomaticSpeechRecognitionPipeline> {
-  asrPromise ??= PREFER_WEBGPU
-    ? buildPipeline("webgpu").catch((err: unknown) => {
-        // WebGPU is present but unusable (driver/adapter failure): fall back to
-        // the always-available WASM backend rather than failing dictation.
-        console.warn("[whisper] WebGPU load failed; falling back to WASM:", err);
-        return buildPipeline("wasm");
-      })
-    : buildPipeline("wasm");
+  asrPromise ??= (async () => {
+    const hasWebGPU =
+      typeof navigator !== "undefined" && (navigator as { gpu?: unknown }).gpu != null;
+    if (hasWebGPU) {
+      try {
+        return await pipeline("automatic-speech-recognition", WEBGPU_MODEL, {
+          device: "webgpu",
+          dtype: { encoder_model: "fp16", decoder_model_merged: "q4f16" },
+          progress_callback: postProgress,
+        });
+      } catch {
+        // WebGPU is present but the GPU model failed to build — fall through to
+        // the WASM model rather than leaving dictation broken.
+      }
+    }
+    return pipeline("automatic-speech-recognition", WASM_MODEL, {
+      device: "wasm",
+      dtype: "fp32",
+      progress_callback: postProgress,
+    });
+  })();
   return asrPromise;
 }
 
-// One inference at a time (the worker is single-threaded). While a pass runs,
-// only the newest pending request is retained — interim snapshots that arrive
-// mid-pass supersede each other, so a backlog never builds and the live view
-// always reflects the freshest audio. The final pass is the last request
-// enqueued (recording has stopped), so it can never be dropped.
-let pending: WhisperTranscribeRequest | null = null;
+// One inference at a time (single GPU / worker thread). Phrase-commit (`final`)
+// requests are queued FIFO and never dropped — every spoken phrase must be
+// transcribed and committed in order. Interim (refine-in-progress) requests keep
+// only the newest, since each re-transcribes the whole current phrase and
+// supersedes the previous one. Finals take priority so a commit is never delayed
+// behind interim refinement.
+const finalQueue: WhisperTranscribeRequest[] = [];
+let interimPending: WhisperTranscribeRequest | null = null;
 let running = false;
 
 ctx.addEventListener("message", (event: MessageEvent<WhisperTranscribeRequest>) => {
-  if (event.data.type !== "transcribe") return;
-  pending = event.data;
+  const req = event.data;
+  if (req.type !== "transcribe") return;
+  if (req.final) finalQueue.push(req);
+  else interimPending = req;
   void pump();
 });
 
+function nextRequest(): WhisperTranscribeRequest | null {
+  const final = finalQueue.shift();
+  if (final) return final;
+  const interim = interimPending;
+  interimPending = null;
+  return interim;
+}
+
 async function pump(): Promise<void> {
   if (running) return;
-  const req = pending;
-  pending = null;
+  const req = nextRequest();
   if (!req) return;
   running = true;
   try {
     await transcribe(req);
   } finally {
     running = false;
-    if (pending) void pump();
+    if (finalQueue.length > 0 || interimPending) void pump();
   }
 }
 
@@ -132,11 +158,12 @@ async function transcribe(req: WhisperTranscribeRequest): Promise<void> {
     asr = await loadAsr();
   } catch (err) {
     // A load failure leaves the pipeline unusable; drop the cached promise so a
-    // later recording can retry the download/compile from scratch. Tag it so
-    // the main thread can surface a connection-oriented message.
+    // later phrase can retry. Tag it so the main thread can show a friendly
+    // connection-oriented message.
     asrPromise = null;
     ctx.postMessage({
       type: "error",
+      phraseId: req.phraseId,
       final: req.final,
       message: `model-load: ${describe(err)}`,
     } satisfies WhisperResponse);
@@ -155,6 +182,7 @@ async function transcribe(req: WhisperTranscribeRequest): Promise<void> {
           streamed += text;
           ctx.postMessage({
             type: "partial",
+            phraseId: req.phraseId,
             final: req.final,
             text: streamed.trim(),
           } satisfies WhisperResponse);
@@ -162,22 +190,26 @@ async function transcribe(req: WhisperTranscribeRequest): Promise<void> {
       },
     );
 
-    // No chunking: whisper's native 30 s window covers a dictation utterance,
-    // and a single pass keeps the streamed partials clean (chunk overlap would
-    // duplicate text in the live view). Speech past ~30 s in one unbroken take
-    // is truncated — acceptable for a composer dictation box.
-    const output = await asr(req.audio, { streamer });
+    // Force English so multilingual turbo doesn't language-hop between short
+    // phrases. Each request is a single phrase (< 30 s), so no chunking needed.
+    const output = await asr(req.audio, {
+      language: "english",
+      task: "transcribe",
+      streamer,
+    });
     const text = Array.isArray(output)
       ? output.map((chunk) => chunk.text).join(" ")
       : output.text;
     ctx.postMessage({
       type: "result",
+      phraseId: req.phraseId,
       final: req.final,
       text: text.trim(),
     } satisfies WhisperResponse);
   } catch (err) {
     ctx.postMessage({
       type: "error",
+      phraseId: req.phraseId,
       final: req.final,
       message: describe(err),
     } satisfies WhisperResponse);

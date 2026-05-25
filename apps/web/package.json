@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "dev": "node scripts/copy-vad-assets.mjs && vite",
+    "build": "node scripts/copy-vad-assets.mjs && tsc -p tsconfig.json --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:perf": "vitest run --config vitest.perf.config.ts"
+    "test:perf": "vitest run --config vitest.perf.config.ts",
+    "vad:assets": "node scripts/copy-vad-assets.mjs"
   },
   "dependencies": {
     "@harness/shared": "workspace:*",
@@ -20,6 +21,7 @@
     "@lezer/json": "1.0.3",
     "@lezer/markdown": "1.6.3",
     "@lezer/python": "1.1.18",
+    "@ricky0123/vad-web": "^0.0.30",
     "@tanstack/react-virtual": "3.13.25",
     "clsx": "2.1.1",
     "react": "19.0.0",

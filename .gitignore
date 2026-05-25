@@ -53,3 +53,6 @@ phase*-*.png
 # Temporary
 .tmp/
 *.tmp
+
+# VAD (Silero) runtime assets — copied from node_modules by scripts/copy-vad-assets.mjs
+apps/web/public/vad/

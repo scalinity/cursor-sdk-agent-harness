@@ -1,28 +1,28 @@
 /**
- * useSpeechToText — live, on-device dictation for the composer. A Whisper model
- * in `whisper-worker.ts` transcribes the microphone as the user speaks: the
- * take is re-transcribed on a short cadence so words land in the composer live,
- * then a final pass on stop commits the authoritative transcript.
+ * useSpeechToText — live, on-device dictation for the composer, gated by voice
+ * activity so it neither erases itself nor transcribes room noise.
  *
- * Why a hook (and not inline in the component): it owns four pieces of
- * imperative, non-React state — a `MediaStream`, a `MediaRecorder`, the Whisper
- * `Worker`, and the recorded chunks — plus their teardown. Per the repo's
- * effects policy those belong in a hook, where a single `useMountEffect`
- * cleanup tears everything down on unmount.
+ * How it works: Silero VAD (`@ricky0123/vad-web`) listens to the mic and splits
+ * speech into phrases — silence, keyboard clicks, and other non-speech never
+ * reach the model. Each phrase streams in live as it's spoken (interim passes,
+ * refined word by word) and is *committed* permanently when you pause. Committed
+ * text is never re-decoded, so finished phrases can never rewrite themselves;
+ * only the phrase you're currently speaking updates. Whisper large-v3-turbo runs
+ * on the GPU (see whisper-worker) for fidelity.
  *
- * The pipeline, per pass: MediaRecorder chunks (a timeslice flushes one every
- * INTERIM_MS) → cumulative Blob → decode + resample to mono 16 kHz Float32 →
- * transfer to the worker → streamed partial text + a final transcript. Each
- * pass re-transcribes the whole take from the start, so a result *replaces* the
- * dictation region rather than appending — `onInterimTranscript` always carries
- * the latest full take.
+ * Why a hook (and not inline in the component): it owns imperative, non-React
+ * state — the VAD instance, the Whisper `Worker`, the in-progress audio buffer,
+ * and the committed/interim transcript — plus their teardown. Per the repo's
+ * effects policy that belongs in a hook, where a single `useMountEffect` cleanup
+ * tears everything down on unmount.
  *
  * Feature detection (`supported`) is deliberate: in the packaged Electron app
- * `getUserMedia`/`MediaRecorder`/`Worker` all exist, but under jsdom (tests)
- * they don't, so the hook degrades to an inert, disabled control rather than
- * throwing on construction.
+ * `getUserMedia`/`AudioContext`/`Worker` all exist, but under jsdom (tests) they
+ * don't, so the hook degrades to an inert, disabled control rather than throwing
+ * on construction.
  */
 import { useCallback, useRef, useState } from "react";
+import type { MicVAD } from "@ricky0123/vad-web";
 import { useErrorReporter } from "./useErrorReporter.js";
 import { useMountEffect } from "./useMountEffect.js";
 import type {
@@ -38,13 +38,11 @@ export type SpeechToTextStatus =
 
 export interface UseSpeechToTextOptions {
   /**
-   * Latest transcript of the in-progress take — fired repeatedly while
-   * recording (and during the final pass). Replaces the dictation region, since
-   * each pass re-transcribes from the start.
+   * The full dictation transcript so far — committed phrases plus the phrase
+   * currently being spoken. Fired live as you talk and again on each commit.
+   * The composer prepends whatever was typed before dictation began.
    */
-  onInterimTranscript: (text: string) => void;
-  /** Authoritative transcript once recording stops; commits the dictation. */
-  onFinalTranscript: (text: string) => void;
+  onTranscript: (text: string) => void;
 }
 
 export interface SpeechToText {
@@ -52,42 +50,51 @@ export interface SpeechToText {
   readonly supported: boolean;
   readonly status: SpeechToTextStatus;
   readonly isRecording: boolean;
-  /** 0–100 while the model downloads on first use; null otherwise. */
+  /** 0–100 while the model downloads/compiles on first use; null otherwise. */
   readonly modelProgress: number | null;
-  /** Start recording when idle, stop+finalize when recording. */
+  /** Start listening when idle, stop+finalize when recording. */
   readonly toggle: () => void;
 }
 
-// MediaRecorder timeslice: flush a chunk (and kick an interim transcription)
-// roughly once a second. Fast enough to feel live without spamming the worker —
-// and the worker coalesces anything that piles up while a pass is running.
-const INTERIM_MS = 1000;
+// Worklet + Silero model are self-hosted under public/vad/ (copied from
+// node_modules by scripts/copy-vad-assets.mjs) so they load from the app's own
+// origin offline. onnxruntime-web's WASM is bundled by Vite and loaded from
+// there, so it is intentionally not part of baseAssetPath.
+const VAD_ASSET_PATH = "/vad/";
 
-// Ignore sub-0.1s audio (an accidental tap) — nothing meaningful to transcribe.
+// Refine the in-progress phrase at most this often — frequent enough to feel
+// live, sparse enough not to thrash the GPU (the worker also coalesces).
+const INTERIM_INTERVAL_MS = 600;
+
+// Ignore sub-0.1s audio (an accidental blip) — nothing meaningful to transcribe.
 const MIN_SAMPLES = 1600;
 
 function detectSupport(): boolean {
   return (
     typeof navigator !== "undefined" &&
     typeof navigator.mediaDevices?.getUserMedia === "function" &&
-    typeof MediaRecorder !== "undefined" &&
+    typeof AudioContext !== "undefined" &&
     typeof Worker !== "undefined" &&
-    typeof AudioContext !== "undefined"
+    typeof WebAssembly !== "undefined"
   );
 }
 
-/** Decode recorded audio to the mono, 16 kHz Float32 PCM Whisper expects. */
-async function decodeToMono16k(blob: Blob): Promise<Float32Array> {
-  // Passing sampleRate to the context makes decodeAudioData resample for us.
-  const audioContext = new AudioContext({ sampleRate: 16000 });
-  try {
-    const decoded = await audioContext.decodeAudioData(await blob.arrayBuffer());
-    // Copy channel 0 into a standalone buffer so we can transfer (not clone)
-    // it to the worker; getChannelData returns a view onto the AudioBuffer.
-    return new Float32Array(decoded.getChannelData(0));
-  } finally {
-    void audioContext.close();
+/** Join non-empty transcript fragments with single spaces. */
+function joinText(...parts: readonly string[]): string {
+  return parts.filter((p) => p.length > 0).join(" ");
+}
+
+/** Flatten accumulated VAD frames into one contiguous PCM buffer. */
+function concatFrames(frames: readonly Float32Array[]): Float32Array {
+  let length = 0;
+  for (const frame of frames) length += frame.length;
+  const out = new Float32Array(length);
+  let offset = 0;
+  for (const frame of frames) {
+    out.set(frame, offset);
+    offset += frame.length;
   }
+  return out;
 }
 
 /** Map a worker error (which may be raw ONNX Runtime noise) to friendly text. */
@@ -98,29 +105,45 @@ function friendlyError(message: string): string {
   return `Dictation failed: ${message}`;
 }
 
-export function useSpeechToText({
-  onInterimTranscript,
-  onFinalTranscript,
-}: UseSpeechToTextOptions): SpeechToText {
+export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): SpeechToText {
   const supported = detectSupport();
   const [status, setStatus] = useState<SpeechToTextStatus>("idle");
   const [modelProgress, setModelProgress] = useState<number | null>(null);
   const { report } = useErrorReporter("speech-to-text");
 
-  // Keep the latest callbacks without re-subscribing the worker each render.
-  const onInterimRef = useRef(onInterimTranscript);
-  onInterimRef.current = onInterimTranscript;
-  const onFinalRef = useRef(onFinalTranscript);
-  onFinalRef.current = onFinalTranscript;
+  // Keep the latest callback without re-subscribing the worker each render.
+  const onTranscriptRef = useRef(onTranscript);
+  onTranscriptRef.current = onTranscript;
 
   const workerRef = useRef<Worker | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  // Guards against overlapping interim decodes (decode is async). The worker
-  // already coalesces requests, so skipping a tick here is harmless — the next
-  // dataavailable, or the final pass, covers the dropped window.
-  const interimDecodingRef = useRef(false);
+  const vadRef = useRef<MicVAD | null>(null);
+
+  // Transcript state. `committed` is the join of finalized phrases and never
+  // changes once written; `interim` is the live text of the phrase in progress.
+  const committedRef = useRef("");
+  const interimRef = useRef("");
+
+  // Phrase bookkeeping. `activePhraseId` is the id of the phrase currently being
+  // spoken (null between phrases); interim results for any other id are stale and
+  // ignored. `pendingFinals` counts commit passes still in flight so a stop can
+  // wait for them. `stopping` flips the status to idle once they drain.
+  const phraseSeqRef = useRef(0);
+  const activePhraseIdRef = useRef<number | null>(null);
+  const segmentFramesRef = useRef<Float32Array[]>([]);
+  const lastInterimAtRef = useRef(0);
+  const pendingFinalsRef = useRef(0);
+  const stoppingRef = useRef(false);
+
+  const emit = useCallback(() => {
+    onTranscriptRef.current(joinText(committedRef.current, interimRef.current));
+  }, []);
+
+  const finishStopIfDrained = useCallback(() => {
+    if (stoppingRef.current && pendingFinalsRef.current <= 0) {
+      stoppingRef.current = false;
+      setStatus("idle");
+    }
+  }, []);
 
   const ensureWorker = useCallback((): Worker => {
     if (workerRef.current) return workerRef.current;
@@ -134,135 +157,176 @@ export function useSpeechToText({
           setModelProgress(Math.round(msg.progress));
           return;
         case "partial":
-          // Streamed words for the current pass — surface them live.
-          onInterimRef.current(msg.text);
+          // Live words for the phrase still being spoken; ignore anything for an
+          // already-finished phrase (a late refine arriving after its commit).
+          if (msg.phraseId === activePhraseIdRef.current) {
+            interimRef.current = msg.text;
+            emit();
+          }
           return;
         case "result":
           setModelProgress(null);
           if (msg.final) {
-            setStatus("idle");
-            if (msg.text.length > 0) onFinalRef.current(msg.text);
-          } else {
-            // An interim pass settled; recording is still in progress.
-            onInterimRef.current(msg.text);
+            // Commit the phrase permanently and clear the interim it refined.
+            if (msg.text.length > 0) {
+              committedRef.current = joinText(committedRef.current, msg.text);
+            }
+            interimRef.current = "";
+            pendingFinalsRef.current -= 1;
+            emit();
+            finishStopIfDrained();
+          } else if (msg.phraseId === activePhraseIdRef.current) {
+            interimRef.current = msg.text;
+            emit();
           }
           return;
         case "error":
           setModelProgress(null);
-          if (msg.final) setStatus("idle");
+          if (msg.final) {
+            pendingFinalsRef.current -= 1;
+            finishStopIfDrained();
+          }
           report(friendlyError(msg.message), { severity: "warn" });
           return;
       }
     });
     workerRef.current = worker;
     return worker;
-  }, [report]);
+  }, [emit, finishStopIfDrained, report]);
 
-  const stopTracks = useCallback(() => {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
-  }, []);
-
-  // Re-transcribe the take so far so partial text lands in the composer live.
-  const runInterimPass = useCallback(async (): Promise<void> => {
-    if (interimDecodingRef.current) return;
-    const chunks = chunksRef.current;
-    if (chunks.length === 0) return;
-    interimDecodingRef.current = true;
-    try {
-      const type = chunks[0]?.type ?? "audio/webm";
-      const audio = await decodeToMono16k(new Blob(chunks, { type }));
-      if (audio.length >= MIN_SAMPLES) {
-        ensureWorker().postMessage(
-          { type: "transcribe", audio, final: false } satisfies WhisperTranscribeRequest,
-          [audio.buffer],
-        );
-      }
-    } catch {
-      // A cumulative webm blob can fail to decode on a half-written trailing
-      // frame; the next tick or the final pass recovers. Don't toast the noise.
-    } finally {
-      interimDecodingRef.current = false;
-    }
-  }, [ensureWorker]);
-
-  const finalize = useCallback(async (): Promise<void> => {
-    stopTracks();
-    const chunks = chunksRef.current;
-    chunksRef.current = [];
-    recorderRef.current = null;
-    if (chunks.length === 0) {
-      setStatus("idle");
-      return;
-    }
-    setStatus("transcribing");
-    try {
-      const type = chunks[0]?.type ?? "audio/webm";
-      const audio = await decodeToMono16k(new Blob(chunks, { type }));
-      if (audio.length < MIN_SAMPLES) {
-        setStatus("idle");
-        return;
-      }
+  const sendTranscribe = useCallback(
+    (audio: Float32Array, phraseId: number, final: boolean) => {
+      if (audio.length < MIN_SAMPLES) return;
+      // `audio` is freshly allocated (concat for interim, VAD-owned slice for
+      // final), so it's safe to transfer rather than clone.
       ensureWorker().postMessage(
-        { type: "transcribe", audio, final: true } satisfies WhisperTranscribeRequest,
+        { type: "transcribe", audio, phraseId, final } satisfies WhisperTranscribeRequest,
         [audio.buffer],
       );
-    } catch (err) {
-      setStatus("idle");
-      report(err, { severity: "warn" });
-    }
-  }, [ensureWorker, report, stopTracks]);
+    },
+    [ensureWorker],
+  );
 
   const start = useCallback(async (): Promise<void> => {
     setStatus("requesting");
-    let stream: MediaStream;
+    // Reset transcript + phrase state for a fresh session.
+    committedRef.current = "";
+    interimRef.current = "";
+    phraseSeqRef.current = 0;
+    activePhraseIdRef.current = null;
+    segmentFramesRef.current = [];
+    lastInterimAtRef.current = 0;
+    pendingFinalsRef.current = 0;
+    stoppingRef.current = false;
+    setModelProgress(null);
+
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
-      setStatus("idle");
-      report("Microphone unavailable — check the app's mic permission.", {
-        severity: "warn",
+      // Lazy-load the VAD (and its ort-web) only when dictation first starts.
+      const { MicVAD } = await import("@ricky0123/vad-web");
+      const vad = await MicVAD.new({
+        baseAssetPath: VAD_ASSET_PATH,
+        model: "v5",
+        // Tuned to reject transients (keyboard clicks, short noises) and require
+        // a real pause before committing a phrase.
+        positiveSpeechThreshold: 0.6,
+        negativeSpeechThreshold: 0.4,
+        minSpeechMs: 250,
+        redemptionMs: 900,
+        preSpeechPadMs: 250,
+        // Flush the in-progress phrase as a final segment when we pause on stop.
+        submitUserSpeechOnPause: true,
+        onSpeechStart: () => {
+          phraseSeqRef.current += 1;
+          activePhraseIdRef.current = phraseSeqRef.current;
+          segmentFramesRef.current = [];
+          lastInterimAtRef.current = Date.now();
+        },
+        onFrameProcessed: (_probs, frame) => {
+          if (activePhraseIdRef.current === null) return;
+          // Copy: the VAD may reuse the frame buffer after this callback.
+          segmentFramesRef.current.push(frame.slice());
+          const now = Date.now();
+          if (now - lastInterimAtRef.current >= INTERIM_INTERVAL_MS) {
+            lastInterimAtRef.current = now;
+            sendTranscribe(
+              concatFrames(segmentFramesRef.current),
+              activePhraseIdRef.current,
+              false,
+            );
+          }
+        },
+        onSpeechEnd: (audio) => {
+          const phraseId = activePhraseIdRef.current;
+          activePhraseIdRef.current = null;
+          segmentFramesRef.current = [];
+          if (phraseId === null) return;
+          // Commit pass over the full, padded phrase. Keep the last interim
+          // visible until this result lands so the text doesn't flash empty.
+          pendingFinalsRef.current += 1;
+          sendTranscribe(audio.slice(), phraseId, true);
+        },
+        onVADMisfire: () => {
+          // Too short to be speech — discard the blip and any interim it showed.
+          activePhraseIdRef.current = null;
+          segmentFramesRef.current = [];
+          interimRef.current = "";
+          emit();
+        },
       });
-      return;
+      vadRef.current = vad;
+      // Build the worker now so its transformers chunk is fetched while the user
+      // starts speaking; the model loads lazily on the first pass.
+      ensureWorker();
+      await vad.start();
+      setStatus("recording");
+    } catch (err) {
+      setStatus("idle");
+      report(
+        "Couldn't start dictation — check the app's microphone permission.",
+        { severity: "warn" },
+      );
+      // Surface the underlying cause for debugging without a second toast.
+      console.warn("[speech-to-text] VAD start failed", err);
     }
-    streamRef.current = stream;
-    chunksRef.current = [];
-    interimDecodingRef.current = false;
-    const recorder = new MediaRecorder(stream);
-    recorderRef.current = recorder;
-    recorder.addEventListener("dataavailable", (event) => {
-      if (event.data.size === 0) return;
-      chunksRef.current.push(event.data);
-      // Transcribe everything captured so far — but only while recording. The
-      // flush that stop() emits arrives with state "inactive"; finalize() owns
-      // that buffer so we don't race it with an interim pass.
-      if (recorder.state === "recording") void runInterimPass();
-    });
-    recorder.addEventListener("stop", () => void finalize());
-    // A timeslice flushes a chunk every INTERIM_MS, driving the live passes.
-    recorder.start(INTERIM_MS);
-    // Construct the worker now so its heavy transformers chunk is fetched and
-    // parsed while the user speaks; the model itself loads lazily on pass one.
-    ensureWorker();
-    setStatus("recording");
-  }, [ensureWorker, finalize, report, runInterimPass]);
+  }, [emit, ensureWorker, report, sendTranscribe]);
+
+  const stop = useCallback(async (): Promise<void> => {
+    stoppingRef.current = true;
+    const vad = vadRef.current;
+    vadRef.current = null;
+    // pause() with submitUserSpeechOnPause flushes the in-progress phrase via
+    // onSpeechEnd (→ a final pass) before we tear the VAD down.
+    try {
+      await vad?.pause();
+    } catch {
+      /* ignore — we're tearing down anyway */
+    }
+    try {
+      await vad?.destroy();
+    } catch {
+      /* ignore */
+    }
+    if (pendingFinalsRef.current > 0) {
+      setStatus("transcribing");
+    } else {
+      stoppingRef.current = false;
+      setStatus("idle");
+    }
+  }, []);
 
   const toggle = useCallback((): void => {
     if (!supported) return;
     if (status === "recording") {
-      recorderRef.current?.stop(); // → "stop" event → finalize()
+      void stop();
     } else if (status === "idle") {
       void start();
     }
     // "requesting"/"transcribing" are transient — ignore extra clicks.
-  }, [supported, status, start]);
+  }, [supported, status, start, stop]);
 
   // Single teardown for every imperative resource the hook holds open.
   useMountEffect(() => () => {
-    if (recorderRef.current && recorderRef.current.state !== "inactive") {
-      recorderRef.current.stop();
-    }
-    streamRef.current?.getTracks().forEach((track) => track.stop());
+    void vadRef.current?.destroy();
     workerRef.current?.terminate();
   });
 

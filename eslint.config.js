@@ -67,7 +67,7 @@ export default [
     },
   },
   {
-    files: ["tooling/**/*.js", "scripts/**/*.mjs"],
+    files: ["tooling/**/*.js", "**/scripts/**/*.mjs"],
     languageOptions: {
       globals: { ...globals.node },
     },
