@@ -56,3 +56,6 @@ phase*-*.png
 
 # VAD (Silero) runtime assets — copied from node_modules by scripts/copy-vad-assets.mjs
 apps/web/public/vad/
+
+# node-gyp build venv (provisioned by apps/desktop/scripts/package-mac.mjs)
+.gyp-venv/

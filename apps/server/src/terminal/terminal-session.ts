@@ -1,0 +1,328 @@
+import { chmodSync, constants as fsConstants, statSync } from "node:fs";
+import { createRequire } from "node:module";
+import os from "node:os";
+import path from "node:path";
+import type { TerminalServerFrame } from "@harness/shared";
+
+const require = createRequire(import.meta.url);
+
+/**
+ * Minimal structural view of a node-pty process. Declared locally so the
+ * session manager stays decoupled from node-pty's types and so tests can
+ * inject a fake without loading the native addon.
+ */
+export interface PtyProcess {
+  onData(listener: (data: string) => void): unknown;
+  onExit(listener: (event: { exitCode: number; signal?: number | undefined }) => void): unknown;
+  write(data: string): void;
+  resize(cols: number, rows: number): void;
+  kill(signal?: string): void;
+}
+
+export interface SpawnPtyOptions {
+  shell: string;
+  args: string[];
+  cwd: string;
+  env: Record<string, string>;
+  cols: number;
+  rows: number;
+}
+
+export type SpawnPty = (opts: SpawnPtyOptions) => PtyProcess;
+
+/** Anything the session needs to push a frame to one attached client. */
+export interface TerminalClient {
+  send(frame: TerminalServerFrame): void;
+}
+
+export interface TerminalLogger {
+  info(obj: unknown, msg?: string): void;
+  warn(obj: unknown, msg?: string): void;
+  error(obj: unknown, msg?: string): void;
+}
+
+export interface CreateTerminalSessionOptions {
+  /**
+   * Resolves the directory the shell should start in — the active workspace
+   * (allowlist-resolved) or the user's home directory. May be async (the
+   * workspace realpath check is). Should itself fall back to home; the session
+   * additionally guards with `os.homedir()` if this rejects.
+   */
+  resolveCwd: () => string | Promise<string>;
+  logger: TerminalLogger;
+  /** Defaults to `$SHELL` or `/bin/zsh`. */
+  shell?: string;
+  /** Defaults to a login interactive shell (`-l`). */
+  shellArgs?: string[];
+  /** Injected for tests; defaults to node-pty. */
+  spawnPty?: SpawnPty;
+  /**
+   * Base environment for the child. Defaults to a scrubbed copy of
+   * `process.env` (Cursor API key removed). Injected in tests.
+   */
+  env?: Record<string, string>;
+  /** Ring-buffer cap in characters. Defaults to 256 KiB. */
+  ringBufferChars?: number;
+}
+
+const DEFAULT_RING_BUFFER_CHARS = 256 * 1024;
+const DEFAULT_COLS = 80;
+const DEFAULT_ROWS = 24;
+
+/**
+ * Owns a single long-lived PTY shared by all attached `/ws/terminal` clients
+ * (single-user harness ⇒ normally one). The PTY is spawned lazily on first
+ * attach, survives client detach (tab switch / reload), and is killed only on
+ * `dispose()` (server shutdown). A ring buffer of recent output lets a
+ * (re)attaching client restore its screen.
+ *
+ * Terminal I/O is deliberately ephemeral: it is NEVER persisted to the events
+ * table or routed through the run bus.
+ */
+export class TerminalSession {
+  private readonly opts: Required<
+    Pick<CreateTerminalSessionOptions, "resolveCwd" | "logger">
+  > & {
+    shell: string;
+    shellArgs: string[];
+    spawnPty: SpawnPty;
+    env: Record<string, string>;
+    ringBufferChars: number;
+  };
+
+  private pty: PtyProcess | null = null;
+  private starting: Promise<void> | null = null;
+  private readonly clients = new Set<TerminalClient>();
+  private cols = DEFAULT_COLS;
+  private rows = DEFAULT_ROWS;
+  private cwd = os.homedir();
+  /** Recent raw output for screen restore on reattach. */
+  private ring: string[] = [];
+  private ringLen = 0;
+  private disposed = false;
+
+  constructor(options: CreateTerminalSessionOptions) {
+    this.opts = {
+      resolveCwd: options.resolveCwd,
+      logger: options.logger,
+      shell: options.shell ?? process.env.SHELL ?? "/bin/zsh",
+      shellArgs: options.shellArgs ?? ["-l"],
+      spawnPty: options.spawnPty ?? defaultSpawnPty,
+      env: options.env ?? scrubbedEnv(),
+      ringBufferChars: options.ringBufferChars ?? DEFAULT_RING_BUFFER_CHARS,
+    };
+  }
+
+  /**
+   * Attach a client. Spawns the PTY if needed, then sends `ready` plus the
+   * buffered screen. Returns a detach function. The PTY is NOT killed on
+   * detach — it is long-lived.
+   */
+  async attach(client: TerminalClient): Promise<() => void> {
+    if (this.disposed) {
+      client.send({ type: "error", message: "Terminal is shutting down" });
+      return () => {};
+    }
+    try {
+      await this.ensureStarted();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to start shell";
+      this.opts.logger.error({ err }, "terminal: spawn failed");
+      client.send({ type: "error", message });
+      return () => {};
+    }
+    // Defer the initial frames one macrotask so a freshly-dialed socket has a
+    // turn to attach its message listener before we push (mirrors the ws
+    // heartbeat setImmediate rationale in ws-plugin). Output produced during
+    // this gap lands in the ring buffer and rides out in the replay below, so
+    // ordering stays ready → buffered screen → live.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (this.disposed) {
+      client.send({ type: "error", message: "Terminal is shutting down" });
+      return () => {};
+    }
+    this.clients.add(client);
+    client.send({ type: "ready", cols: this.cols, rows: this.rows, cwd: this.cwd });
+    if (this.ringLen > 0) {
+      client.send({ type: "data", data: this.ring.join("") });
+    }
+    return () => {
+      this.clients.delete(client);
+    };
+  }
+
+  /** Write client keystrokes to the PTY. */
+  write(data: string): void {
+    this.pty?.write(data);
+  }
+
+  /** Apply a viewport resize (last-writer-wins across clients). */
+  resize(cols: number, rows: number): void {
+    this.cols = cols;
+    this.rows = rows;
+    this.pty?.resize(cols, rows);
+  }
+
+  /** Kill the PTY and drop all clients. Idempotent. */
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.clients.clear();
+    if (this.pty) {
+      try {
+        this.pty.kill();
+      } catch {
+        // already dead
+      }
+      this.pty = null;
+    }
+    this.ring = [];
+    this.ringLen = 0;
+  }
+
+  private ensureStarted(): Promise<void> {
+    if (this.pty) return Promise.resolve();
+    if (this.starting) return this.starting;
+    this.starting = this.spawn().finally(() => {
+      this.starting = null;
+    });
+    return this.starting;
+  }
+
+  private async spawn(): Promise<void> {
+    let cwd: string;
+    try {
+      cwd = await this.opts.resolveCwd();
+    } catch (err) {
+      this.opts.logger.warn({ err }, "terminal: cwd resolution failed; using home");
+      cwd = os.homedir();
+    }
+    this.cwd = cwd;
+
+    ensureSpawnHelperExecutable(this.opts.logger);
+
+    const pty = this.opts.spawnPty({
+      shell: this.opts.shell,
+      args: this.opts.shellArgs,
+      cwd,
+      env: this.opts.env,
+      cols: this.cols,
+      rows: this.rows,
+    });
+
+    pty.onData((data) => {
+      this.appendToRing(data);
+      this.broadcast({ type: "data", data });
+    });
+    pty.onExit(({ exitCode, signal }) => {
+      this.broadcast({
+        type: "exit",
+        code: exitCode,
+        ...(signal !== undefined ? { signal } : {}),
+      });
+      // The process is gone; reset so the next attach spawns a fresh shell
+      // with a clean screen.
+      this.pty = null;
+      this.ring = [];
+      this.ringLen = 0;
+    });
+
+    this.pty = pty;
+  }
+
+  private appendToRing(data: string): void {
+    this.ring.push(data);
+    this.ringLen += data.length;
+    while (this.ringLen > this.opts.ringBufferChars && this.ring.length > 1) {
+      const dropped = this.ring.shift();
+      if (dropped === undefined) break;
+      this.ringLen -= dropped.length;
+    }
+  }
+
+  private broadcast(frame: TerminalServerFrame): void {
+    for (const client of this.clients) {
+      try {
+        client.send(frame);
+      } catch {
+        // best-effort; a dead socket is cleaned up by its close handler
+      }
+    }
+  }
+}
+
+/**
+ * Copy `process.env` into a plain string record, dropping the Cursor API key
+ * (the harness keeps it in the Keychain, so `env` inside the embedded shell
+ * must not surface it) and any undefined entries. Ensures a sane `TERM`.
+ */
+function scrubbedEnv(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    if (key === "CURSOR_API_KEY") continue;
+    out[key] = value;
+  }
+  if (!out.TERM) out.TERM = "xterm-256color";
+  if (!out.COLORTERM) out.COLORTERM = "truecolor";
+  return out;
+}
+
+/** Default node-pty-backed spawn. Lazily required so tests injecting a stub
+ * never load the native addon. */
+const defaultSpawnPty: SpawnPty = (opts) => {
+  // node-pty is CJS with a native binding; require lazily and treat as
+  // untyped at this isolated boundary (documented).
+  const nodePty = require("node-pty") as {
+    spawn(
+      file: string,
+      args: string[],
+      options: { name: string; cols: number; rows: number; cwd: string; env: Record<string, string> },
+    ): PtyProcess;
+  };
+  return nodePty.spawn(opts.shell, opts.args, {
+    name: "xterm-256color",
+    cols: opts.cols,
+    rows: opts.rows,
+    cwd: opts.cwd,
+    env: opts.env,
+  });
+};
+
+let helperChecked = false;
+
+/**
+ * node-pty forks a `spawn-helper` executable on macOS/Linux. Its prebuilt
+ * binary can land without the execute bit under pnpm's content-addressed
+ * store, which makes `posix_spawnp` fail. Best-effort: ensure +x once before
+ * the first spawn. Covers fresh installs and the packaged app alike. Runs once
+ * per process.
+ */
+function ensureSpawnHelperExecutable(logger: TerminalLogger): void {
+  if (helperChecked) return;
+  helperChecked = true;
+  if (process.platform === "win32") return;
+  try {
+    const ptyEntry = require.resolve("node-pty");
+    // .../node-pty/lib/index.js → .../node-pty
+    const pkgDir = ptyEntry.slice(0, ptyEntry.lastIndexOf(`${path.sep}lib${path.sep}`));
+    const candidates = [
+      path.join(pkgDir, "build", "Release", "spawn-helper"),
+      path.join(pkgDir, "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper"),
+    ];
+    for (const candidate of candidates) {
+      let mode: number;
+      try {
+        mode = statSync(candidate).mode;
+      } catch {
+        continue; // not this layout
+      }
+      if ((mode & fsConstants.S_IXUSR) === 0) {
+        chmodSync(candidate, 0o755);
+        logger.info({ candidate }, "terminal: set +x on node-pty spawn-helper");
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, "terminal: could not verify spawn-helper permissions");
+  }
+}

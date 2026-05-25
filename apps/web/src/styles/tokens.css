@@ -51,6 +51,32 @@
   --color-warning:           oklch(0.85 0.13 95);
   --color-warning-bg:        oklch(0.30 0.06 95);
 
+  /* ---- Color: Terminal ANSI palette (embedded terminal) ----
+     A full 16-colour ANSI set for xterm, harmonised with the warm theme.
+     The base palette has no cool cyan/magenta, so those are defined here in
+     OKLCH rather than hardcoded in component code. `lib/xterm-theme.ts` reads
+     the resolved values and maps them into xterm's theme object. */
+  --term-background:     var(--color-background);
+  --term-foreground:     var(--color-text-primary);
+  --term-cursor:         var(--color-accent-primary);
+  --term-selection:      oklch(0.46 0.09 72 / 0.35);
+  --term-black:          oklch(0.30 0.008 70);
+  --term-red:            var(--color-danger);
+  --term-green:          var(--color-success);
+  --term-yellow:         var(--color-warning);
+  --term-blue:           var(--color-info);
+  --term-magenta:        var(--color-violet);
+  --term-cyan:           oklch(0.78 0.10 200);
+  --term-white:          var(--color-text-secondary);
+  --term-bright-black:   oklch(0.46 0.008 70);
+  --term-bright-red:     oklch(0.78 0.16 25);
+  --term-bright-green:   oklch(0.84 0.13 150);
+  --term-bright-yellow:  oklch(0.90 0.13 95);
+  --term-bright-blue:    oklch(0.82 0.10 240);
+  --term-bright-magenta: oklch(0.82 0.11 295);
+  --term-bright-cyan:    oklch(0.85 0.10 200);
+  --term-bright-white:   var(--color-text-primary);
+
   /* ---- Typography ---- */
   --font-family-sans: 'Inter', system-ui, sans-serif;
   --font-family-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;

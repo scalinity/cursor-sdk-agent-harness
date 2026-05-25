@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "electron dist/main.js",
     "dev": "node ./scripts/start-electron.mjs",
-    "package:mac": "electron-builder --mac",
+    "package:mac": "node scripts/package-mac.mjs",
     "test": "vitest run"
   },
   "dependencies": {
