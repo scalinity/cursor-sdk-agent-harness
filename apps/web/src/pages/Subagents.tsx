@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { MODEL_LABELS, type ModelId, type SubagentSummary } from "@harness/shared";
 import { useMcpServers } from "../hooks/useMcpServers.js";
 import { useSubagents } from "../hooks/useSubagents.js";
@@ -23,6 +24,7 @@ function truncate(text: string, limit = 80): string {
  * Spec §5 Subagent CRUD.
  */
 export function Subagents() {
+  const navigate = useNavigate();
   const subagents = useSubagents();
   const mcp = useMcpServers();
   const [editorOpen, setEditorOpen] = useState(false);
@@ -40,14 +42,23 @@ export function Subagents() {
   };
 
   return (
-    <main className="min-h-screen bg-background p-4 text-text-primary">
+    <main className="min-h-screen bg-background p-4 pt-8 text-text-primary">
       <div className="mx-auto flex max-w-screen-xl flex-col gap-4">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle pb-3">
-          <div>
-            <h1 className="text-2xl font-semibold">Subagents</h1>
-            <p className="text-sm text-text-tertiary">
-              Reusable subagent definitions wired into your parent agents.
-            </p>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className="h-control-md rounded-sm border border-border-subtle px-2 text-sm text-text-secondary hover:bg-surface-hover"
+              onClick={() => navigate("/settings")}
+            >
+              ←
+            </button>
+            <div>
+              <h1 className="text-2xl font-semibold">Subagents</h1>
+              <p className="text-sm text-text-tertiary">
+                Reusable subagent definitions wired into your parent agents.
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import type { McpServerSummary } from "@harness/shared";
 import { useMcpServers } from "../hooks/useMcpServers.js";
 import { McpServerEditor } from "../components/settings/McpServerEditor.js";
@@ -10,6 +11,7 @@ import { formatRelativeTime } from "../lib/format.js";
  * Spec §5 MCP Server CRUD.
  */
 export function McpServers() {
+  const navigate = useNavigate();
   const { servers, loading, error, patch, remove, revalidate, reload } = useMcpServers();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<McpServerSummary | null>(null);
@@ -24,14 +26,23 @@ export function McpServers() {
   };
 
   return (
-    <main className="min-h-screen bg-background p-4 text-text-primary">
+    <main className="min-h-screen bg-background p-4 pt-8 text-text-primary">
       <div className="mx-auto flex max-w-screen-xl flex-col gap-4">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle pb-3">
-          <div>
-            <h1 className="text-2xl font-semibold">MCP servers</h1>
-            <p className="text-sm text-text-tertiary">
-              Validate, enable, and assign MCP server definitions to your agents.
-            </p>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className="h-control-md rounded-sm border border-border-subtle px-2 text-sm text-text-secondary hover:bg-surface-hover"
+              onClick={() => navigate("/settings")}
+            >
+              ←
+            </button>
+            <div>
+              <h1 className="text-2xl font-semibold">MCP servers</h1>
+              <p className="text-sm text-text-tertiary">
+                Validate, enable, and assign MCP server definitions to your agents.
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -52,7 +63,16 @@ export function McpServers() {
         </header>
 
         {error ? (
-          <div className="rounded-sm border border-danger bg-danger-bg p-3 text-sm text-danger">{error}</div>
+          <div className="flex items-center justify-between rounded-sm border border-border-subtle bg-surface-2 p-3 text-sm text-text-secondary">
+            <span>Could not load MCP servers. Check that the server is running.</span>
+            <button
+              type="button"
+              className="rounded-sm border border-border-subtle px-2 py-0.5 text-xs text-text-secondary hover:bg-surface-hover"
+              onClick={() => void reload()}
+            >
+              Retry
+            </button>
+          </div>
         ) : null}
 
         <table className="w-full border-collapse text-sm">
