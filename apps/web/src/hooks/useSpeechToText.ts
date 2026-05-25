@@ -281,12 +281,11 @@ export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): Speec
       setStatus("recording");
     } catch (err) {
       setStatus("idle");
-      report(
-        "Couldn't start dictation — check the app's microphone permission.",
-        { severity: "warn" },
-      );
-      // Surface the underlying cause for debugging without a second toast.
-      console.warn("[speech-to-text] VAD start failed", err);
+      const msg =
+        err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "NotFoundError")
+          ? "Microphone unavailable — check the app's mic permission."
+          : `Dictation failed to start: ${err instanceof Error ? err.message : String(err)}`;
+      report(msg, { severity: "warn" });
     }
   }, [emit, ensureWorker, report, sendTranscribe]);
 
