@@ -95,10 +95,18 @@ export class DocsRepo {
   }
 
   deleteSource(id: string): boolean {
-    const result = this.raw
-      .prepare("DELETE FROM docs_sources WHERE id = ?")
-      .run(id);
-    return result.changes > 0;
+    // Delete pages explicitly (firing the docs_fts_delete row trigger) before
+    // the source row. SQLite does NOT fire row triggers for FK ON DELETE
+    // CASCADE unless recursive_triggers is on, so relying on the cascade alone
+    // would orphan the FTS index rows — they'd keep matching @docs/search.
+    const tx = this.raw.transaction((sourceId: string) => {
+      this.raw.prepare("DELETE FROM docs_pages WHERE source_id = ?").run(sourceId);
+      const result = this.raw
+        .prepare("DELETE FROM docs_sources WHERE id = ?")
+        .run(sourceId);
+      return result.changes > 0;
+    });
+    return tx(id);
   }
 
   insertPage(

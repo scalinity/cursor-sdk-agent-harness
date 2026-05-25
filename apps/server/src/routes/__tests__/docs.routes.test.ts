@@ -81,6 +81,34 @@ describe("/api/docs/sources", () => {
     });
     expect(res.statusCode).toBe(404);
   });
+
+  it("removes FTS rows when a source is deleted (no orphans)", async () => {
+    const { db, repos, app } = setup();
+    cleanup.push(() => app.close(), () => db.close());
+    await registerDocsRoutes(app, { docsRepo: repos.docs });
+
+    const sourceId = crypto.randomUUID();
+    repos.docs.insertSource(sourceId, "Orphan Test", "https://example.com", 100);
+    repos.docs.insertPage(
+      crypto.randomUUID(),
+      sourceId,
+      "https://example.com/p",
+      "Page",
+      "orphan candidate content for fts",
+    );
+
+    const ftsBefore = (
+      db.raw.prepare("SELECT COUNT(*) AS c FROM docs_fts").get() as { c: number }
+    ).c;
+    expect(ftsBefore).toBe(1);
+
+    repos.docs.deleteSource(sourceId);
+
+    const ftsAfter = (
+      db.raw.prepare("SELECT COUNT(*) AS c FROM docs_fts").get() as { c: number }
+    ).c;
+    expect(ftsAfter).toBe(0);
+  });
 });
 
 describe("/api/docs/search", () => {
