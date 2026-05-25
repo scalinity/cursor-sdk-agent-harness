@@ -18,6 +18,7 @@ export default [
       "**/.pnpm-store/**",
       "**/.claude/**",
       "**/.gyp-venv/**",
+      "**/public/vad/**",
       "docs/mockup-rendered.html",
       "docs/mockup-design-dna.html",
     ],

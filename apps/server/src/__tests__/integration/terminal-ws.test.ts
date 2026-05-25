@@ -316,6 +316,65 @@ describe("Embedded terminal — /ws/terminal", () => {
     }
   });
 
+  it("responds with an error frame for an invalid client frame", async () => {
+    const fake = makeFakePty();
+    h = await buildTerminalHarness({ spawnPty: () => fake.pty });
+    const token = await h.csrfToken();
+    const socket = await h.app.injectWS(`/ws/terminal?csrf=${encodeURIComponent(token)}`, {
+      headers: { origin: ORIGIN },
+    });
+    const frames = collect(socket);
+    await frames.waitFor((f) => f.type === "ready");
+
+    socket.send(JSON.stringify({ type: "bogus" }));
+    const err = await frames.waitFor((f) => f.type === "error");
+    expect(err.message).toContain("schema validation");
+  });
+
+  it("sends an error frame when the PTY fails to spawn", async () => {
+    // Test the session directly (not via WS) to avoid the listener-attach
+    // race inherent in testing fast error paths through injectWS.
+    const spawnPty = () => {
+      throw new Error("spawn-helper not found");
+    };
+    const session = new TerminalSession({
+      resolveCwd: () => "/tmp",
+      logger: NOOP_LOGGER,
+      spawnPty,
+    });
+    const received: Array<Record<string, unknown>> = [];
+    const client = { send: (f: Record<string, unknown>) => received.push(f) };
+    await session.attach(client as never);
+    expect(received).toHaveLength(1);
+    expect(received[0]?.type).toBe("error");
+    expect(received[0]?.message).toContain("spawn-helper not found");
+    session.dispose();
+  });
+
+  it("broadcasts data to multiple concurrent clients", async () => {
+    const fake = makeFakePty();
+    h = await buildTerminalHarness({ spawnPty: () => fake.pty });
+    const token = await h.csrfToken();
+
+    const s1 = await h.app.injectWS(`/ws/terminal?csrf=${encodeURIComponent(token)}`, {
+      headers: { origin: ORIGIN },
+    });
+    const f1 = collect(s1);
+    await f1.waitFor((f) => f.type === "ready");
+
+    const s2 = await h.app.injectWS(`/ws/terminal?csrf=${encodeURIComponent(token)}`, {
+      headers: { origin: ORIGIN },
+    });
+    const f2 = collect(s2);
+    await f2.waitFor((f) => f.type === "ready");
+
+    fake.emitData("shared-output\r\n");
+    const d1 = await f1.waitFor((f) => f.type === "data" && String(f.data).includes("shared-output"));
+    const d2 = await f2.waitFor((f) => f.type === "data" && String(f.data).includes("shared-output"));
+    expect(d1.data).toContain("shared-output");
+    expect(d2.data).toContain("shared-output");
+  });
+
   it("spawns a real shell via node-pty end-to-end (output + exit)", async () => {
     // No spawnPty stub: exercises the real native binding + spawn-helper.
     h = await buildTerminalHarness({ shell: "/bin/echo", shellArgs: ["TERMINAL_E2E_OK"] });

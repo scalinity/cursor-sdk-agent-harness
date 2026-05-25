@@ -6,7 +6,9 @@ import type {
   FastifyRequest,
 } from "fastify";
 import fp from "fastify-plugin";
-import type { WebSocket, RawData } from "ws";
+import type { WebSocket } from "ws";
+import type { RawData } from "ws";
+import { rawDataToString } from "./raw-data.js";
 import {
   clientFrameSchema,
   frameIdSchema,
@@ -947,21 +949,4 @@ function extractValidFrameIdFromUnknown(raw: unknown): string | undefined {
   if (typeof id !== "string") return undefined;
   const parsed = frameIdSchema.safeParse(id);
   return parsed.success ? parsed.data : undefined;
-}
-
-/**
- * Normalise the four `ws` RawData shapes to a UTF-8 string. `ws` may deliver
- * `string | Buffer | ArrayBuffer | Buffer[]` depending on the peer's framing
- * mode; the WS plugin only speaks JSON text frames so we coalesce everything
- * to a string before handing to JSON.parse.
- */
-function rawDataToString(data: RawData): string {
-  if (typeof data === "string") return data;
-  if (Array.isArray(data)) {
-    return Buffer.concat(data).toString("utf8");
-  }
-  if (data instanceof ArrayBuffer) {
-    return Buffer.from(data).toString("utf8");
-  }
-  return (data as Buffer).toString("utf8");
 }

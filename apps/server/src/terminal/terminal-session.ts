@@ -92,6 +92,9 @@ export class TerminalSession {
 
   private pty: PtyProcess | null = null;
   private starting: Promise<void> | null = null;
+  /** Consecutive spawn failures; capped to stop infinite retry loops. */
+  private spawnFailures = 0;
+  private static readonly MAX_SPAWN_FAILURES = 5;
   private readonly clients = new Set<TerminalClient>();
   private cols = DEFAULT_COLS;
   private rows = DEFAULT_ROWS;
@@ -183,9 +186,22 @@ export class TerminalSession {
   private ensureStarted(): Promise<void> {
     if (this.pty) return Promise.resolve();
     if (this.starting) return this.starting;
-    this.starting = this.spawn().finally(() => {
-      this.starting = null;
-    });
+    if (this.spawnFailures >= TerminalSession.MAX_SPAWN_FAILURES) {
+      return Promise.reject(
+        new Error(`Shell failed to start ${this.spawnFailures} consecutive times; giving up`),
+      );
+    }
+    this.starting = this.spawn()
+      .then(() => {
+        this.spawnFailures = 0;
+      })
+      .catch((err: unknown) => {
+        this.spawnFailures++;
+        throw err;
+      })
+      .finally(() => {
+        this.starting = null;
+      });
     return this.starting;
   }
 
@@ -252,15 +268,28 @@ export class TerminalSession {
 }
 
 /**
- * Copy `process.env` into a plain string record, dropping the Cursor API key
- * (the harness keeps it in the Keychain, so `env` inside the embedded shell
- * must not surface it) and any undefined entries. Ensures a sane `TERM`.
+ * Known secret env vars to strip from the child shell. The harness keeps the
+ * API key in the Keychain (not env) so `env` in the embedded terminal must
+ * not surface it. `KEYCHAIN_SERVICE` is the Keychain account name itself —
+ * harmless but unnecessary in the shell.
+ */
+const SCRUB_KEYS = new Set(["CURSOR_API_KEY", "KEYCHAIN_SERVICE"]);
+
+/** Pattern-based strip for secret-shaped env vars the harness or CI might set.
+ *  Errs on the side of caution — a missing var is easier to diagnose than a
+ *  leaked one. */
+const SCRUB_PATTERNS = [/TOKEN$/i, /SECRET$/i, /PASSWORD$/i, /_KEY$/i];
+
+/**
+ * Copy `process.env` into a plain string record, dropping known and
+ * pattern-matched secrets and any undefined entries. Ensures a sane `TERM`.
  */
 function scrubbedEnv(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue;
-    if (key === "CURSOR_API_KEY") continue;
+    if (SCRUB_KEYS.has(key)) continue;
+    if (SCRUB_PATTERNS.some((p) => p.test(key))) continue;
     out[key] = value;
   }
   if (!out.TERM) out.TERM = "xterm-256color";
