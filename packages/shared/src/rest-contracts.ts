@@ -603,8 +603,11 @@ export type GitStatusResponse = z.infer<typeof gitStatusResponseSchema>;
 // ============================================================================
 
 export const fileWriteRequestSchema = z.object({
-  path: z.string().min(1),
-  content: z.string(),
+  path: z.string().min(1).max(1024).refine(
+    (v) => !Array.from(v).some((ch) => ch.charCodeAt(0) < 0x20),
+    "Path contains invalid characters",
+  ),
+  content: z.string().max(10_485_760),
   workspaceId: z.string().optional(),
 });
 export type FileWriteRequest = z.infer<typeof fileWriteRequestSchema>;
@@ -647,7 +650,7 @@ export type RunSearchResult = z.infer<typeof runSearchResultSchema>;
 // ============================================================================
 
 export const runPatchSchema = z.object({
-  name: z.string().max(200).optional(),
+  name: z.string().trim().min(1).max(200).optional(),
 });
 export type RunPatch = z.infer<typeof runPatchSchema>;
 

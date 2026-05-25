@@ -5,8 +5,9 @@ import { useRunStore } from "../../state/run-store.js";
 import { useWorkspaceAllowlist } from "../../hooks/useWorkspaceAllowlist.js";
 import { useActiveWorkspace } from "../../hooks/useActiveWorkspace.js";
 import { ChevronDownIcon, FolderIcon, PlusIcon, XIcon } from "./ToolbarIcons.js";
-import { mutatingRequest } from "../../lib/http-client.js";
+import { httpRequest, mutatingRequest } from "../../lib/http-client.js";
 import { useUiStore } from "../../state/ui-store.js";
+import { csrfTokenResponseSchema } from "@harness/shared";
 
 /**
  * SessionsRail — left rail. Top action starts a new chat (a fresh session);
@@ -23,6 +24,8 @@ export interface SessionsRailProps {
   onNewSession?: () => void;
   /** Delete a terminal conversation from the rail. */
   onDeleteRun?: (runId: string) => void;
+  /** Called after a successful rename so the parent can reload the run list. */
+  onRenameRun?: (runId: string, name: string) => void;
 }
 
 function dotClass(status: SdkRunStatus): string {
@@ -51,6 +54,7 @@ export function SessionsRail({
   onPickWorkspace,
   onNewSession,
   onDeleteRun,
+  onRenameRun,
 }: SessionsRailProps) {
   const searchRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
@@ -155,6 +159,7 @@ export function SessionsRail({
               onToggle={() => toggleCollapsed(ws.id)}
               onActivate={() => void setActive(ws.id)}
               {...(onDeleteRun ? { onDeleteRun } : {})}
+              {...(onRenameRun ? { onRenameRun } : {})}
             />
           ))
         )}
@@ -167,6 +172,7 @@ export function SessionsRail({
             onSelectRun={onSelectRun}
             onToggle={() => toggleCollapsed("__unassigned__")}
             {...(onDeleteRun ? { onDeleteRun } : {})}
+            {...(onRenameRun ? { onRenameRun } : {})}
           />
         ) : null}
 
@@ -212,6 +218,7 @@ interface WorkspaceGroupProps {
   onToggle: () => void;
   onActivate: () => void;
   onDeleteRun?: (runId: string) => void;
+  onRenameRun?: (runId: string, name: string) => void;
 }
 
 function WorkspaceGroup({
@@ -224,6 +231,7 @@ function WorkspaceGroup({
   onToggle,
   onActivate,
   onDeleteRun,
+  onRenameRun,
 }: WorkspaceGroupProps) {
   return (
     <div className="ws-group">
@@ -260,6 +268,7 @@ function WorkspaceGroup({
                 isActive={run.id === activeRunId}
                 onSelectRun={onSelectRun}
                 {...(onDeleteRun ? { onDeleteRun } : {})}
+                {...(onRenameRun ? { onRenameRun } : {})}
               />
             ))
           )}
@@ -276,6 +285,7 @@ interface UnassignedGroupProps {
   onSelectRun: (runId: string) => void;
   onToggle: () => void;
   onDeleteRun?: (runId: string) => void;
+  onRenameRun?: (runId: string, name: string) => void;
 }
 
 function UnassignedGroup({
@@ -285,6 +295,7 @@ function UnassignedGroup({
   onSelectRun,
   onToggle,
   onDeleteRun,
+  onRenameRun,
 }: UnassignedGroupProps) {
   return (
     <div className="ws-group">
@@ -311,6 +322,7 @@ function UnassignedGroup({
               isActive={run.id === activeRunId}
               onSelectRun={onSelectRun}
               {...(onDeleteRun ? { onDeleteRun } : {})}
+              {...(onRenameRun ? { onRenameRun } : {})}
             />
           ))}
         </div>
@@ -324,9 +336,10 @@ interface RailItemProps {
   isActive: boolean;
   onSelectRun: (runId: string) => void;
   onDeleteRun?: (runId: string) => void;
+  onRenameRun?: (runId: string, name: string) => void;
 }
 
-function RailItem({ run, isActive, onSelectRun, onDeleteRun }: RailItemProps) {
+function RailItem({ run, isActive, onSelectRun, onDeleteRun, onRenameRun }: RailItemProps) {
   // Deleting a run cascade-deletes all its events (FK ON DELETE CASCADE) and
   // is irreversible, so require a confirming second click. Disarms when the
   // pointer leaves the row or the button loses focus — no timer, so the
@@ -341,26 +354,29 @@ function RailItem({ run, isActive, onSelectRun, onDeleteRun }: RailItemProps) {
   const startRename = () => {
     setRenameValue(label);
     setRenaming(true);
-    // Focus happens after the next paint when the input renders.
-    requestAnimationFrame(() => {
-      renameInputRef.current?.focus();
-      renameInputRef.current?.select();
-    });
   };
 
   const commitRename = () => {
     const trimmed = renameValue.trim();
     setRenaming(false);
     if (trimmed.length === 0 || trimmed === label) return;
-    const token = useUiStore.getState().csrfToken;
     void mutatingRequest(`/api/runs/${run.id}`, {
       method: "PATCH",
       body: { name: trimmed },
-      getCsrfToken: () => token,
+      getCsrfToken: () => useUiStore.getState().csrfToken,
       refreshCsrfToken: async () => {
-        // CSRF refresh would require the hook, but here we just bail.
-        return null;
+        try {
+          const res = await httpRequest("/api/security/csrf-token", {
+            responseSchema: csrfTokenResponseSchema,
+          });
+          useUiStore.getState().setCsrfToken(res.token);
+          return res.token;
+        } catch {
+          return null;
+        }
       },
+    }).then(() => {
+      onRenameRun?.(run.id, trimmed);
     });
   };
 
@@ -383,7 +399,12 @@ function RailItem({ run, isActive, onSelectRun, onDeleteRun }: RailItemProps) {
       <div className="min-w-0">
         {renaming ? (
           <input
-            ref={renameInputRef}
+            ref={(node) => {
+              renameInputRef.current = node;
+              // Select the text once the input mounts.
+              node?.select();
+            }}
+            autoFocus
             className="w-full bg-transparent text-md text-text-primary outline-none"
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}

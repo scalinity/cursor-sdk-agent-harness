@@ -1,13 +1,14 @@
 import type { Database as BetterSqlite3Database } from "better-sqlite3";
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
-import type {
-  AgentMode,
-  ExecutionMode,
-  RunRow,
-  SdkRunStatus,
-  TokenUsage,
-  UsageSource,
+import {
+  executionModeSchema,
+  type AgentMode,
+  type ExecutionMode,
+  type RunRow,
+  type SdkRunStatus,
+  type TokenUsage,
+  type UsageSource,
 } from "@harness/shared";
 import { isoNow, parseJsonOrNull, stringifyOrNull } from "./mapping.js";
 
@@ -238,7 +239,7 @@ function rowToDomain(row: RunDbRow): RunRow {
     name: row.name,
     modelId: row.model_id,
     mode: row.mode === null ? null : (row.mode as AgentMode),
-    executionMode: row.execution_mode === null ? null : (row.execution_mode as ExecutionMode),
+    executionMode: row.execution_mode === null ? null : executionModeSchema.parse(row.execution_mode),
     workspaceId: row.workspace_id,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
@@ -851,6 +852,9 @@ export class RunsRepo {
     executionMode: string | null;
     status: string;
   }> {
+    // Wrap in double quotes and escape internal quotes to prevent FTS5
+    // syntax errors from user-supplied characters like *, OR, NEAR, etc.
+    const safeQuery = '"' + query.replace(/"/g, '""') + '"';
     const rows = this.raw
       .prepare(
         `SELECT r.id, r.name, r.prompt_preview, r.status, r.agent_id, r.execution_mode, r.created_at,
@@ -862,7 +866,7 @@ export class RunsRepo {
           ORDER BY rank
           LIMIT ?`,
       )
-      .all(query, limit) as Array<{
+      .all(safeQuery, limit) as Array<{
       id: string;
       name: string | null;
       prompt_preview: string;

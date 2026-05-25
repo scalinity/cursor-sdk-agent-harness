@@ -2,16 +2,14 @@ import { gitStatusResponseSchema } from "@harness/shared";
 import type { FastifyInstance } from "fastify";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
-import type { SettingsRepo } from "../db/repositories/settings.repo.js";
-import type { WorkspaceAllowlistRepo } from "../db/repositories/workspace-allowlist.repo.js";
-import { ACTIVE_WORKSPACE_SETTING_KEY } from "../config/settings-keys.js";
+import {
+  resolveWorkspacePath,
+  type WorkspaceResolverDeps,
+} from "../lib/workspace-resolver.js";
 
 const execFile = promisify(execFileCb);
 
-export interface GitRoutesDeps {
-  settingsRepo: SettingsRepo;
-  workspaceAllowlist: WorkspaceAllowlistRepo;
-}
+export type GitRoutesDeps = WorkspaceResolverDeps;
 
 /**
  * In-memory cache for git status, keyed by workspace path.
@@ -23,6 +21,21 @@ const gitStatusCache = new Map<
 >();
 
 const CACHE_TTL_MS = 10_000;
+const CACHE_MAX_ENTRIES = 10;
+
+function cacheSet(
+  key: string,
+  data: ReturnType<typeof gitStatusResponseSchema.parse>,
+  expiresAt: number,
+): void {
+  // Evict the oldest entry when the cache exceeds the max size.
+  // Map preserves insertion order, so the first key is the oldest.
+  if (gitStatusCache.size >= CACHE_MAX_ENTRIES && !gitStatusCache.has(key)) {
+    const oldest = gitStatusCache.keys().next().value;
+    if (oldest !== undefined) gitStatusCache.delete(oldest);
+  }
+  gitStatusCache.set(key, { data, expiresAt });
+}
 
 async function gitExec(
   args: string[],
@@ -38,13 +51,6 @@ async function gitExec(
   } catch {
     return { stdout: "", ok: false };
   }
-}
-
-function resolveWorkspacePath(deps: GitRoutesDeps): string | null {
-  const activeId = deps.settingsRepo.get<string>(ACTIVE_WORKSPACE_SETTING_KEY);
-  if (!activeId) return null;
-  const entry = deps.workspaceAllowlist.getById(activeId);
-  return entry?.path ?? null;
 }
 
 export async function registerGitRoutes(
@@ -82,35 +88,21 @@ export async function registerGitRoutes(
         ahead: 0,
         behind: 0,
       });
-      gitStatusCache.set(workspacePath, { data, expiresAt: now + CACHE_TTL_MS });
+      cacheSet(workspacePath, data, now + CACHE_TTL_MS);
       return data;
     }
 
-    // Get branch name
-    const branchResult = await gitExec(
-      ["rev-parse", "--abbrev-ref", "HEAD"],
-      workspacePath,
-    );
+    // Run all four git queries in parallel after confirming isGitRepo.
+    const [branchResult, statusResult, aheadResult, behindResult] =
+      await Promise.all([
+        gitExec(["rev-parse", "--abbrev-ref", "HEAD"], workspacePath),
+        gitExec(["status", "--porcelain"], workspacePath),
+        gitExec(["rev-list", "--count", "@{upstream}..HEAD"], workspacePath),
+        gitExec(["rev-list", "--count", "HEAD..@{upstream}"], workspacePath),
+      ]);
     const branch = branchResult.ok ? branchResult.stdout : null;
-
-    // Check dirty status
-    const statusResult = await gitExec(
-      ["status", "--porcelain"],
-      workspacePath,
-    );
     const isDirty = statusResult.ok && statusResult.stdout.length > 0;
-
-    // Get ahead/behind counts (may fail if no upstream)
-    const aheadResult = await gitExec(
-      ["rev-list", "--count", "@{upstream}..HEAD"],
-      workspacePath,
-    );
     const ahead = aheadResult.ok ? parseInt(aheadResult.stdout, 10) || 0 : 0;
-
-    const behindResult = await gitExec(
-      ["rev-list", "--count", "HEAD..@{upstream}"],
-      workspacePath,
-    );
     const behind = behindResult.ok ? parseInt(behindResult.stdout, 10) || 0 : 0;
 
     const data = gitStatusResponseSchema.parse({

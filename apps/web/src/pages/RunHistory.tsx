@@ -31,6 +31,34 @@ const COST_FILTERS: Array<{ value: RunHistoryCostFilter; label: string }> = [
 
 type RangePreset = "24h" | "7d" | "30d" | "custom";
 
+/**
+ * SafeSnippet — renders an FTS snippet string that contains `<mark>` tags as
+ * safe React elements. All other text is HTML-escaped by React's default
+ * text-node rendering, eliminating XSS risk from user-controlled content.
+ */
+function SafeSnippet({ html }: { html: string }) {
+  // Split on <mark> and </mark> tags, preserving them as delimiters.
+  const parts = html.split(/(<\/?mark>)/);
+  const elements: React.ReactNode[] = [];
+  let inMark = false;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]!;
+    if (part === "<mark>") {
+      inMark = true;
+      continue;
+    }
+    if (part === "</mark>") {
+      inMark = false;
+      continue;
+    }
+    if (part.length === 0) continue;
+    elements.push(
+      inMark ? <mark key={i}>{part}</mark> : <span key={i}>{part}</span>,
+    );
+  }
+  return <>{elements}</>;
+}
+
 function listParam(params: URLSearchParams, key: string): string[] {
   return (params.get(key) ?? "")
     .split(",")
@@ -302,7 +330,7 @@ export function RunHistory() {
               {search.results.map((r) => (
                 <Link key={r.runId} to={`/runs/${r.runId}/replay`} className="flex flex-col gap-0.5 border-b border-border-subtle p-2 text-sm hover:bg-surface-2">
                   <span className="text-text-primary">{r.name ?? r.prompt}</span>
-                  <span className="text-text-tertiary" dangerouslySetInnerHTML={{ __html: r.snippet }} />
+                  <span className="text-text-tertiary"><SafeSnippet html={r.snippet} /></span>
                 </Link>
               ))}
             </div>
