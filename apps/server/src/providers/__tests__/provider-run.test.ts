@@ -5,7 +5,25 @@ import { createRepositories } from "../../db/repositories/index.js";
 import { createPersistAndBroadcast } from "../../sdk/persist-and-broadcast.js";
 import { createRunBus } from "../../ws/index.js";
 import { ProviderRunController } from "../provider-run.js";
-import type { ModelProvider, ProviderEvent } from "../provider.js";
+import type { ModelProvider, ProviderEvent, ProviderOptions } from "../provider.js";
+
+// Yields one delta, then blocks until the caller's signal aborts.
+class HangingProvider implements ModelProvider {
+  readonly id = "p1";
+  readonly kind = "openai";
+  readonly name = "Hanging";
+  async *sendMessage(_prompt: string, options: ProviderOptions): AsyncIterable<ProviderEvent> {
+    yield { type: "text_delta", content: "partial" };
+    await new Promise<void>((resolve) => {
+      if (options.signal?.aborted) return resolve();
+      options.signal?.addEventListener("abort", () => resolve(), { once: true });
+    });
+    yield { type: "error", message: "aborted" };
+  }
+  listModels() {
+    return Promise.resolve([]);
+  }
+}
 
 class ScriptedProvider implements ModelProvider {
   readonly id = "p1";
@@ -148,5 +166,53 @@ describe("ProviderRunController", () => {
     controller.start();
     await controller.awaitSettled();
     expect(repos.runs.getById(run.id)?.status).toBe("ERROR");
+  });
+
+  it("P23-C4/W1: cancel() aborts the stream and finalizes the run as CANCELLED", async () => {
+    db = openTestDb({ skipSeed: true });
+    const repos = createRepositories(db.raw);
+    const bus = createRunBus();
+    const pipeline = createPersistAndBroadcast({ events: repos.events, bus, logger });
+    const agent = repos.agents.create({
+      name: "A",
+      status: "active",
+      mode: "local",
+      modelId: "p1:gpt-5",
+      cwd: null,
+      settingSources: null,
+      sandboxEnabled: null,
+      cloudOptions: null,
+      mcpServerIds: [],
+      subagentDefinitionIds: [],
+    });
+    const run = repos.runs.create({
+      id: "33333333-3333-4333-8333-333333333333",
+      agentId: agent.id,
+      status: "CREATING",
+      promptPreview: "hi",
+      modelId: "p1:gpt-5",
+      mode: "local",
+      executionMode: "ask",
+      workspaceId: null,
+      contextMetadata: null,
+    });
+    const controller = new ProviderRunController(
+      {
+        runId: run.id,
+        agentId: agent.id,
+        modelName: "gpt-5",
+        prompt: "hi",
+        provider: new HangingProvider(),
+        runsRepo: repos.runs,
+        pipeline,
+        logger,
+      },
+      () => {},
+    );
+    controller.start();
+    await new Promise((r) => setTimeout(r, 10)); // let it stream "partial"
+    const result = await controller.cancel("user_cancelled");
+    expect(result.outcome).toBe("cancelled");
+    expect(repos.runs.getById(run.id)?.status).toBe("CANCELLED");
   });
 });

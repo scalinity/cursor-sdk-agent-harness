@@ -1,7 +1,14 @@
 import type { FastifyBaseLogger } from "fastify";
-import type { ModelPricingHint, SDKMessage, TokenUsage } from "@harness/shared";
+import type {
+  ModelPricingHint,
+  RunInterruptedReason,
+  SDKMessage,
+  TokenUsage,
+} from "@harness/shared";
 import type { RunsRepo } from "../db/repositories/runs.repo.js";
 import type { PersistAndBroadcastPipeline } from "../sdk/persist-and-broadcast.js";
+import type { CancelableRun } from "../sdk/active-runs.js";
+import type { CancelResult } from "../sdk/run-controller.js";
 import type { ModelProvider, ProviderUsage } from "./provider.js";
 
 /**
@@ -26,11 +33,12 @@ export interface ProviderRunInit {
   logger: FastifyBaseLogger;
 }
 
-export class ProviderRunController {
+export class ProviderRunController implements CancelableRun {
   readonly runId: string;
   readonly agentId: string;
   readonly abortController = new AbortController();
   private settled: Promise<void> | null = null;
+  private cancelReason: RunInterruptedReason | null = null;
 
   constructor(
     private readonly init: ProviderRunInit,
@@ -51,8 +59,17 @@ export class ProviderRunController {
     return this.settled ?? Promise.resolve();
   }
 
-  cancel(): void {
+  /**
+   * P23-C4: cancel the in-flight provider stream and wait for finalization.
+   * The abort aborts the provider's fetch/SDK call; `run()` then records the
+   * run as CANCELLED (not ERROR — see P23-W1). Returns once the run row is
+   * terminal so the caller doesn't observe a still-RUNNING row.
+   */
+  async cancel(reason: RunInterruptedReason = "user_cancelled"): Promise<CancelResult> {
+    this.cancelReason = reason;
     this.abortController.abort();
+    await this.awaitSettled();
+    return { outcome: "cancelled" };
   }
 
   private emit(message: SDKMessage): void {
@@ -108,7 +125,13 @@ export class ProviderRunController {
     const durationMs = Date.now() - startedAt;
     const tokenUsage = this.buildUsage(usage);
 
-    if (errored) {
+    if (this.abortController.signal.aborted) {
+      // P23-W1: an aborted run is a cancellation, not a stream error — record
+      // CANCELLED so history/usage don't mislabel it as a failure.
+      this.emit({ type: "status", agent_id: this.agentId, run_id: this.runId, status: "CANCELLED" });
+      this.init.runsRepo.setCancelled(this.runId, this.cancelReason ?? "user_cancelled");
+      this.init.runsRepo.setUsage(this.runId, tokenUsage);
+    } else if (errored) {
       this.emit({ type: "status", agent_id: this.agentId, run_id: this.runId, status: "ERROR" });
       this.init.runsRepo.setInterrupted(this.runId, "stream_error", errored);
       this.init.runsRepo.setUsage(this.runId, tokenUsage);
@@ -128,7 +151,7 @@ export class ProviderRunController {
         usage: tokenUsage,
       });
     }
-    this.init.pipeline.dropRun(this.runId);
+    // onTerminate owns cleanup (unregister from activeRuns + pipeline.dropRun).
     this.onTerminate(this.runId);
   }
 

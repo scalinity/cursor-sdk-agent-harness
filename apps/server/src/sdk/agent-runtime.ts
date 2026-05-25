@@ -514,8 +514,14 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
             pipeline: deps.pipeline,
             logger: deps.logger,
           },
-          (id) => deps.pipeline.dropRun(id),
+          (id) => {
+            // P23-C4: keep the registry in sync so cancel/terminate/shutdown
+            // can reach the run while it's live, and clean up on termination.
+            activeRuns.unregister(id);
+            deps.pipeline.dropRun(id);
+          },
         );
+        activeRuns.register(providerController);
         providerController.start();
         deps.agentsRepo.updateLastActiveAt(row.id);
         const persistedProvider = deps.runsRepo.getById(runRow.id);
