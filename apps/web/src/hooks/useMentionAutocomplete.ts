@@ -1,7 +1,9 @@
 import { useCallback, useRef, useState } from "react";
 import type { ContextSearchResult, ContextChip, ContextMentionKind } from "@harness/shared";
 import { httpRequest } from "../lib/http-client.js";
+import { useUiStore } from "../state/ui-store.js";
 import { useCsrfToken } from "./useCsrfToken.js";
+import { useMountEffect } from "./useMountEffect.js";
 
 export interface UseMentionAutocompleteResult {
   isOpen: boolean;
@@ -16,8 +18,6 @@ export interface UseMentionAutocompleteResult {
   clearChips: () => void;
 }
 
-let chipIdCounter = 0;
-
 export function useMentionAutocomplete(): UseMentionAutocompleteResult {
   const [isOpen, setIsOpen] = useState(false);
   const [results, setResults] = useState<ContextSearchResult | null>(null);
@@ -25,6 +25,8 @@ export function useMentionAutocomplete(): UseMentionAutocompleteResult {
   const [chips, setChips] = useState<ContextChip[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queryRef = useRef("");
+  const cursorPosRef = useRef(0);
+  const chipIdRef = useRef(0);
   useCsrfToken();
 
   const fetchResults = useCallback(async (query: string) => {
@@ -63,6 +65,7 @@ export function useMentionAutocomplete(): UseMentionAutocompleteResult {
       }
       const query = before.slice(atIdx + 1);
       queryRef.current = query;
+      cursorPosRef.current = cursorPosition;
 
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
@@ -75,10 +78,20 @@ export function useMentionAutocomplete(): UseMentionAutocompleteResult {
   const selectItem = useCallback(
     (kind: ContextMentionKind, value: string, displayLabel: string) => {
       const chip: ContextChip = {
-        id: `chip-${++chipIdCounter}`,
+        id: `chip-${++chipIdRef.current}`,
         mention: { kind, value, displayLabel },
       };
       setChips((prev) => [...prev, chip]);
+
+      // Remove the @query text from the draft
+      const draft = useUiStore.getState().composerDraft;
+      const before = draft.slice(0, cursorPosRef.current);
+      const atIdx = before.lastIndexOf("@");
+      if (atIdx !== -1) {
+        const newDraft = draft.slice(0, atIdx) + draft.slice(cursorPosRef.current);
+        useUiStore.getState().setComposerDraft(newDraft);
+      }
+
       setIsOpen(false);
       setResults(null);
     },
@@ -161,6 +174,12 @@ export function useMentionAutocomplete(): UseMentionAutocompleteResult {
     },
     [isOpen, chips.length, flatResults, selectedIndex, selectItem, dismiss],
   );
+
+  useMountEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  });
 
   return {
     isOpen,

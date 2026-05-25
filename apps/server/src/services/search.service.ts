@@ -67,9 +67,10 @@ function parseGrepOutput(stdout: string, workspaceRoot: string): GrepMatch[] {
       continue;
     }
 
-    // Match line: file:lineNo:colNo:content (for matches)
-    // Context line: file-lineNo-content
-    const matchResult = line.match(/^(.+?):(\d+):(\d+):(.*)$/);
+    // Match line: rg format file:lineNo:colNo:content OR grep format file:lineNo:content
+    const rgMatch = line.match(/^(.+?):(\d+):(\d+):(.*)$/);
+    const grepMatch = !rgMatch ? line.match(/^(.+?):(\d+):(.*)$/) : null;
+    const matchResult = rgMatch ?? (grepMatch ? [grepMatch[0], grepMatch[1], grepMatch[2], "1", grepMatch[3]] : null);
     if (matchResult) {
       if (currentGroup && afterCount <= 2) {
         results.push({
@@ -81,7 +82,7 @@ function parseGrepOutput(stdout: string, workspaceRoot: string): GrepMatch[] {
           contextAfter: currentGroup.after,
         });
       }
-      const relPath = path.relative(workspaceRoot, matchResult[1]!);
+      const relPath = path.relative(workspaceRoot, path.resolve(workspaceRoot, matchResult[1]!));
       currentGroup = {
         path: relPath,
         lineNo: parseInt(matchResult[2]!, 10),
@@ -94,8 +95,8 @@ function parseGrepOutput(stdout: string, workspaceRoot: string): GrepMatch[] {
       continue;
     }
 
-    // Context line (before/after match)
-    const ctxResult = line.match(/^(.+?)-(\d+)-(.*)$/);
+    // Context line (before/after match) — greedy .+ to handle filenames with hyphens
+    const ctxResult = line.match(/^(.+)-(\d+)-(.*)$/);
     if (ctxResult && currentGroup) {
       const ctxLineNo = parseInt(ctxResult[2]!, 10);
       if (ctxLineNo < currentGroup.lineNo) {
@@ -156,7 +157,7 @@ export async function grepSearch(opts: GrepSearchOptions): Promise<GrepSearchOut
         "--include=*.json", "--include=*.md", "--include=*.css", "--include=*.html",
         "--exclude-dir=node_modules", "--exclude-dir=.git", "--exclude-dir=dist",
         "--exclude-dir=build", "--exclude-dir=coverage",
-        "-B", "2", "-C", "2",
+        "-C", "2",
       ];
       if (!opts.caseSensitive) args.push("-i");
       args.push("--", opts.query, ".");

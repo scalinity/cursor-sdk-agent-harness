@@ -26,13 +26,12 @@ interface SymbolEntry {
 }
 
 const SYMBOL_PATTERNS = [
-  { regex: /^export\s+(?:async\s+)?function\s+(\w+)/gm, kind: "function" as const },
+  { regex: /^export\s+(?:(?:default|async)\s+)*function\s+(\w+)/gm, kind: "function" as const },
   { regex: /^export\s+class\s+(\w+)/gm, kind: "class" as const },
   { regex: /^export\s+type\s+(\w+)/gm, kind: "type" as const },
   { regex: /^export\s+interface\s+(\w+)/gm, kind: "interface" as const },
   { regex: /^export\s+const\s+(\w+)/gm, kind: "variable" as const },
   { regex: /^export\s+enum\s+(\w+)/gm, kind: "enum" as const },
-  { regex: /^export\s+(?:default\s+)?function\s+(\w+)/gm, kind: "function" as const },
 ];
 
 const TS_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
@@ -110,6 +109,10 @@ async function collectSymbols(workspaceRoot: string): Promise<SymbolEntry[]> {
   }
 
   await walk(workspaceRoot, 0);
+  if (symbolCaches.size >= 5) {
+    const oldest = [...symbolCaches.entries()].sort((a, b) => a[1].timestamp - b[1].timestamp)[0];
+    if (oldest) symbolCaches.delete(oldest[0]);
+  }
   symbolCaches.set(workspaceRoot, { symbols, timestamp: Date.now() });
   return symbols;
 }
@@ -201,6 +204,18 @@ async function walkForFiles(
 }
 
 // ---------------------------------------------------------------------------
+// Path safety
+// ---------------------------------------------------------------------------
+
+function assertWithinWorkspace(resolved: string, root: string): void {
+  const normalizedRoot = path.resolve(root);
+  const normalizedResolved = path.resolve(resolved);
+  if (normalizedResolved !== normalizedRoot && !normalizedResolved.startsWith(normalizedRoot + path.sep)) {
+    throw new Error(`Path traversal blocked: ${resolved} escapes workspace root`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Content resolution
 // ---------------------------------------------------------------------------
 
@@ -229,6 +244,9 @@ export async function resolveMention(
 
 async function resolveFile(mention: ContextMention, root: string): Promise<ResolvedMention> {
   const filePath = path.resolve(root, mention.value);
+  try { assertWithinWorkspace(filePath, root); } catch {
+    return { mention, content: `[Blocked: path escapes workspace]`, tokenEstimate: 10, truncated: false };
+  }
   let content: string;
   try {
     content = await fs.readFile(filePath, "utf-8");
@@ -245,6 +263,9 @@ async function resolveFile(mention: ContextMention, root: string): Promise<Resol
 
 async function resolveFolder(mention: ContextMention, root: string): Promise<ResolvedMention> {
   const dirPath = path.resolve(root, mention.value);
+  try { assertWithinWorkspace(dirPath, root); } catch {
+    return { mention, content: `[Blocked: path escapes workspace]`, tokenEstimate: 10, truncated: false };
+  }
   const lines: string[] = [`// Folder: ${mention.value}`];
   let count = 0;
 
@@ -291,6 +312,9 @@ async function resolveSymbol(mention: ContextMention, root: string): Promise<Res
   }
 
   const filePath = path.resolve(root, found.path);
+  try { assertWithinWorkspace(filePath, root); } catch {
+    return { mention, content: `[Blocked: path escapes workspace]`, tokenEstimate: 10, truncated: false };
+  }
   let fileContent: string;
   try {
     fileContent = await fs.readFile(filePath, "utf-8");

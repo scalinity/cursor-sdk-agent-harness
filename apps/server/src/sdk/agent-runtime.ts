@@ -20,6 +20,7 @@ import type { McpServersRepo } from "../db/repositories/mcp-servers.repo.js";
 import type { RunsRepo } from "../db/repositories/runs.repo.js";
 import type { SubagentDefinitionsRepo } from "../db/repositories/subagents.repo.js";
 import type { CursorApiKeyStore } from "../keychain/cursor-api-key.js";
+import type { WorkspaceAllowlistRepo } from "../db/repositories/workspace-allowlist.repo.js";
 import type { WorkspacePolicy } from "../security/workspace-policy.js";
 import { getSettingsSnapshot } from "../services/settings.service.js";
 import type { SettingsRepo } from "../db/repositories/settings.repo.js";
@@ -87,6 +88,7 @@ export interface AgentRuntimeDeps {
    * per-run text buffer doesn't leak.
    */
   pipeline: PersistAndBroadcastPipeline;
+  allowlistRepo: WorkspaceAllowlistRepo;
 }
 
 export interface AgentRuntime {
@@ -361,7 +363,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
       let contextBlock = "";
       let contextMetadata: unknown = null;
 
-      if (activeWorkspaceId) {
+      if (activeWorkspaceId && deps.allowlistRepo.findMatching(activeWorkspaceId)) {
         // 1) Resolve project rules
         const allRules = await readRulesFromWorkspace(activeWorkspaceId, deps.logger);
         const mentionedPaths = mentions

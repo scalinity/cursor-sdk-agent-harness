@@ -227,6 +227,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     logger: app.log,
     activeRuns,
     pipeline,
+    allowlistRepo: repos.workspaceAllowlist,
   });
 
   const approvalResponder =

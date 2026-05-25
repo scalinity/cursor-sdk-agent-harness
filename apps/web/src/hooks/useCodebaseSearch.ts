@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { GrepSearchResult, FileSearchResult } from "@harness/shared";
 import { httpRequest } from "../lib/http-client.js";
+import { useMountEffect } from "./useMountEffect.js";
 
 export type SearchType = "grep" | "files";
 
@@ -69,11 +70,27 @@ export function useCodebaseSearch(): UseCodebaseSearchResult {
     [doSearch, searchType],
   );
 
+  useMountEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  });
+
+  const changeSearchType = useCallback(
+    (t: SearchType) => {
+      setSearchType(t);
+      if (query.length > 0) {
+        void doSearch(query, t);
+      }
+    },
+    [doSearch, query],
+  );
+
   return {
     query,
     setQuery,
     searchType,
-    setSearchType,
+    setSearchType: changeSearchType,
     grepResults,
     fileResults,
     isSearching,

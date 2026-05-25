@@ -3,18 +3,11 @@ import type { FastifyInstance } from "fastify";
 import type { SettingsRepo } from "../db/repositories/settings.repo.js";
 import type { WorkspaceAllowlistRepo } from "../db/repositories/workspace-allowlist.repo.js";
 import { grepSearch, fileSearch } from "../services/search.service.js";
-import { ACTIVE_WORKSPACE_SETTING_KEY } from "../config/settings-keys.js";
+import { getActiveWorkspaceRoot } from "../config/active-workspace.js";
 
 export interface SearchRoutesDeps {
   settingsRepo: SettingsRepo;
   allowlistRepo: WorkspaceAllowlistRepo;
-}
-
-function getActiveWorkspaceRoot(deps: SearchRoutesDeps): string | null {
-  const raw = deps.settingsRepo.get<string | null>(ACTIVE_WORKSPACE_SETTING_KEY);
-  if (typeof raw !== "string" || raw.length === 0) return null;
-  const entry = deps.allowlistRepo.findMatching(raw);
-  return entry ? raw : null;
 }
 
 export async function registerSearchRoutes(
