@@ -126,6 +126,9 @@ export class TerminalSession {
       client.send({ type: "error", message: "Terminal is shutting down" });
       return () => {};
     }
+    // If the active workspace changed since the live shell was spawned, replace
+    // it with a fresh shell rooted in the new directory before (re)attaching.
+    await this.reconcileWorkspaceCwd();
     try {
       await this.ensureStarted();
     } catch (err) {
@@ -205,6 +208,42 @@ export class TerminalSession {
     return this.starting;
   }
 
+  /**
+   * If the resolved active-workspace directory differs from the directory the
+   * live PTY was spawned in, kill the PTY so the next `ensureStarted` respawns
+   * a fresh shell in the new directory. No-op when no PTY exists yet (the first
+   * spawn picks up the current workspace) or the directory is unchanged. A real
+   * shell can `cd` anywhere afterward, so this governs the *start* dir only —
+   * consistent with how a run's cwd is chosen.
+   */
+  private async reconcileWorkspaceCwd(): Promise<void> {
+    if (!this.pty) return;
+    let desired: string;
+    try {
+      desired = await this.opts.resolveCwd();
+    } catch {
+      // Can't resolve right now — keep the current shell rather than guessing.
+      return;
+    }
+    if (desired === this.cwd) return;
+    this.opts.logger.info(
+      { from: this.cwd, to: desired },
+      "terminal: active workspace changed; respawning shell",
+    );
+    try {
+      this.pty.kill();
+    } catch {
+      // already dead
+    }
+    // Drop the PTY + scrollback so ensureStarted() spawns fresh in `desired`
+    // and the reattaching client restores a clean screen. The stale onData/
+    // onExit guards (this.pty !== pty) keep the dying PTY from corrupting the
+    // replacement that ensureStarted is about to create.
+    this.pty = null;
+    this.ring = [];
+    this.ringLen = 0;
+  }
+
   private async spawn(): Promise<void> {
     let cwd: string;
     try {
@@ -227,10 +266,12 @@ export class TerminalSession {
     });
 
     pty.onData((data) => {
+      if (this.pty !== pty) return; // stale output from a shell we replaced
       this.appendToRing(data);
       this.broadcast({ type: "data", data });
     });
     pty.onExit(({ exitCode, signal }) => {
+      if (this.pty !== pty) return; // exit of a shell we already replaced
       this.broadcast({
         type: "exit",
         code: exitCode,

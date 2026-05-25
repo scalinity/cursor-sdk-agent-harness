@@ -70,6 +70,11 @@ export function useTerminalSession(): UseTerminalSessionResult {
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let storeUnsub: (() => void) | undefined;
     let disposed = false;
+    // The directory the server last reported for the live shell. A change means
+    // the workspace switched and the server respawned the shell, so we clear the
+    // stale screen. null until the first `ready`, so a tab-switch reattach to the
+    // same shell never wipes the restored scrollback.
+    let lastCwd: string | null = null;
 
     const send = (payload: string): void => {
       if (socket && socket.readyState === WebSocket.OPEN) socket.send(payload);
@@ -82,6 +87,13 @@ export function useTerminalSession(): UseTerminalSessionResult {
 
     const resizeObserver = new ResizeObserver(() => safeFit(fit));
     resizeObserver.observe(host);
+
+    // Refit once the mono web font has finished loading. xterm sizes columns
+    // against the cell width measured at open(); if 'JetBrains Mono' (loaded
+    // async via Google Fonts) wasn't ready, it measured the narrower fallback,
+    // over-counted columns, and the rightmost glyphs clipped once the wider
+    // face painted. Nothing else refits on a font swap, so the clip persisted.
+    refitWhenFontReady(appearance, fit, () => disposed);
 
     const scheduleReconnect = (): void => {
       if (disposed) return;
@@ -118,6 +130,10 @@ export function useTerminalSession(): UseTerminalSessionResult {
         if (!frame) return;
         switch (frame.type) {
           case "ready":
+            if (lastCwd !== null && frame.cwd !== lastCwd) {
+              term.reset();
+            }
+            lastCwd = frame.cwd;
             safeFit(fit);
             send(serializeTerminalResize(term.cols, term.rows));
             setStatus("connected");
@@ -149,10 +165,25 @@ export function useTerminalSession(): UseTerminalSessionResult {
 
     connect();
 
+    // Re-dial when the active workspace changes so the shell follows it. The
+    // server replaces the PTY with one rooted in the new directory on reattach,
+    // and the `ready` cwd-change check above clears the stale screen. Closing
+    // the socket drives onclose → scheduleReconnect → connect (a fresh shell);
+    // if it's already closed, schedule the reconnect directly.
+    const workspaceUnsub = useUiStore.subscribe((s, prev) => {
+      if (s.activeWorkspaceId === prev.activeWorkspaceId) return;
+      if (socket) {
+        socket.close();
+      } else {
+        scheduleReconnect();
+      }
+    });
+
     return () => {
       disposed = true;
       clearTimeout(reconnectTimer);
       storeUnsub?.();
+      workspaceUnsub();
       resizeObserver.disconnect();
       dataDisposable.dispose();
       resizeDisposable.dispose();
@@ -174,4 +205,27 @@ function safeFit(fit: FitAddon): void {
   } catch {
     // Host not laid out yet (e.g. tab hidden); the ResizeObserver retries.
   }
+}
+
+/**
+ * Refit the terminal once the primary mono web font is loaded so the column
+ * count matches its real cell width (see call site for why this clips otherwise).
+ * `fit()` no-ops when the count is already correct (warm font cache); a changed
+ * count fires `term.onResize`, which re-syncs the PTY.
+ */
+function refitWhenFontReady(
+  appearance: { fontFamily: string; fontSize: number },
+  fit: FitAddon,
+  isDisposed: () => boolean,
+): void {
+  if (typeof document === "undefined" || !("fonts" in document)) return;
+  const primaryFamily = appearance.fontFamily.split(",")[0]?.trim() || "monospace";
+  void document.fonts.load(`${appearance.fontSize}px ${primaryFamily}`).then(
+    () => {
+      if (!isDisposed()) safeFit(fit);
+    },
+    () => {
+      // Font blocked/offline — the fallback stays; nothing to refit.
+    },
+  );
 }

@@ -375,6 +375,49 @@ describe("Embedded terminal — /ws/terminal", () => {
     expect(d2.data).toContain("shared-output");
   });
 
+  it("respawns the shell in the new directory when the active workspace changes", async () => {
+    // Direct session (not via WS) to avoid the injectWS listener-attach race.
+    let cwd = "/workspace/a";
+    const spawns: Array<{ cwd: string; fake: ReturnType<typeof makeFakePty> }> = [];
+    const spawnPty: SpawnPty = (o) => {
+      const fake = makeFakePty();
+      spawns.push({ cwd: o.cwd, fake });
+      return fake.pty;
+    };
+    const session = new TerminalSession({
+      resolveCwd: () => cwd,
+      logger: NOOP_LOGGER,
+      spawnPty,
+    });
+
+    // First attach → spawns in workspace A.
+    const r1: Array<Record<string, unknown>> = [];
+    await session.attach({ send: (f: Record<string, unknown>) => r1.push(f) } as never);
+    expect(spawns).toHaveLength(1);
+    expect(spawns[0]?.cwd).toBe("/workspace/a");
+    expect(r1.find((f) => f.type === "ready")?.cwd).toBe("/workspace/a");
+
+    // Output from workspace A lands in the ring buffer.
+    spawns[0]?.fake.emitData("output-from-a\r\n");
+
+    // Switch the active workspace, then reattach (mirrors the client's re-dial).
+    cwd = "/workspace/b";
+    const r2: Array<Record<string, unknown>> = [];
+    await session.attach({ send: (f: Record<string, unknown>) => r2.push(f) } as never);
+
+    // The old shell was killed and a fresh one spawned in the new directory.
+    expect(spawns[0]?.fake.killed()).toBe(true);
+    expect(spawns).toHaveLength(2);
+    expect(spawns[1]?.cwd).toBe("/workspace/b");
+    expect(r2.find((f) => f.type === "ready")?.cwd).toBe("/workspace/b");
+    // Clean screen: workspace A's output is not replayed to the new client.
+    expect(
+      r2.some((f) => f.type === "data" && String(f.data).includes("output-from-a")),
+    ).toBe(false);
+
+    session.dispose();
+  });
+
   it("spawns a real shell via node-pty end-to-end (output + exit)", async () => {
     // No spawnPty stub: exercises the real native binding + spawn-helper.
     h = await buildTerminalHarness({ shell: "/bin/echo", shellArgs: ["TERMINAL_E2E_OK"] });
