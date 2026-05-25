@@ -56,10 +56,10 @@ export interface SpeechToText {
   readonly toggle: () => void;
 }
 
-// Worklet + Silero model are self-hosted under public/vad/ (copied from
-// node_modules by scripts/copy-vad-assets.mjs) so they load from the app's own
-// origin offline. onnxruntime-web's WASM is bundled by Vite and loaded from
-// there, so it is intentionally not part of baseAssetPath.
+// Worklet, Silero model, AND onnxruntime-web WASM are self-hosted under
+// public/vad/ (copied from node_modules by scripts/copy-vad-assets.mjs).
+// The ort WASM glue (.mjs) is loaded via a runtime-constructed dynamic import()
+// that Vite can't rewrite, so it must live at the exact filename ort expects.
 const VAD_ASSET_PATH = "/vad/";
 
 // Refine the in-progress phrase at most this often — frequent enough to feel
@@ -225,6 +225,7 @@ export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): Speec
       const { MicVAD } = await import("@ricky0123/vad-web");
       const vad = await MicVAD.new({
         baseAssetPath: VAD_ASSET_PATH,
+        onnxWASMBasePath: VAD_ASSET_PATH,
         model: "v5",
         // Tuned to reject transients (keyboard clicks, short noises) and require
         // a real pause before committing a phrase.

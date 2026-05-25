@@ -3,10 +3,10 @@
  * are served from the app's own origin. The dictation feature must work fully
  * offline inside the packaged Electron app (the `app://harness` origin has no
  * CDN access). MicVAD loads its worklet and the Silero model by URL from
- * `baseAssetPath`, so those two must be self-hosted. onnxruntime-web's WASM is
- * NOT copied here — Vite bundles it as a hashed asset and ort loads it from
- * there, which guarantees the build variant (asyncify/jsep/plain) always
- * matches; self-hosting a fixed variant would risk a 404 mismatch.
+ * `baseAssetPath`; onnxruntime-web's WASM glue module is loaded via a runtime-
+ * constructed dynamic `import()` that Vite can't rewrite, so we self-host the
+ * glue (.mjs) and binary (.wasm) here too and point ort at them via
+ * `onnxWASMBasePath`.
  *
  * Runs from the web package's `dev`/`build` scripts. The output lives under
  * public/vad/ and is gitignored (these are derived from node_modules).
@@ -20,6 +20,14 @@ const require = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
 
 const vadDir = dirname(require.resolve("@ricky0123/vad-web/package.json"));
+// Resolve onnxruntime-web from *within* the VAD package so the WASM matches the
+// JS version it imports. (The package's exports map hides package.json, so we
+// resolve the main entry and derive the root from the path.)
+const ortMain = require.resolve("onnxruntime-web", { paths: [vadDir] });
+const ortDir = ortMain.slice(
+  0,
+  ortMain.lastIndexOf("onnxruntime-web") + "onnxruntime-web".length,
+);
 
 const outDir = join(here, "..", "public", "vad");
 mkdirSync(outDir, { recursive: true });
@@ -28,6 +36,10 @@ mkdirSync(outDir, { recursive: true });
 const assets = [
   [join(vadDir, "dist", "vad.worklet.bundle.min.js"), "vad.worklet.bundle.min.js"],
   [join(vadDir, "dist", "silero_vad_v5.onnx"), "silero_vad_v5.onnx"],
+  // ort-web's Emscripten glue is loaded via a runtime `import()` that bundlers
+  // can't rewrite, so it must live at the exact filename ort constructs.
+  [join(ortDir, "dist", "ort-wasm-simd-threaded.mjs"), "ort-wasm-simd-threaded.mjs"],
+  [join(ortDir, "dist", "ort-wasm-simd-threaded.wasm"), "ort-wasm-simd-threaded.wasm"],
 ];
 
 for (const [src, name] of assets) {
