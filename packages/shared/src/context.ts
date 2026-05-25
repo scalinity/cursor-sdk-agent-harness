@@ -10,6 +10,8 @@ export const contextMentionKindSchema = z.enum([
   "symbol",
   "codebase",
   "rules",
+  "docs",
+  "notepad",
 ]);
 export type ContextMentionKind = z.infer<typeof contextMentionKindSchema>;
 

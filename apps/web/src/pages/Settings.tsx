@@ -6,6 +6,8 @@ import { useUiStore } from "../state/ui-store.js";
 import { useCsrfToken } from "../hooks/useCsrfToken.js";
 import { mutatingRequest } from "../lib/http-client.js";
 import { ModeToggle } from "../components/ModeToggle.js";
+import { DocsSettings } from "../components/settings/DocsSettings.js";
+import { CommandsSettings } from "../components/settings/CommandsSettings.js";
 
 export function Settings() {
   const navigate = useNavigate();
@@ -83,8 +85,18 @@ export function Settings() {
             >
               Subagents →
             </button>
+            <button
+              type="button"
+              onClick={() => navigate("/notepads")}
+              className="settings-link"
+            >
+              Notepads →
+            </button>
           </div>
         </section>
+
+        <DocsSettings />
+        <CommandsSettings />
       </div>
     </div>
   );

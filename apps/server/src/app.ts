@@ -316,6 +316,8 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     context: {
       settingsRepo: repos.settings,
       allowlistRepo: repos.workspaceAllowlist,
+      docsRepo: repos.docs,
+      notepadsRepo: repos.notepads,
     },
     search: {
       settingsRepo: repos.settings,
@@ -325,7 +327,14 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       settingsRepo: repos.settings,
       allowlistRepo: repos.workspaceAllowlist,
     },
+    docs: { docsRepo: repos.docs },
+    notepads: { notepadsRepo: repos.notepads },
+    commands: { slashCommandsRepo: repos.slashCommands },
+    terminalAi: {},
   });
+
+  // Seed built-in slash commands on first install
+  repos.slashCommands.seedBuiltins();
 
   return {
     app,

@@ -5,12 +5,16 @@ import {
 import type { FastifyInstance } from "fastify";
 import type { SettingsRepo } from "../db/repositories/settings.repo.js";
 import type { WorkspaceAllowlistRepo } from "../db/repositories/workspace-allowlist.repo.js";
+import type { DocsRepo } from "../db/repositories/docs.repo.js";
+import type { NotepadsRepo } from "../db/repositories/notepads.repo.js";
 import { contextSearch, resolveMention } from "../services/context.service.js";
 import { getActiveWorkspaceRoot } from "../config/active-workspace.js";
 
 export interface ContextRoutesDeps {
   settingsRepo: SettingsRepo;
   allowlistRepo: WorkspaceAllowlistRepo;
+  docsRepo?: DocsRepo | undefined;
+  notepadsRepo?: NotepadsRepo | undefined;
 }
 
 export async function registerContextRoutes(
@@ -42,7 +46,12 @@ export async function registerContextRoutes(
     }
 
     const resolved = await Promise.all(
-      parsed.data.mentions.map((m) => resolveMention(m, root)),
+      parsed.data.mentions.map((m) =>
+        resolveMention(m, root, {
+          docsRepo: deps.docsRepo,
+          notepadsRepo: deps.notepadsRepo,
+        }),
+      ),
     );
     const totalTokenEstimate = resolved.reduce((sum, r) => sum + r.tokenEstimate, 0);
 

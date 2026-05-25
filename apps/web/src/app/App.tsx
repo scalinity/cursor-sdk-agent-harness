@@ -38,6 +38,11 @@ const Settings = lazy(async () => {
   return { default: module.Settings };
 });
 
+const NotepadsPage = lazy(async () => {
+  const module = await import("../pages/Notepads.js");
+  return { default: module.Notepads };
+});
+
 export function App() {
   return (
     <Routes>
@@ -65,6 +70,14 @@ export function App() {
         element={
           <Suspense fallback={null}>
             <Usage />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/notepads"
+        element={
+          <Suspense fallback={null}>
+            <NotepadsPage />
           </Suspense>
         }
       />

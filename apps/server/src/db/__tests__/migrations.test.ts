@@ -15,8 +15,17 @@ describe("migrations + verifyMigrations", () => {
 
     expect(tables).toEqual([
       "agents",
+      "docs_fts",
+      "docs_fts_config",
+      "docs_fts_content",
+      "docs_fts_data",
+      "docs_fts_docsize",
+      "docs_fts_idx",
+      "docs_pages",
+      "docs_sources",
       "events",
       "mcp_servers",
+      "notepads",
       "runs",
       "runs_fts",
       "runs_fts_config",
@@ -25,6 +34,7 @@ describe("migrations + verifyMigrations", () => {
       "runs_fts_docsize",
       "runs_fts_idx",
       "settings",
+      "slash_commands",
       "subagent_definitions",
       "workspace_allowlist",
     ]);

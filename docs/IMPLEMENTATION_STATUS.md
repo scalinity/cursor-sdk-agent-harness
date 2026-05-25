@@ -28,6 +28,7 @@ each phase. Use it as the single source of truth for "what is decided" vs
 | 18 | Embedded Browser Pane (WebContentsView + built-in MCP) | 🟡 in progress |
 | 19 | Execution Modes, Git Status, and Chat UX | ✅ complete | Three-mode execution system (Ask/Agent/YOLO), git branch+dirty in statusbar, code block copy+apply buttons, session rename, Cmd+N new session, FTS run search. Migration 0003, 7 new shared schemas, 4 new server routes, 7 new frontend components/hooks. 431 tests (282 server, 122 web, 10 shared, 6 eslint, 11 scripts). | **Milestone 1 — manual driving — complete & user-verified (browser fully functional).** Electron `WebContentsView` browser in the right-pane Browser tab, one isolated `persist:agent-<id>` session per agent (+ a standalone `manual` session so the tab works as a browser without an agent), driven manually (URL bar, back/fwd/reload/stop). Built-in browser MCP server + agent control + action visualization + console/network drawers + replay are **Milestone 2** (in progress). See the Phase 18 section below. |
 | 20 | Context Intelligence and Rules | ✅ complete | @-mention system (file/folder/symbol/codebase/rules), project rules (.harness/rules/ with always/glob/manual scopes), codebase search (grep+file via ripgrep with fallback). Migration 0004, 16 new shared schemas, 3 new server routes, 3 new services, 6 new frontend components/hooks, Search tab in right pane. 464 tests (306 server, 122 web, 30 shared, 6 eslint, 11 scripts). |
+| 22 | Enrichment: Docs Indexing, Notepads, Terminal AI, Slash Commands | ✅ complete | Custom documentation indexing (crawl + FTS5 search + @docs mentions), persistent Notepads (@notepad mentions, editor page), Terminal AI (Cmd+K pattern-based command generation with dangerous-command detection), user-definable slash commands (CRUD + template expansion + built-in /explain, /review, /test, /fix, /refactor). Migration 0005, 19 new shared schemas (enrichment.ts), 3 new repos (docs, notepads, slash-commands), 4 new server routes, 1 new service (docs-crawler), 4 new hooks, 4 new components/pages, extended @-mention system with docs+notepad kinds. 500+ tests (350 server, 122 web). |
 
 ---
 
@@ -3114,4 +3115,104 @@ Web:
 
 ### Next phase
 
-Phase 21 — Planning, Git Integration, and Session Diffs (`21_PLANNING_GIT_AND_SESSION_DIFFS.md`).
+Phase 22 — Enrichment: Docs Indexing, Notepads, Terminal AI, Slash Commands (`22_ENRICHMENT.md`).
+
+---
+
+## Phase 22 Outcomes — Enrichment: Docs Indexing, Notepads, Terminal AI, Slash Commands
+
+### Summary
+
+Added four enrichment features that expand the harness from a chat-only SDK
+wrapper into a power-user tool with rich context sources, smart terminal
+interaction, and extensible commands.
+
+### Features delivered
+
+1. **Custom Documentation Indexing** — Users paste a documentation URL → the
+   server crawls the site (BFS, max 2 concurrent, 500ms delay, robots.txt
+   respect) → content is indexed in FTS5 → available via `@docs` mentions
+   in the Composer. CRUD endpoints for sources, search endpoint with FTS5
+   MATCH and snippet extraction.
+
+2. **Persistent Notepads** — Named markdown documents stored in the database.
+   `@notepad` mentions resolve notepad content into agent context. Full CRUD
+   with unique-name validation, auto-save editor (2s debounce + save-on-blur),
+   character count and token estimate. Notepads page at `/notepads`.
+
+3. **Terminal AI (Cmd+K)** — Pattern-based command generation from natural
+   language prompts. Dangerous-command detection (rm -rf, kill, DROP TABLE,
+   git reset --hard, etc.) with UI warning. Template fallback for
+   unrecognized prompts. `TerminalCommandBar` component with Enter/Tab/Esc
+   keyboard flow.
+
+4. **Slash Commands** — User-definable prompt templates with `{{variable}}`
+   substitution. Five built-in commands seeded on first install (/explain,
+   /review, /test, /fix, /refactor). CRUD + expand endpoints. `useSlashCommands`
+   hook with pattern matching, variable parsing. Management UI in Settings.
+
+### Schema changes
+
+- Migration `0005_enrichment.sql`:
+  - `CREATE TABLE docs_sources` — documentation source metadata
+  - `CREATE TABLE docs_pages` — crawled page content
+  - `CREATE VIRTUAL TABLE docs_fts USING fts5(...)` — full-text index on docs
+  - `CREATE TABLE notepads` — persistent context documents
+  - `CREATE TABLE slash_commands` — user-definable prompt templates
+  - FTS insert/delete triggers on `docs_pages`
+
+### Files created
+
+Shared:
+- `packages/shared/src/enrichment.ts` — 19 Zod schemas for all Phase 22 features
+
+Server:
+- `apps/server/src/db/migrations/0005_enrichment.sql`
+- `apps/server/src/db/repositories/docs.repo.ts`
+- `apps/server/src/db/repositories/notepads.repo.ts`
+- `apps/server/src/db/repositories/slash-commands.repo.ts`
+- `apps/server/src/services/docs-crawler.service.ts`
+- `apps/server/src/routes/docs.routes.ts`
+- `apps/server/src/routes/notepads.routes.ts`
+- `apps/server/src/routes/terminal-ai.routes.ts`
+- `apps/server/src/routes/commands.routes.ts`
+- `apps/server/src/services/__tests__/docs-crawler.test.ts`
+- `apps/server/src/routes/__tests__/docs.routes.test.ts`
+- `apps/server/src/routes/__tests__/notepads.routes.test.ts`
+- `apps/server/src/routes/__tests__/terminal-ai.routes.test.ts`
+- `apps/server/src/routes/__tests__/commands.routes.test.ts`
+
+Web:
+- `apps/web/src/hooks/useDocsSources.ts`
+- `apps/web/src/hooks/useNotepads.ts`
+- `apps/web/src/hooks/useTerminalAI.ts`
+- `apps/web/src/hooks/useSlashCommands.ts`
+- `apps/web/src/components/settings/DocsSettings.tsx`
+- `apps/web/src/components/settings/CommandsSettings.tsx`
+- `apps/web/src/components/TerminalCommandBar.tsx`
+- `apps/web/src/pages/Notepads.tsx`
+
+### Files modified (key changes)
+
+- `packages/shared/src/context.ts` — added "docs" and "notepad" to contextMentionKindSchema
+- `packages/shared/src/index.ts` — barrel exports for enrichment module
+- `apps/server/src/db/repositories/index.ts` — added DocsRepo, NotepadsRepo, SlashCommandsRepo
+- `apps/server/src/routes/index.ts` — registered 4 new route modules
+- `apps/server/src/app.ts` — wired new route deps + slash command seed
+- `apps/server/src/services/context.service.ts` — added @docs and @notepad resolvers
+- `apps/server/src/routes/context.routes.ts` — pass docsRepo/notepadsRepo to resolveMention
+- `apps/server/src/db/__tests__/migrations.test.ts` — updated table list for new tables
+- `apps/web/src/app/App.tsx` — added /notepads route
+- `apps/web/src/pages/Settings.tsx` — added DocsSettings + CommandsSettings sections
+- `apps/web/src/styles/app-shell.css` — styles for all new components
+
+### Acceptance gates
+
+- `pnpm typecheck` ✅
+- `pnpm lint` ✅
+- `pnpm test` ✅ — 350 server tests, 122 web tests
+- Desktop build + install ✅ (May 25 13:03)
+
+### Next phase
+
+Phase 23 — Semantic Search and Multi-Model (`23_SEMANTIC_SEARCH_AND_MULTI_MODEL.md`).
