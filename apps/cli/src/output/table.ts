@@ -1,3 +1,5 @@
+import { sanitizeTerminalText } from "./sanitize.js";
+
 export interface TableColumn<T> {
   key: string;
   header: string;
@@ -12,12 +14,12 @@ function truncate(value: string, maxWidth: number | undefined): string {
 }
 
 export function renderTable<T>(rows: readonly T[], columns: readonly TableColumn<T>[]): string {
-  const rendered = rows.map((row) => columns.map((column) => truncate(column.value(row), column.maxWidth)));
+  const rendered = rows.map((row) => columns.map((column) => truncate(sanitizeTerminalText(column.value(row)), column.maxWidth)));
   const widths = columns.map((column, index) => {
     const values = rendered.map((row) => row[index] ?? "");
-    return Math.max(column.header.length, ...values.map((value) => value.length));
+    return Math.max(sanitizeTerminalText(column.header).length, ...values.map((value) => value.length));
   });
-  const header = columns.map((column, index) => column.header.padEnd(widths[index] ?? 0)).join("  ");
+  const header = columns.map((column, index) => sanitizeTerminalText(column.header).padEnd(widths[index] ?? 0)).join("  ");
   const divider = widths.map((width) => "─".repeat(width)).join("  ");
   const body = rendered.map((row) => row.map((value, index) => value.padEnd(widths[index] ?? 0)).join("  "));
   return [header, divider, ...body].join("\n");

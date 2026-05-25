@@ -2,10 +2,15 @@ import React from "react";
 import { Box, Text } from "ink";
 import chalk from "chalk";
 import type { ServerFrame } from "@harness/shared";
+import { sanitizeTerminalText } from "../output/sanitize.js";
 import { formatMicros } from "../output/table.js";
 import { renderDiff } from "../render/diff.js";
 import { renderMarkdown } from "../render/markdown.js";
 import { formatToolCallLine } from "./ToolCallLine.js";
+
+const MAX_BUFFER_ITEMS = 5000;
+const MAX_TEXT_LINES = 5000;
+const MAX_TEXT_BYTES = 512 * 1024;
 
 export type StreamItem =
   | { type: "assistant"; text: string }
@@ -31,9 +36,9 @@ export function ingestStreamFrame(buffer: StreamBuffer, frame: ServerFrame): Str
       const delta = frame.event.payload.text_delta ?? "";
       const last = items.at(-1);
       if (last?.type === "assistant" && !frame.event.payload.is_replacement) {
-        items[items.length - 1] = { type: "assistant", text: last.text + delta };
+        items[items.length - 1] = { type: "assistant", text: capStreamText(last.text + delta) };
       } else {
-        items.push({ type: "assistant", text: delta });
+        items.push({ type: "assistant", text: capStreamText(delta) });
       }
       break;
     }
@@ -41,9 +46,9 @@ export function ingestStreamFrame(buffer: StreamBuffer, frame: ServerFrame): Str
       const delta = frame.event.payload.text_delta;
       const last = items.at(-1);
       if (last?.type === "thinking" && !frame.event.payload.is_replacement) {
-        items[items.length - 1] = { ...last, text: last.text + delta };
+        items[items.length - 1] = { ...last, text: capStreamText(last.text + delta) };
       } else {
-        items.push({ type: "thinking", text: delta });
+        items.push({ type: "thinking", text: capStreamText(delta) });
       }
       break;
     }
@@ -120,17 +125,17 @@ function renderStreamItem(item: StreamItem): string {
     case "assistant":
       return renderMarkdown(item.text);
     case "thinking":
-      return chalk.dim(`◐ Thinking...\n  ${item.text}`);
+      return chalk.dim(`◐ Thinking...\n  ${sanitizeTerminalText(item.text)}`);
     case "tool":
       return formatToolCallLine(item);
     case "diff":
-      return `${chalk.cyan(`┌─ ${item.path} ─`)}\n${renderDiff(item.diff)}\n${chalk.cyan("└────────")}`;
+      return `${chalk.cyan(`┌─ ${sanitizeTerminalText(item.path)} ─`)}\n${renderDiff(item.diff)}\n${chalk.cyan("└────────")}`;
     case "approval":
-      return chalk.yellow(`⚠ Approval required: ${item.description} [y]es / [n]o / [a]lways`);
+      return chalk.yellow(`⚠ Approval required: ${sanitizeTerminalText(item.description)} [y]es / [n]o / [a]lways`);
     case "summary":
       return renderSummary(item);
     case "error":
-      return chalk.red(item.message);
+      return chalk.red(sanitizeTerminalText(item.message));
   }
 }
 
@@ -143,7 +148,7 @@ function renderSummary(item: Extract<StreamItem, { type: "summary" }>): string {
 
 function summarizeUnknown(value: unknown): string {
   if (value === undefined || value === null) return "";
-  const text = typeof value === "string" ? value : JSON.stringify(value);
+  const text = sanitizeTerminalText(typeof value === "string" ? value : JSON.stringify(value));
   if (!text) return "";
   return text.length > 60 ? `${text.slice(0, 59)}…` : text;
 }
@@ -159,6 +164,13 @@ function sumTokens(input: number | null, output: number | null): number | null {
 }
 
 function capItems(items: StreamItem[]): StreamItem[] {
-  if (items.length <= 5000) return items;
-  return items.slice(items.length - 5000);
+  if (items.length <= MAX_BUFFER_ITEMS) return items;
+  return items.slice(items.length - MAX_BUFFER_ITEMS);
+}
+
+function capStreamText(text: string): string {
+  let next = text.length <= MAX_TEXT_BYTES ? text : text.slice(text.length - MAX_TEXT_BYTES);
+  const lines = next.split("\n");
+  if (lines.length > MAX_TEXT_LINES) next = lines.slice(lines.length - MAX_TEXT_LINES).join("\n");
+  return next;
 }

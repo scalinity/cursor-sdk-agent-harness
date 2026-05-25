@@ -35,11 +35,19 @@ export function mentionItemToChip(item: Pick<MentionSelectionItem, "kind" | "val
 export interface MentionPopupProps {
   results: ContextSearchResult | null;
   selectedIndex: number;
+  open?: boolean;
 }
 
-export function MentionPopup({ results, selectedIndex }: MentionPopupProps) {
+export function MentionPopup({ results, selectedIndex, open = results !== null }: MentionPopupProps) {
   const items = flattenMentionResults(results).slice(0, 8);
-  if (items.length === 0) return null;
+  if (!open) return null;
+  if (items.length === 0) {
+    return (
+      <Box flexDirection="column" borderStyle="round" paddingX={1}>
+        <Text dimColor>type to search</Text>
+      </Box>
+    );
+  }
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={1}>
       {items.map((item, index) => {

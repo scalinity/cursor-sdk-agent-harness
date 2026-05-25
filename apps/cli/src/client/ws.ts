@@ -6,23 +6,40 @@ import type { CliStreamPort } from "../types.js";
 export interface HarnessWsClientOptions {
   serverUrl: string;
   csrfToken: string;
+  origin?: string;
+}
+
+export class CliStreamError extends Error {
+  readonly code: "STREAM_DISCONNECTED";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "CliStreamError";
+    this.code = "STREAM_DISCONNECTED";
+  }
 }
 
 export class HarnessWsClient implements CliStreamPort {
   private socket: WebSocket | null = null;
   private readonly url: string;
+  private readonly origin: string;
 
   constructor(options: HarnessWsClientOptions) {
     this.url = buildWsUrl(options.serverUrl, options.csrfToken);
+    this.origin = options.origin ?? "http://127.0.0.1:5173";
   }
 
   async connect(onFrame: (frame: ServerFrame) => void): Promise<void> {
     if (this.socket?.readyState === WebSocket.OPEN) return;
     await new Promise<void>((resolve, reject) => {
-      const socket = new WebSocket(this.url, { origin: "http://127.0.0.1:5173" });
+      const socket = new WebSocket(this.url, { origin: this.origin });
       this.socket = socket;
-      socket.once("open", () => resolve());
-      socket.once("error", (error) => reject(error));
+      const rejectInitial = (error: Error) => reject(error);
+      socket.once("open", () => {
+        socket.off("error", rejectInitial);
+        resolve();
+      });
+      socket.once("error", rejectInitial);
       socket.on("message", (data) => {
         const raw = typeof data === "string" ? data : data.toString("utf8");
         let parsed: unknown;
@@ -49,9 +66,13 @@ export class HarnessWsClient implements CliStreamPort {
   }
 
   async subscribeToRun(runId: string, onFrame: (frame: ServerFrame) => void): Promise<void> {
+    let terminalFrameSeen = false;
     await this.connect((frame) => {
       onFrame(frame);
-      if (isTerminalFrame(frame)) this.close();
+      if (isTerminalFrame(frame)) {
+        terminalFrameSeen = true;
+        this.close();
+      }
     });
     this.send({
       id: frameId("sub"),
@@ -61,13 +82,32 @@ export class HarnessWsClient implements CliStreamPort {
       after_seq: 0,
       replay: { enabled: true, speed: "instant" },
     });
-    await new Promise<void>((resolve) => {
-      const poll = setInterval(() => {
-        if (!this.socket || this.socket.readyState === WebSocket.CLOSED || this.socket.readyState === WebSocket.CLOSING) {
-          clearInterval(poll);
+    await new Promise<void>((resolve, reject) => {
+      const socket = this.socket;
+      if (!socket) {
+        reject(new CliStreamError("WebSocket closed before subscription started."));
+        return;
+      }
+      const cleanup = () => {
+        socket.off("close", onClose);
+        socket.off("error", onError);
+      };
+      const onClose = (code: number, reason: Buffer) => {
+        cleanup();
+        this.socket = null;
+        if (terminalFrameSeen) {
           resolve();
+          return;
         }
-      }, 25);
+        const suffix = reason.length > 0 ? `: ${reason.toString("utf8")}` : "";
+        reject(new CliStreamError(`WebSocket disconnected before the run finished (code ${code})${suffix}`));
+      };
+      const onError = (error: Error) => {
+        cleanup();
+        reject(new CliStreamError(error.message));
+      };
+      socket.once("close", onClose);
+      socket.once("error", onError);
     });
   }
 
@@ -107,7 +147,7 @@ export class HarnessWsClient implements CliStreamPort {
   }
 }
 
-function buildWsUrl(serverUrl: string, csrfToken: string): string {
+export function buildWsUrl(serverUrl: string, csrfToken: string): string {
   const url = new URL(serverUrl.replace(/\/$/, ""));
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = "/ws";
@@ -119,7 +159,7 @@ function frameId(prefix: string): string {
   return `${prefix}-${randomUUID()}`;
 }
 
-function isTerminalFrame(frame: ServerFrame): boolean {
+export function isTerminalFrame(frame: ServerFrame): boolean {
   if (frame.type === "run.final_result" || frame.type === "run.interrupted") return true;
   return frame.type === "sdk.status" && ["FINISHED", "ERROR", "CANCELLED", "EXPIRED"].includes(frame.event.payload.status);
 }

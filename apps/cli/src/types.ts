@@ -1,4 +1,18 @@
-import type { AgentSummary, ContextMention, CreateRunRequest, CreateRunResponse, ServerFrame } from "@harness/shared";
+import type {
+  AgentDetailResponse,
+  AgentSummary,
+  ContextMention,
+  ContextSearchResult,
+  CreateAgentRequest,
+  CreateRunRequest,
+  CreateRunResponse,
+  FileSearchResult,
+  GetRunEventsResponse,
+  GrepSearchResult,
+  RunSummary,
+  ServerFrame,
+  UpdateAgentRequest,
+} from "@harness/shared";
 
 export type CliMode = "ask" | "agent";
 
@@ -11,6 +25,7 @@ export interface CliAgentSummary {
 
 export interface CliHttpPort {
   ensureCsrfToken(): Promise<string>;
+  getAgent(agentId: string): Promise<AgentDetailResponse>;
   getOrCreateAgent(input: {
     agentId?: string;
     name?: string;
@@ -19,24 +34,29 @@ export interface CliHttpPort {
     workspace?: string;
   }): Promise<CliAgentSummary>;
   createRun(input: CreateRunRequest): Promise<CreateRunResponse>;
+  getRun(runId: string): Promise<RunSummary>;
+  getRunEvents(runId: string, input?: { afterSeq?: number; limit?: number; direction?: "asc" | "desc" }): Promise<GetRunEventsResponse>;
   listAgents(input?: { limit?: number; offset?: number }): Promise<{ items: AgentSummary[] }>;
-  createAgent(input: unknown): Promise<AgentSummary>;
-  listRuns(input: Record<string, string | number | boolean | undefined>): Promise<{ items: unknown[]; total: number }>;
-  grepSearch(input: Record<string, string | number | boolean | undefined>): Promise<unknown>;
-  fileSearch(input: Record<string, string | number | boolean | undefined>): Promise<unknown>;
-  contextSearch(query: string): Promise<unknown>;
+  createAgent(input: CreateAgentRequest): Promise<AgentSummary>;
+  updateAgent(agentId: string, input: UpdateAgentRequest): Promise<AgentDetailResponse>;
+  listRuns(input: Record<string, string | number | boolean | undefined>): Promise<{ items: RunSummary[]; total: number }>;
+  grepSearch(input: Record<string, string | number | boolean | undefined>): Promise<GrepSearchResult>;
+  fileSearch(input: Record<string, string | number | boolean | undefined>): Promise<FileSearchResult>;
+  contextSearch(query: string): Promise<ContextSearchResult>;
 }
 
 export interface CliStreamPort {
   subscribeToRun(runId: string, onFrame: (frame: ServerFrame) => void): Promise<void>;
   cancelRun?(runId: string): void;
   sendApproval?(runId: string, requestId: string, decision: "approve" | "deny", reason?: string): void;
+  close?(): void;
 }
 
 export interface CommandDeps {
   http: CliHttpPort;
   stream?: CliStreamPort;
   write: (line: string) => void;
+  writeRaw?: (text: string) => void;
   writeError?: (line: string) => void;
 }
 

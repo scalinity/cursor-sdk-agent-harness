@@ -2,17 +2,30 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { z, type ZodTypeAny } from "zod";
 import {
+  agentDetailResponseSchema,
   agentSummarySchema,
   contextSearchResultSchema,
+  createAgentRequestSchema,
   createRunResponseSchema,
   csrfTokenResponseSchema,
   fileSearchResultSchema,
+  getRunEventsResponseSchema,
   grepSearchResultSchema,
+  runSummarySchema,
   listAgentsResponseSchema,
   listRunsResponseSchema,
+  updateAgentRequestSchema,
+  type AgentDetailResponse,
   type AgentSummary,
+  type ContextSearchResult,
+  type CreateAgentRequest,
   type CreateRunRequest,
   type CreateRunResponse,
+  type FileSearchResult,
+  type GetRunEventsResponse,
+  type GrepSearchResult,
+  type RunSummary,
+  type UpdateAgentRequest,
 } from "@harness/shared";
 import { DEFAULT_MODEL_ID } from "../config.js";
 import type { CliAgentSummary, CliHttpPort, CliMode } from "../types.js";
@@ -62,8 +75,18 @@ export class HarnessHttpClient implements CliHttpPort {
     return this.request("/api/agents", { query: input, schema: listAgentsResponseSchema });
   }
 
-  async createAgent(input: unknown): Promise<AgentSummary> {
-    return this.request("/api/agents", { method: "POST", body: input, schema: agentSummarySchema });
+  async getAgent(agentId: string): Promise<AgentDetailResponse> {
+    return this.request("/api/agents/" + encodeURIComponent(agentId), { schema: agentDetailResponseSchema });
+  }
+
+  async createAgent(input: CreateAgentRequest): Promise<AgentSummary> {
+    const parsed = createAgentRequestSchema.parse(input);
+    return this.request("/api/agents", { method: "POST", body: parsed, schema: agentSummarySchema });
+  }
+
+  async updateAgent(agentId: string, input: UpdateAgentRequest): Promise<AgentDetailResponse> {
+    const parsed = updateAgentRequestSchema.parse(input);
+    return this.request("/api/agents/" + encodeURIComponent(agentId), { method: "PATCH", body: parsed, schema: agentDetailResponseSchema });
   }
 
   async getOrCreateAgent(input: {
@@ -74,58 +97,72 @@ export class HarnessHttpClient implements CliHttpPort {
     workspace?: string;
   }): Promise<CliAgentSummary> {
     if (input.agentId) {
-      const detail = await this.request("/api/agents/" + encodeURIComponent(input.agentId), { schema: agentSummarySchema.passthrough() });
-      return {
-        id: String(detail.id),
-        name: String(detail.name),
-        modelId: String(detail.modelId),
-        executionMode: normalizeExecutionMode(detail.executionMode),
-      };
+      const detail = await this.getAgent(input.agentId);
+      return cliAgentFromSummary(detail);
     }
 
+    const workspace = path.resolve(input.workspace ?? process.cwd());
     const agents = await this.listAgents({ limit: 100 });
-    const active = agents.items.find((agent) => agent.status === "active" && (!input.model || agent.modelId === input.model));
-    if (active) {
-      return {
-        id: active.id,
-        name: active.name,
-        modelId: active.modelId,
-        executionMode: normalizeExecutionMode(active.executionMode),
-      };
+    for (const agent of agents.items) {
+      if (agent.status !== "active") continue;
+      if (input.model && agent.modelId !== input.model) continue;
+      const detail = await this.getAgent(agent.id);
+      if (!agentHasWorkspace(detail, workspace)) continue;
+      if (input.mode && detail.executionMode !== input.mode) {
+        return cliAgentFromSummary(await this.updateAgent(detail.id, { executionMode: input.mode }));
+      }
+      return cliAgentFromSummary(detail);
     }
 
-    const workspace = input.workspace ?? process.cwd();
     const created = await this.createAgent({
       name: input.name ?? `${path.basename(workspace)} CLI`,
       modelId: input.model ?? DEFAULT_MODEL_ID,
       mode: "local",
       cwd: [workspace],
+      mcpServerIds: [],
+      subagentDefinitionIds: [],
     });
-    return {
-      id: created.id,
-      name: created.name,
-      modelId: created.modelId,
-      executionMode: normalizeExecutionMode(created.executionMode),
-    };
+    if (input.mode && created.executionMode !== input.mode) {
+      return cliAgentFromSummary(await this.updateAgent(created.id, { executionMode: input.mode }));
+    }
+    return cliAgentFromSummary(created);
   }
 
   async createRun(input: CreateRunRequest): Promise<CreateRunResponse> {
     return this.request("/api/runs", { method: "POST", body: input, schema: createRunResponseSchema });
   }
 
-  async listRuns(input: Record<string, string | number | boolean | undefined>): Promise<{ items: unknown[]; total: number }> {
+  async getRun(runId: string): Promise<RunSummary> {
+    return this.request("/api/runs/" + encodeURIComponent(runId), { schema: runSummarySchema });
+  }
+
+  async getRunEvents(
+    runId: string,
+    input: { afterSeq?: number; limit?: number; direction?: "asc" | "desc" } = {},
+  ): Promise<GetRunEventsResponse> {
+    return this.request("/api/runs/" + encodeURIComponent(runId) + "/events", {
+      query: {
+        after_seq: input.afterSeq,
+        limit: input.limit,
+        direction: input.direction,
+      },
+      schema: getRunEventsResponseSchema,
+    });
+  }
+
+  async listRuns(input: Record<string, string | number | boolean | undefined>): Promise<{ items: RunSummary[]; total: number }> {
     return this.request("/api/runs", { query: input, schema: listRunsResponseSchema });
   }
 
-  async grepSearch(input: Record<string, string | number | boolean | undefined>): Promise<unknown> {
+  async grepSearch(input: Record<string, string | number | boolean | undefined>): Promise<GrepSearchResult> {
     return this.request("/api/search/grep", { query: input, schema: grepSearchResultSchema });
   }
 
-  async fileSearch(input: Record<string, string | number | boolean | undefined>): Promise<unknown> {
+  async fileSearch(input: Record<string, string | number | boolean | undefined>): Promise<FileSearchResult> {
     return this.request("/api/search/files", { query: input, schema: fileSearchResultSchema });
   }
 
-  async contextSearch(query: string): Promise<unknown> {
+  async contextSearch(query: string): Promise<ContextSearchResult> {
     return this.request("/api/context/search", { query: { q: query }, schema: contextSearchResultSchema });
   }
 
@@ -201,4 +238,18 @@ export class HarnessHttpClient implements CliHttpPort {
 
 function normalizeExecutionMode(value: unknown): CliMode {
   return value === "ask" ? "ask" : "agent";
+}
+
+function cliAgentFromSummary(agent: Pick<AgentSummary, "id" | "name" | "modelId" | "executionMode">): CliAgentSummary {
+  return {
+    id: agent.id,
+    name: agent.name,
+    modelId: agent.modelId,
+    executionMode: normalizeExecutionMode(agent.executionMode),
+  };
+}
+
+function agentHasWorkspace(agent: AgentDetailResponse, workspace: string): boolean {
+  const cwd = agent.cwd ?? [];
+  return cwd.some((entry) => path.resolve(entry) === workspace);
 }
