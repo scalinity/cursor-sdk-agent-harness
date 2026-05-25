@@ -1,8 +1,12 @@
-import { memo, createElement } from "react";
+import { memo, createElement, useState } from "react";
 import type { KnownLanguage } from "@harness/shared";
 import type { MarkdownBlock } from "../../lib/streaming-markdown-projector.js";
 import { detectLanguageFromPath } from "../../lib/code-edit-events.js";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard.js";
+import { mutatingRequest } from "../../lib/http-client.js";
+import { useUiStore } from "../../state/ui-store.js";
+import { httpRequest } from "../../lib/http-client.js";
+import { csrfTokenResponseSchema } from "@harness/shared";
 import { StreamingText } from "./StreamingText.js";
 import { SyntaxHighlighter } from "./SyntaxHighlighter.js";
 
@@ -84,6 +88,24 @@ function ApplyIcon({ className }: { className?: string }) {
   );
 }
 
+function SpinnerIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M7 1v2M7 11v2M1 7h2M11 7h2M2.76 2.76l1.41 1.41M9.83 9.83l1.41 1.41M2.76 11.24l1.41-1.41M9.83 4.17l1.41-1.41" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ErrorXIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+type ApplyState = "idle" | "applying" | "applied" | "error";
+
 interface CodeBlockProps {
   text: string;
   language: KnownLanguage;
@@ -100,26 +122,47 @@ interface CodeBlockProps {
  */
 function CodeBlock({ text, language, languageRaw, closed, terminal }: CodeBlockProps) {
   const { copied, copy } = useCopyToClipboard();
+  const [applyState, setApplyState] = useState<ApplyState>("idle");
   const filename = parseFilenameFromFence(languageRaw);
 
   const handleApply = () => {
-    if (!filename) return;
-    // Fire-and-forget. CSRF token is read from the store at call time.
-    // We use the raw fetch approach since this is a simple POST.
-    const csrf = (
-      document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement | null
-    )?.content;
-    void fetch("/api/files/write", {
+    if (!filename || applyState === "applying") return;
+    setApplyState("applying");
+    void mutatingRequest("/api/files/write", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        ...(csrf ? { "X-CSRF-Token": csrf } : {}),
+      body: { path: filename, content: text },
+      getCsrfToken: () => useUiStore.getState().csrfToken,
+      refreshCsrfToken: async () => {
+        try {
+          const res = await httpRequest("/api/security/csrf-token", {
+            responseSchema: csrfTokenResponseSchema,
+          });
+          useUiStore.getState().setCsrfToken(res.token);
+          return res.token;
+        } catch {
+          return null;
+        }
       },
-      credentials: "same-origin",
-      body: JSON.stringify({ path: filename, content: text }),
-    });
+    })
+      .then(() => {
+        setApplyState("applied");
+      })
+      .catch(() => {
+        setApplyState("error");
+      });
   };
+
+  const applyIcon =
+    applyState === "applying" ? <SpinnerIcon className="size-3.5 animate-spin" /> :
+    applyState === "applied" ? <CheckSmallIcon className="size-3.5" /> :
+    applyState === "error" ? <ErrorXIcon className="size-3.5 text-danger" /> :
+    <ApplyIcon className="size-3.5" />;
+
+  const applyLabel =
+    applyState === "applying" ? "Applying..." :
+    applyState === "applied" ? "Applied" :
+    applyState === "error" ? "Failed" :
+    "Apply";
 
   return (
     <pre className="streaming-md__code group relative">
@@ -129,13 +172,14 @@ function CodeBlock({ text, language, languageRaw, closed, terminal }: CodeBlockP
         {filename ? (
           <button
             type="button"
-            className="flex items-center gap-1 rounded-md bg-surface-3 px-1.5 py-0.5 text-2xs text-text-tertiary transition-colors hover:text-text-primary"
+            className="flex items-center gap-1 rounded-md bg-surface-3 px-1.5 py-0.5 text-2xs text-text-tertiary transition-colors hover:text-text-primary disabled:opacity-50"
             onClick={handleApply}
-            title={`Apply to ${filename}`}
-            aria-label={`Apply to ${filename}`}
+            disabled={applyState === "applying"}
+            title={applyState === "error" ? "Apply failed" : `Apply to ${filename}`}
+            aria-label={applyState === "error" ? "Apply failed" : `Apply to ${filename}`}
           >
-            <ApplyIcon className="size-3.5" />
-            <span>Apply</span>
+            {applyIcon}
+            <span>{applyLabel}</span>
           </button>
         ) : null}
         <button

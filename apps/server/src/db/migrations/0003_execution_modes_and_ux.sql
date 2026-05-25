@@ -19,7 +19,6 @@ CREATE VIRTUAL TABLE IF NOT EXISTS runs_fts USING fts5(
   run_id UNINDEXED,
   prompt,
   name,
-  content='',
   tokenize='porter unicode61'
 );
 
