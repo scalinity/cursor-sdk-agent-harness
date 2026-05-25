@@ -174,7 +174,7 @@ export const browserSnapshotOutputSchema = z.object({
   title: z.string(),
 });
 
-export const browserClickInputSchema = z.object({ ref: z.string().min(1) });
+export const browserClickInputSchema = z.object({ ref: z.string().regex(/^e\d+$/, "ref must match /^e\\d+$/ from a prior browser_snapshot") });
 export const browserClickOutputSchema = z.object({
   clicked: z.literal(true),
   urlAfter: z.string(),
@@ -182,7 +182,7 @@ export const browserClickOutputSchema = z.object({
 });
 
 export const browserTypeInputSchema = z.object({
-  ref: z.string().min(1),
+  ref: z.string().regex(/^e\d+$/, "ref must match /^e\\d+$/ from a prior browser_snapshot"),
   text: z.string(),
   submit: z.boolean().optional(),
 });
@@ -212,7 +212,7 @@ export const browserNetworkRequestsOutputSchema = z.array(networkRequestSchema);
 export const browserWaitForInputSchema = z
   .object({
     text: z.string().optional(),
-    ref: z.string().optional(),
+    ref: z.string().regex(/^e\d+$/, "ref must match /^e\\d+$/ from a prior browser_snapshot").optional(),
     ms: z.number().int().nonnegative().optional(),
     timeoutMs: z.number().int().positive().optional(),
   })
