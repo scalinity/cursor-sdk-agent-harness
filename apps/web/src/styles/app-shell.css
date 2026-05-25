@@ -1421,3 +1421,41 @@ body,
   font-size: var(--font-size-sm);
   line-height: var(--line-height-normal);
 }
+
+/* ---- Embedded terminal ---- */
+/* The mount stays in the tree once first opened so the PTY session and
+   scrollback survive a tab switch; it's hidden (not unmounted) when another
+   right-pane surface is active. */
+.terminal-mount {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.terminal-mount--hidden {
+  display: none;
+}
+.terminal-surface {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-background);
+}
+.terminal-surface__host {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-2);
+}
+.terminal-surface__status {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-2);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-tertiary);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-2);
+}
