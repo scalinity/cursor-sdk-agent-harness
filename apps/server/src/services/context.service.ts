@@ -2,6 +2,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { ContextMention, ResolvedMention, ContextSearchResult } from "@harness/shared";
 import { grepSearch } from "./search.service.js";
+import type { DocsRepo } from "../db/repositories/docs.repo.js";
+import type { NotepadsRepo } from "../db/repositories/notepads.repo.js";
 
 const FILE_TRUNCATE_CHARS = 50_000;
 const SYMBOL_TRUNCATE_CHARS = 10_000;
@@ -219,9 +221,15 @@ function assertWithinWorkspace(resolved: string, root: string): void {
 // Content resolution
 // ---------------------------------------------------------------------------
 
+export interface ResolveMentionDeps {
+  docsRepo?: DocsRepo | undefined;
+  notepadsRepo?: NotepadsRepo | undefined;
+}
+
 export async function resolveMention(
   mention: ContextMention,
   workspaceRoot: string,
+  deps?: ResolveMentionDeps | undefined,
 ): Promise<ResolvedMention> {
   switch (mention.kind) {
     case "file":
@@ -239,6 +247,10 @@ export async function resolveMention(
         tokenEstimate: 10,
         truncated: false,
       };
+    case "docs":
+      return resolveDocs(mention, deps?.docsRepo);
+    case "notepad":
+      return resolveNotepad(mention, deps?.notepadsRepo);
   }
 }
 
@@ -381,4 +393,55 @@ async function resolveCodebase(mention: ContextMention, root: string): Promise<R
     tokenEstimate: estimateTokens(content),
     truncated: searchResult.truncated,
   };
+}
+
+const DOCS_MAX_RESULTS = 5;
+const DOCS_SNIPPET_MAX_CHARS = 500;
+
+async function resolveDocs(
+  mention: ContextMention,
+  docsRepo: DocsRepo | undefined,
+): Promise<ResolvedMention> {
+  if (!docsRepo) {
+    return { mention, content: "[Docs indexing not available]", tokenEstimate: 10, truncated: false };
+  }
+
+  // Belt-and-braces: an FTS5 edge case here must degrade this one mention,
+  // not reject the whole Promise.all batch in /api/context/resolve.
+  let results: ReturnType<DocsRepo["search"]>;
+  try {
+    results = docsRepo.search(mention.value, DOCS_MAX_RESULTS);
+  } catch {
+    return { mention, content: `[Docs search failed for: ${mention.value}]`, tokenEstimate: 12, truncated: false };
+  }
+  if (results.length === 0) {
+    return { mention, content: `[No documentation results for: ${mention.value}]`, tokenEstimate: 15, truncated: false };
+  }
+
+  const sections = results.map((r) => {
+    const snippet = r.snippet.length > DOCS_SNIPPET_MAX_CHARS
+      ? r.snippet.slice(0, DOCS_SNIPPET_MAX_CHARS) + "..."
+      : r.snippet;
+    return `// ${r.sourceName} — ${r.title}\n// ${r.url}\n${snippet}`;
+  });
+
+  const content = `// Documentation search: ${mention.value}\n${sections.join("\n\n")}`;
+  return { mention, content, tokenEstimate: estimateTokens(content), truncated: false };
+}
+
+async function resolveNotepad(
+  mention: ContextMention,
+  notepadsRepo: NotepadsRepo | undefined,
+): Promise<ResolvedMention> {
+  if (!notepadsRepo) {
+    return { mention, content: "[Notepads not available]", tokenEstimate: 10, truncated: false };
+  }
+
+  const notepad = notepadsRepo.getByName(mention.value);
+  if (!notepad) {
+    return { mention, content: `[Notepad not found: ${mention.value}]`, tokenEstimate: 10, truncated: false };
+  }
+
+  const content = `// Notepad: ${notepad.name}\n${notepad.content}`;
+  return { mention, content, tokenEstimate: estimateTokens(content), truncated: false };
 }
