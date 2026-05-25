@@ -1,11 +1,15 @@
 import {
   WebContentsView,
   session,
+  app,
   type BrowserWindow,
   type Session,
   type WebContents,
 } from "electron";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import type {
+  AccessibilityNode,
   BrowserActionEvent,
   BrowserId,
   BrowserPushEvent,
@@ -325,6 +329,156 @@ export class BrowserController {
 
   networkRequests(agentId: BrowserId, since?: number): NetworkRequest[] {
     return this.browsers.get(agentId)?.network.since(since) ?? [];
+  }
+
+  // -- Agent-only programmatic actions (Phase 18 M2) --------------------------
+
+  private requireWc(agentId: BrowserId): WebContents {
+    const view = this.get(agentId);
+    if (!view) throw new Error(`No browser session for agent ${agentId} — navigate first.`);
+    return view.webContents;
+  }
+
+  /**
+   * Capture the page's accessibility tree. Assigns sequential `data-aria-ref`
+   * attributes to interactable elements so `click`/`type` can reference them.
+   */
+  async snapshot(agentId: BrowserId): Promise<{ tree: AccessibilityNode[]; url: string; title: string }> {
+    const wc = this.requireWc(agentId);
+    const tree: AccessibilityNode[] = await wc.executeJavaScript(`
+      (function(){
+        const R={'A':'link','BUTTON':'button','INPUT':'textbox','SELECT':'combobox',
+          'TEXTAREA':'textbox','IMG':'img','H1':'heading','H2':'heading','H3':'heading',
+          'H4':'heading','TABLE':'table','FORM':'form','NAV':'navigation','MAIN':'main',
+          'HEADER':'banner','FOOTER':'contentinfo','SECTION':'region','ARTICLE':'article',
+          'UL':'list','OL':'list','LI':'listitem'};
+        let seq=0;
+        function walk(el){
+          if(!el||!el.tagName)return null;
+          const tag=el.tagName;
+          const role=el.getAttribute('role')||R[tag]||(tag==='DIV'||tag==='SPAN'?'':'generic');
+          const ref='e'+(++seq);
+          el.setAttribute('data-aria-ref',ref);
+          const node={ref:ref,role:role||'generic'};
+          const nm=el.getAttribute('aria-label')||el.getAttribute('alt')||
+            el.getAttribute('title')||(tag==='INPUT'?el.getAttribute('placeholder'):null)||
+            (el.innerText&&el.innerText.length<80?el.innerText.trim():null);
+          if(nm)node.name=nm;
+          if(el.value!==undefined&&el.value!=='')node.value=String(el.value);
+          const ch=[];
+          for(const c of el.children){const n=walk(c);if(n)ch.push(n);}
+          if(ch.length)node.children=ch;
+          return node;
+        }
+        const root=walk(document.body);
+        return root&&root.children?root.children:[root].filter(Boolean);
+      })()
+    `);
+    return { tree: tree ?? [], url: wc.getURL(), title: wc.getTitle() };
+  }
+
+  /** Click an element by its `data-aria-ref` from a prior snapshot. */
+  async click(agentId: BrowserId, ref: string): Promise<{ clicked: true; urlAfter: string; ms: number }> {
+    const wc = this.requireWc(agentId);
+    const start = Date.now();
+    const found: boolean = await wc.executeJavaScript(
+      `(function(){const el=document.querySelector('[data-aria-ref="${ref}"]');if(!el)return false;el.click();return true;})()`
+    );
+    if (!found) throw new Error(`Element ref "${ref}" not found — call browser_snapshot first.`);
+    this.setLastAction(agentId, `click ${ref}`);
+    this.emitAction(agentId, { type: "click", ref, rect: { x: 0, y: 0, width: 0, height: 0 } });
+    // Brief wait for navigation/state changes triggered by the click
+    await new Promise((r) => setTimeout(r, 100));
+    return { clicked: true, urlAfter: wc.getURL(), ms: Date.now() - start };
+  }
+
+  /** Type text into an input by its `data-aria-ref`. Set submit=true to press Enter. */
+  async type(agentId: BrowserId, ref: string, text: string, submit?: boolean): Promise<{ typed: true; valueAfter: string }> {
+    const wc = this.requireWc(agentId);
+    const result: { ok: boolean; value: string } = await wc.executeJavaScript(
+      `(function(){
+        const el=document.querySelector('[data-aria-ref="${ref}"]');
+        if(!el)return {ok:false,value:''};
+        el.focus();
+        el.value=${JSON.stringify(text)};
+        el.dispatchEvent(new Event('input',{bubbles:true}));
+        el.dispatchEvent(new Event('change',{bubbles:true}));
+        ${submit ? "el.form?el.form.submit():el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}));" : ""}
+        return {ok:true,value:el.value};
+      })()`
+    );
+    if (!result.ok) throw new Error(`Element ref "${ref}" not found — call browser_snapshot first.`);
+    this.setLastAction(agentId, `type ${ref}`);
+    this.emitAction(agentId, { type: "type", ref, rect: { x: 0, y: 0, width: 0, height: 0 } });
+    return { typed: true, valueAfter: result.value };
+  }
+
+  /** Capture a PNG screenshot of the current viewport. */
+  async screenshot(agentId: BrowserId, fullPage?: boolean): Promise<{ imagePath: string; width: number; height: number; bytes: number }> {
+    const wc = this.requireWc(agentId);
+    void fullPage; // v1: viewport only (fullPage requires scroll+stitch)
+    const image = await wc.capturePage();
+    const png = image.toPNG();
+    const size = image.getSize();
+    const dir = join(app.getPath("userData"), "screenshots", agentId);
+    mkdirSync(dir, { recursive: true });
+    const filename = `${Date.now()}.png`;
+    const filePath = join(dir, filename);
+    writeFileSync(filePath, png);
+    this.setLastAction(agentId, "screenshot");
+    this.emitAction(agentId, { type: "screenshot" });
+    return { imagePath: filePath, width: size.width, height: size.height, bytes: png.length };
+  }
+
+  /** Evaluate a JS expression in the page. document.cookie reads are redacted. */
+  async evaluate(agentId: BrowserId, expression: string): Promise<{ value: unknown; error?: string }> {
+    const wc = this.requireWc(agentId);
+    try {
+      const value: unknown = await wc.executeJavaScript(
+        `(function(){try{const __r__=(${expression});if(typeof __r__==='string'&&__r__===document.cookie)return '[REDACTED]';return __r__;}catch(__e__){return {__eval_error__:__e__.message}}})()`
+      );
+      if (value && typeof value === "object" && "__eval_error__" in (value as Record<string, unknown>)) {
+        return { value: undefined, error: String((value as Record<string, unknown>).__eval_error__) };
+      }
+      return { value };
+    } catch (err: unknown) {
+      return { value: undefined, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /** Wait until a condition holds (text visible, ref exists, or fixed delay). */
+  async waitFor(
+    agentId: BrowserId,
+    opts: { text?: string; ref?: string; ms?: number; timeoutMs?: number },
+  ): Promise<{ matched: boolean; ms: number }> {
+    const wc = this.requireWc(agentId);
+    const timeout = opts.timeoutMs ?? 30_000;
+    const start = Date.now();
+
+    if (opts.ms !== undefined) {
+      await new Promise((r) => setTimeout(r, Math.min(opts.ms!, timeout)));
+      return { matched: true, ms: Date.now() - start };
+    }
+
+    const poll = async (): Promise<boolean> => {
+      if (opts.text) {
+        return wc.executeJavaScript(
+          `document.body.innerText.includes(${JSON.stringify(opts.text)})`
+        );
+      }
+      if (opts.ref) {
+        return wc.executeJavaScript(
+          `!!document.querySelector('[data-aria-ref="${opts.ref}"]')`
+        );
+      }
+      return true;
+    };
+
+    while (Date.now() - start < timeout) {
+      if (await poll()) return { matched: true, ms: Date.now() - start };
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return { matched: false, ms: Date.now() - start };
   }
 
   // -- internals ------------------------------------------------------------

@@ -92,12 +92,18 @@ async function startEmbeddedServer(): Promise<void> {
       const all = browserController.networkRequests(agentId, since);
       return filter ? all.filter((r) => r.url.includes(filter)) : all;
     },
-    waitFor: async () => { throw new Error("browser_wait_for not implemented yet"); },
-    click: async () => { throw new Error("browser_click not implemented yet"); },
-    type: async () => { throw new Error("browser_type not implemented yet"); },
-    snapshot: async () => { throw new Error("browser_snapshot not implemented yet"); },
-    screenshot: async () => { throw new Error("browser_screenshot not implemented yet"); },
-    evaluate: async () => { throw new Error("browser_evaluate not implemented yet"); },
+    waitFor: async (agentId: string, input: { text?: string; ref?: string; ms?: number; timeoutMs?: number }) =>
+      browserController.waitFor(agentId, input),
+    click: async (agentId: string, ref: string) =>
+      browserController.click(agentId, ref),
+    type: async (agentId: string, ref: string, text: string, submit?: boolean) =>
+      browserController.type(agentId, ref, text, submit),
+    snapshot: async (agentId: string) =>
+      browserController.snapshot(agentId),
+    screenshot: async (agentId: string, fullPage?: boolean) =>
+      browserController.screenshot(agentId, fullPage),
+    evaluate: async (agentId: string, expression: string) =>
+      browserController.evaluate(agentId, expression),
   });
 
   const mcpServer = await mod.startBrowserMcpServer();
