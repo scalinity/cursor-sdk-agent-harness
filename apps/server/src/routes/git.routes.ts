@@ -101,31 +101,17 @@ export async function registerGitRoutes(
       return data;
     }
 
-    // Get branch name
-    const branchResult = await gitExec(
-      ["rev-parse", "--abbrev-ref", "HEAD"],
-      workspacePath,
-    );
+    // Run all four git queries in parallel after confirming isGitRepo.
+    const [branchResult, statusResult, aheadResult, behindResult] =
+      await Promise.all([
+        gitExec(["rev-parse", "--abbrev-ref", "HEAD"], workspacePath),
+        gitExec(["status", "--porcelain"], workspacePath),
+        gitExec(["rev-list", "--count", "@{upstream}..HEAD"], workspacePath),
+        gitExec(["rev-list", "--count", "HEAD..@{upstream}"], workspacePath),
+      ]);
     const branch = branchResult.ok ? branchResult.stdout : null;
-
-    // Check dirty status
-    const statusResult = await gitExec(
-      ["status", "--porcelain"],
-      workspacePath,
-    );
     const isDirty = statusResult.ok && statusResult.stdout.length > 0;
-
-    // Get ahead/behind counts (may fail if no upstream)
-    const aheadResult = await gitExec(
-      ["rev-list", "--count", "@{upstream}..HEAD"],
-      workspacePath,
-    );
     const ahead = aheadResult.ok ? parseInt(aheadResult.stdout, 10) || 0 : 0;
-
-    const behindResult = await gitExec(
-      ["rev-list", "--count", "HEAD..@{upstream}"],
-      workspacePath,
-    );
     const behind = behindResult.ok ? parseInt(behindResult.stdout, 10) || 0 : 0;
 
     const data = gitStatusResponseSchema.parse({
