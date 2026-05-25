@@ -14,15 +14,24 @@
  * `distutils`) and point node-gyp at it via the PYTHON env var. Created once,
  * reused thereafter. No system Python is modified and no machine-specific path
  * is committed.
+ *
+ * Post-packaging: @electron/rebuild silently leaves better-sqlite3 compiled for
+ * system Node (NMV 147) instead of Electron (NMV 130). We force-rebuild it
+ * inside the packaged .app, then re-sign so the code signature covers the
+ * replaced binary.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const desktopDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const venvDir = path.join(desktopDir, ".gyp-venv");
 const venvPython = path.join(venvDir, "bin", "python");
+
+const ELECTRON_VERSION = JSON.parse(
+  readFileSync(path.join(desktopDir, "package.json"), "utf8"),
+).devDependencies.electron;
 
 function run(cmd, args, opts = {}) {
   const res = spawnSync(cmd, args, { stdio: "inherit", ...opts });
@@ -47,3 +56,55 @@ run("electron-builder", ["--mac"], {
   cwd: desktopDir,
   env: { ...process.env, PYTHON: venvPython },
 });
+
+// ---------------------------------------------------------------------------
+// Post-packaging: force-rebuild better-sqlite3 for Electron inside the .app
+// ---------------------------------------------------------------------------
+const distElectron = path.join(desktopDir, "dist-electron");
+const macArm64 = path.join(distElectron, "mac-arm64");
+
+// electron-builder names the output dir mac-arm64 on Apple Silicon
+const appDir = readdirSync(macArm64).find((f) => f.endsWith(".app"));
+if (!appDir) {
+  throw new Error("[package-mac] cannot find .app in dist-electron/mac-arm64");
+}
+
+const appPath = path.join(macArm64, appDir);
+const betterSqlite3Dir = path.join(
+  appPath,
+  "Contents/Resources/app/node_modules/better-sqlite3",
+);
+
+if (existsSync(betterSqlite3Dir)) {
+  console.log(
+    `[package-mac] force-rebuilding better-sqlite3 for Electron ${ELECTRON_VERSION} (ABI 130)`,
+  );
+  run(
+    "npx",
+    [
+      "--yes",
+      "node-gyp",
+      "rebuild",
+      `--target=${ELECTRON_VERSION}`,
+      "--arch=arm64",
+      "--dist-url=https://electronjs.org/headers",
+      "--build-from-source",
+      `--python=${venvPython}`,
+    ],
+    { cwd: betterSqlite3Dir },
+  );
+
+  // Re-sign — the binary we just replaced invalidates the existing signature.
+  // Use the same Developer ID identity electron-builder used; ad-hoc (`-`)
+  // breaks keytar at runtime. Find the first valid codesigning identity.
+  const idResult = spawnSync("security", [
+    "find-identity", "-v", "-p", "codesigning",
+  ]);
+  const idLine = (idResult.stdout?.toString() ?? "").split("\n").find((l) => l.includes('"'));
+  const identityMatch = idLine?.match(/"(.+?)"/);
+  const identity = identityMatch?.[1] ?? "-";
+  console.log(`[package-mac] re-signing app with identity: ${identity}`);
+  run("codesign", ["--deep", "--force", "--sign", identity, appPath]);
+} else {
+  console.warn("[package-mac] better-sqlite3 not found in app bundle — skipping rebuild");
+}

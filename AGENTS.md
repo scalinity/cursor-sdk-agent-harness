@@ -102,6 +102,8 @@ pnpm test             # vitest across server + web + shared
 pnpm migrate          # apply Drizzle migrations to the local DB
 pnpm reset-local-db   # wipe the local SQLite file (destructive)
 pnpm build            # production build of every package
+CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop  # unsigned local desktop package
+rm -rf "/Applications/Cursor SDK Agent Harness.app" && cp -R "apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app" "/Applications/Cursor SDK Agent Harness.app"  # replace installed app
 pnpm format           # prettier
 ```
 
@@ -136,6 +138,7 @@ If a code path could log a secret, write the test that proves it can't, then wir
 
 - **One phase per session.** Phase prompts at `~/Documents/Obsidian Vault/Codex Builds/Cursor SDK Agent Harness/Cursor SDK Agent Harness Codex Phase Prompts/`. Run them in order. Don't chain phases inside a single session.
 - **Acceptance gates first.** Don't move to the next phase until the current phase's gates pass (typecheck, lint, test, plus phase-specific gates).
+- **Rebuild and reinstall the desktop app before completion.** After any completed codebase work, run `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop`, then replace `/Applications/Cursor SDK Agent Harness.app` with `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app`. Do not report completion until the rebuild and reinstall succeed, or explicitly report the blocker.
 - **Update the status ledger every session.** `docs/IMPLEMENTATION_STATUS.md` records what changed, what ran, what passed, what didn't, and the exact next prompt filename. This is how chains of sessions stay coherent.
 - **Phase dependencies are real.** Phase 09 (streaming surfaces) cannot run before Phase 0.5 (tokens) and Phase 5 (chat shell). The dependency map at the prompts folder's `PHASE_DEPENDENCY_MAP.md` is authoritative.
 

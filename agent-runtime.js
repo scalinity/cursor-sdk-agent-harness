@@ -1,0 +1,385 @@
+import { getSettingsSnapshot } from "../services/settings.service.js";
+import { buildAgentOptions } from "./agent-options-builder.js";
+import { LiveAgents } from "./live-agents.js";
+import { createPipelineSink, } from "./persist-and-broadcast.js";
+import { RunController, newRunId } from "./run-controller.js";
+import { ACTIVE_WORKSPACE_SETTING_KEY } from "../config/settings-keys.js";
+/**
+ * Application-layer error codes surfaced to REST routes. Routes map these
+ * to HTTP statuses; everything else (Workspace rejection, SDK errors) is
+ * also surfaced via this enum so the HTTP shell stays small.
+ */
+export class AgentRuntimeError extends Error {
+    code;
+    details;
+    constructor(code, message, details) {
+        super(message);
+        this.code = code;
+        this.details = details;
+        this.name = "AgentRuntimeError";
+    }
+}
+export function createAgentRuntime(deps) {
+    const activeRuns = deps.activeRuns;
+    // Bounded LRU cache of live SDK handles. We reuse a single SDKAgent
+    // across `startRun` calls (spec §4: "Subsequent prompts to the same
+    // agent reuse the same durable agent handle"). Bound prevents a
+    // long-running process that resumes many agents from leaking handles.
+    // See ./live-agents.ts for eviction policy.
+    const liveAgents = new LiveAgents({ logger: deps.logger });
+    async function loadActiveAgent(row) {
+        const cached = liveAgents.get(row.id);
+        if (cached)
+            return cached;
+        const apiKey = await mustApiKey();
+        const opts = await buildAgentOptions({
+            agent: row,
+            apiKey,
+            mcpServers: deps.mcpRepo.list(),
+            subagents: deps.subagentsRepo.list(),
+            workspacePolicy: deps.workspacePolicy,
+        });
+        try {
+            const handle = await deps.sdk.resumeAgent(row.id, opts);
+            liveAgents.set(row.id, handle);
+            return handle;
+        }
+        catch (err) {
+            // The SDK shards durable agents by the cwd they were created under
+            // (~/.cursor/projects/<cwd>/sdk-agent-store/<hash>/index.db), while the
+            // harness keeps a single global `agents` table. So a harness row can
+            // outlive its SDK-side record whenever the resolved cwd drifts from the
+            // one the agent was created under (e.g. the desktop app launched from
+            // Finder resolves a different store than a dev server) or after the user
+            // clears ~/.cursor — resume then throws `Agent <id> not found`. Rather
+            // than dead-ending the user's prompt (the composer's "Agent ... not
+            // found" toast), transparently re-create the SDK agent under our durable
+            // id (buildAgentOptions sets opts.agentId = row.id, which the SDK honors)
+            // so the send proceeds and future resumes round-trip. Mirrors the
+            // create-time id handling above and RunController's wedged-run retry.
+            if (!isAgentNotFoundError(err)) {
+                throw new AgentRuntimeError("SDK_RESUME_FAILED", err instanceof Error ? err.message : String(err), err);
+            }
+            deps.logger.warn({ err, agentId: row.id }, "resume reported the agent missing from the SDK store; re-creating it under the same id so the send can proceed");
+            try {
+                const handle = await deps.sdk.createAgent(opts);
+                if (handle.agentId !== row.id) {
+                    // The SDK minted a fresh id instead of honoring ours. We can't
+                    // silently swap the row id mid-send — the in-flight run is already
+                    // tagged with row.id — so surface a clear error rather than leave
+                    // the harness and SDK pointing at different ids.
+                    try {
+                        handle.close();
+                    }
+                    catch {
+                        // best-effort
+                    }
+                    throw new AgentRuntimeError("SDK_RESUME_FAILED", `SDK re-created agent under a different id (${handle.agentId} != ${row.id}); cannot reconcile mid-send`);
+                }
+                liveAgents.set(row.id, handle);
+                return handle;
+            }
+            catch (recreateErr) {
+                if (recreateErr instanceof AgentRuntimeError)
+                    throw recreateErr;
+                throw new AgentRuntimeError("SDK_RESUME_FAILED", recreateErr instanceof Error ? recreateErr.message : String(recreateErr), recreateErr);
+            }
+        }
+    }
+    async function mustApiKey() {
+        const apiKey = await deps.apiKeyStore.getApiKey();
+        if (apiKey === null || apiKey.length === 0) {
+            throw new AgentRuntimeError("MISSING_API_KEY", "No Cursor API key configured. Save one via PUT /api/settings/api-key.");
+        }
+        return apiKey;
+    }
+    return {
+        async create(input) {
+            const apiKey = await mustApiKey();
+            // Persist-before-SDK pattern: insert the row as `creating` first, then
+            // call the SDK, then flip to `active`. On failure we mark `error` so
+            // the picker can surface the problem rather than dropping the record.
+            const createArgs = (overrides) => ({
+                ...(overrides.id !== undefined ? { id: overrides.id } : {}),
+                name: input.name,
+                status: overrides.status,
+                mode: input.mode,
+                modelId: input.modelId,
+                cwd: input.cwd ?? null,
+                settingSources: input.settingSources ?? null,
+                sandboxEnabled: input.sandboxEnabled ?? null,
+                cloudOptions: input.cloudOptions ?? null,
+                mcpServerIds: input.mcpServerIds,
+                subagentDefinitionIds: input.subagentDefinitionIds,
+            });
+            const initialRow = deps.agentsRepo.create(createArgs({ status: "creating" }));
+            let options;
+            try {
+                options = await buildAgentOptions({
+                    agent: initialRow,
+                    apiKey,
+                    mcpServers: deps.mcpRepo.list(),
+                    subagents: deps.subagentsRepo.list(),
+                    workspacePolicy: deps.workspacePolicy,
+                });
+            }
+            catch (err) {
+                deps.agentsRepo.updateStatus(initialRow.id, "error", err);
+                throw err;
+            }
+            try {
+                const handle = await deps.sdk.createAgent(options);
+                if (handle.agentId !== initialRow.id) {
+                    // The SDK rotated our durable id. Swap atomically — `swapId`
+                    // wraps delete+insert in db.transaction so a failed re-insert
+                    // leaves the original row intact for inspection rather than
+                    // losing the record entirely.
+                    const replaced = deps.agentsRepo.swapId(initialRow.id, {
+                        ...createArgs({ id: handle.agentId, status: "active" }),
+                        id: handle.agentId,
+                    });
+                    deps.agentsRepo.updateLastActiveAt(replaced.id);
+                    liveAgents.set(replaced.id, handle);
+                    return replaced;
+                }
+                deps.agentsRepo.updateStatus(initialRow.id, "active");
+                deps.agentsRepo.updateLastActiveAt(initialRow.id);
+                liveAgents.set(initialRow.id, handle);
+                const final = deps.agentsRepo.getById(initialRow.id);
+                if (!final) {
+                    throw new AgentRuntimeError("AGENT_NOT_FOUND", `Inserted agent vanished id=${initialRow.id}`);
+                }
+                return final;
+            }
+            catch (err) {
+                // The swap above is transactional, so on swap failure the original
+                // row is still present and this updateStatus succeeds. On any
+                // other SDK failure, the initial row is also present.
+                deps.agentsRepo.updateStatus(initialRow.id, "error", err);
+                if (err instanceof AgentRuntimeError)
+                    throw err;
+                throw new AgentRuntimeError("SDK_CREATE_FAILED", err instanceof Error ? err.message : String(err), err);
+            }
+        },
+        async resume(agentId) {
+            const row = deps.agentsRepo.getById(agentId);
+            if (!row) {
+                throw new AgentRuntimeError("AGENT_NOT_FOUND", `Agent ${agentId} not found`);
+            }
+            if (row.status === "terminated") {
+                // Resuming a terminated agent is allowed — spec §4 Terminate
+                // Agent: "allow later reactivation by calling resume." We bump
+                // the row out of terminated by flipping the status now.
+                deps.agentsRepo.updateStatus(row.id, "active");
+            }
+            await loadActiveAgent(row);
+            deps.agentsRepo.updateLastActiveAt(row.id);
+            const updated = deps.agentsRepo.getById(row.id);
+            if (!updated) {
+                throw new AgentRuntimeError("AGENT_NOT_FOUND", `Agent ${row.id} vanished`);
+            }
+            return updated;
+        },
+        async terminate(agentId) {
+            const row = deps.agentsRepo.getById(agentId);
+            if (!row) {
+                throw new AgentRuntimeError("AGENT_NOT_FOUND", `Agent ${agentId} not found`);
+            }
+            // Abort every active run owned by this agent BEFORE flipping status,
+            // so the controllers' onTerminate handlers see the agent still active
+            // when they unregister.
+            const controllers = activeRuns.forAgent(agentId);
+            await Promise.all(controllers.map(async (c) => {
+                try {
+                    await c.cancel("agent_terminated");
+                }
+                catch (err) {
+                    deps.logger.warn({ err, runId: c.runId, agentId }, "agent terminate: run cancel threw");
+                }
+            }));
+            const handle = liveAgents.get(agentId);
+            if (handle) {
+                try {
+                    handle.close();
+                }
+                catch (err) {
+                    deps.logger.warn({ err, agentId }, "agent terminate: handle.close threw");
+                }
+                liveAgents.delete(agentId);
+            }
+            deps.agentsRepo.terminate(agentId);
+        },
+        list() {
+            const rows = deps.agentsRepo.list();
+            const aggregates = deps.runsRepo.aggregatesByAgent();
+            return rows.map((r) => buildSummary(r, aggregates.get(r.id)));
+        },
+        getById(agentId) {
+            const row = deps.agentsRepo.getById(agentId);
+            if (!row) {
+                throw new AgentRuntimeError("AGENT_NOT_FOUND", `Agent ${agentId} not found`);
+            }
+            const aggregates = deps.runsRepo.aggregatesByAgent().get(agentId);
+            const latest = deps.runsRepo.getLatestForAgent(agentId);
+            const summary = buildSummary(row, aggregates);
+            return {
+                ...summary,
+                cwd: row.cwd,
+                settingSources: row.settingSources,
+                sandboxEnabled: row.sandboxEnabled,
+                cloudOptions: row.cloudOptions,
+                mcpServerIds: row.mcpServerIds,
+                subagentDefinitionIds: row.subagentDefinitionIds,
+                latestRunId: latest?.id ?? null,
+                latestRunStatus: latest?.status ?? null,
+            };
+        },
+        async startRun(input) {
+            const row = deps.agentsRepo.getById(input.agentId);
+            if (!row) {
+                throw new AgentRuntimeError("AGENT_NOT_FOUND", `Agent ${input.agentId} not found`);
+            }
+            if (row.status === "terminated") {
+                throw new AgentRuntimeError("AGENT_TERMINATED", `Agent ${input.agentId} is terminated. Resume it first.`);
+            }
+            // For local agents, re-validate every cwd before sending a new
+            // prompt. The allowlist may have changed between agent creation
+            // and now; we never trust stale state.
+            if (row.mode === "local") {
+                await buildAgentOptions({
+                    agent: row,
+                    apiKey: await mustApiKey(),
+                    mcpServers: deps.mcpRepo.list(),
+                    subagents: deps.subagentsRepo.list(),
+                    workspacePolicy: deps.workspacePolicy,
+                });
+            }
+            const handle = await loadActiveAgent(row);
+            const snapshot = getSettingsSnapshot(deps.settingsRepo);
+            const runId = newRunId();
+            // Tag the run with the workspace active at creation time so the
+            // sessions rail can group chats per workspace. Reads the shared
+            // ACTIVE_WORKSPACE_SETTING_KEY (see config/settings-keys.ts); guards for
+            // the non-empty-string shape like the workspace-allowlist route does.
+            const rawActiveWorkspaceId = deps.settingsRepo.get(ACTIVE_WORKSPACE_SETTING_KEY);
+            const activeWorkspaceId = typeof rawActiveWorkspaceId === "string" && rawActiveWorkspaceId.length > 0
+                ? rawActiveWorkspaceId
+                : null;
+            const runRow = deps.runsRepo.create({
+                id: runId,
+                agentId: row.id,
+                status: "CREATING",
+                promptPreview: input.prompt.slice(0, 256),
+                modelId: row.modelId,
+                mode: row.mode,
+                workspaceId: activeWorkspaceId,
+            });
+            const controller = new RunController({
+                runId: runRow.id,
+                agentId: row.id,
+                modelId: row.modelId,
+                mode: row.mode,
+                prompt: input.prompt,
+                ...(input.images && input.images.length > 0 ? { images: input.images } : {}),
+                agent: handle,
+                sdk: deps.sdk,
+                runsRepo: deps.runsRepo,
+                pricing: snapshot.pricing,
+                sink: createPipelineSink({
+                    runId: runRow.id,
+                    agentId: row.id,
+                    agentMode: row.mode,
+                    pipeline: deps.pipeline,
+                    logger: deps.logger,
+                }),
+                logger: deps.logger,
+            }, (c) => {
+                activeRuns.unregister(c.runId);
+                // Drop the per-run text accumulator so a long-lived process doesn't
+                // keep ghost buffers around after every run.
+                deps.pipeline.dropRun(c.runId);
+            });
+            activeRuns.register(controller);
+            try {
+                await controller.start();
+            }
+            catch (err) {
+                activeRuns.unregister(controller.runId);
+                // Symmetric cleanup with the onTerminate callback below: if
+                // start() ingested any events before throwing, the per-run
+                // text accumulator is now orphaned (the consume loop never
+                // ran, so onTerminate won't fire). Drop it explicitly to
+                // match the happy-path lifecycle.
+                deps.pipeline.dropRun(controller.runId);
+                deps.runsRepo.setInterrupted(controller.runId, "stream_error", err instanceof Error ? err.message : String(err));
+                throw new AgentRuntimeError("SDK_SEND_FAILED", err instanceof Error ? err.message : String(err), err);
+            }
+            deps.agentsRepo.updateLastActiveAt(row.id);
+            const persisted = deps.runsRepo.getById(controller.runId);
+            return {
+                runId: controller.runId,
+                agentId: row.id,
+                status: persisted?.status ?? "RUNNING",
+                startedAt: persisted?.startedAt ?? controller.startedAt.toISOString(),
+            };
+        },
+        async shutdown() {
+            // Cancel every in-flight run BEFORE clearing the registries. The
+            // consume loop keeps iterating run.stream() until either the
+            // stream ends OR the abort signal fires; if we cleared
+            // activeRuns/pipeline first, a still-running controller would
+            // re-create per-run text buffers and try to publish on an empty
+            // bus — fragile and order-dependent. Aborting first lets the
+            // loops exit cleanly via the existing
+            // `if (this.abortController.signal.aborted) break` guard in
+            // RunController.consumeAndFinalise.
+            for (const controller of activeRuns.all()) {
+                try {
+                    controller.abortController.abort("server_close");
+                }
+                catch (err) {
+                    deps.logger.warn({ err, runId: controller.runId }, "shutdown: controller abort threw");
+                }
+            }
+            for (const handle of liveAgents.values()) {
+                try {
+                    handle.close();
+                }
+                catch {
+                    // best-effort
+                }
+            }
+            liveAgents.clear();
+            activeRuns.clear();
+        },
+    };
+}
+/**
+ * True when an SDK call rejected because the durable agent is absent from the
+ * SDK's on-disk store. Matched on the error text — `@cursor/sdk@1.0.13` throws
+ * `Agent <id> not found` (errors.ts / local run-store) with no machine-readable
+ * code. Deliberately does NOT match the SDK's `Run <id> not found for agent
+ * <id>` message: there "not found" precedes "for agent", so the agent-id-then-
+ * "not found" pattern below can't match it.
+ */
+function isAgentNotFoundError(err) {
+    return err instanceof Error && /\bagent\s+\S+\s+not found\b/i.test(err.message);
+}
+function buildSummary(row, aggregates) {
+    return {
+        id: row.id,
+        name: row.name,
+        status: row.status,
+        mode: row.mode,
+        modelId: row.modelId,
+        runCount: aggregates?.runCount ?? 0,
+        activeRunCount: aggregates?.activeRunCount ?? 0,
+        totalCostUsdMicros: aggregates?.totalCostUsdMicros ?? 0,
+        totalInputTokens: aggregates?.totalInputTokens ?? 0,
+        totalOutputTokens: aggregates?.totalOutputTokens ?? 0,
+        lastActiveAt: row.lastActiveAt,
+        createdAt: row.createdAt,
+        terminatedAt: row.terminatedAt,
+    };
+}
+//# sourceMappingURL=agent-runtime.js.map
