@@ -189,7 +189,11 @@ export async function crawlDocumentation(
     while (queue.length > 0 && pageCount < maxPages) {
       if (Date.now() - startTime > TOTAL_TIMEOUT_MS) break;
 
-      const batch = queue.splice(0, MAX_CONCURRENT);
+      // Clamp the batch to the remaining page budget. Without this, a final
+      // batch of MAX_CONCURRENT could each insert a page when only one slot
+      // remained, overshooting maxPages by up to MAX_CONCURRENT - 1.
+      const remaining = maxPages - pageCount;
+      const batch = queue.splice(0, Math.min(MAX_CONCURRENT, remaining));
       const promises = batch.map(async (url) => {
         if (visited.has(url)) return;
         visited.add(url);
