@@ -56,6 +56,12 @@ function rowTokens(run: RunSummary): string {
   return formatTokens(tokenTotal(run.inputTokens, run.outputTokens));
 }
 
+function rowCacheRate(run: RunSummary): string {
+  if (run.inputTokens === null || run.inputTokens === 0) return "--";
+  const cached = run.cachedInputTokens ?? 0;
+  return `${((100 * cached) / run.inputTokens).toFixed(0)}%`;
+}
+
 function VirtualRunRow({ run, selected, onToggleSelected, onFilterAgent }: {
   run: RunSummary;
   selected: boolean;
@@ -80,6 +86,7 @@ function VirtualRunRow({ run, selected, onToggleSelected, onFilterAgent }: {
       </div>
       <div className="mono col-span-1 text-text-secondary">{rowCost(run)}</div>
       <div className="mono col-span-1 text-text-secondary">{rowTokens(run)}</div>
+      <div className="mono col-span-1 text-text-secondary">{rowCacheRate(run)}</div>
     </div>
   );
 }
@@ -276,7 +283,7 @@ export function RunHistory() {
           {history.runs.length > 200 ? (
             <div ref={parentRef} className="run-history-virtual">
               <div className="grid grid-cols-12 gap-2 border-b border-border-subtle px-2 py-2 text-xs uppercase tracking-uppercase text-text-tertiary">
-                <span className="col-span-1">Sel</span><span className="col-span-2">Status</span><span className="col-span-3">Title</span><span className="col-span-1">Agent</span><span className="col-span-1">Model</span><span className="col-span-1">Started</span><span className="col-span-1">Duration</span><span className="col-span-1">Tool calls</span><span className="col-span-1">Cost</span><span className="col-span-1">Tokens</span>
+                <span className="col-span-1">Sel</span><span className="col-span-2">Status</span><span className="col-span-3">Title</span><span className="col-span-1">Agent</span><span className="col-span-1">Model</span><span className="col-span-1">Started</span><span className="col-span-1">Duration</span><span className="col-span-1">Tool calls</span><span className="col-span-1">Cost</span><span className="col-span-1">Tokens</span><span className="col-span-1">Cache</span>
               </div>
               <div ref={setVirtualSpacer} className="run-history-virtual__spacer">
                 {virtualizer.getVirtualItems().map((item) => {
@@ -294,7 +301,7 @@ export function RunHistory() {
               <table className="w-full border-collapse text-sm">
                 <thead className="text-left text-xs uppercase tracking-uppercase text-text-tertiary">
                   <tr>
-                    <th className="p-2 font-medium">Sel</th><th className="p-2 font-medium">Status</th><th className="p-2 font-medium">Title</th><th className="p-2 font-medium">Agent</th><th className="p-2 font-medium">Model</th><th className="p-2 font-medium">Started</th><th className="p-2 font-medium">Duration</th><th className="p-2 font-medium">Tool calls</th><th className="p-2 font-medium">Cost</th><th className="p-2 font-medium">Tokens</th>
+                    <th className="p-2 font-medium">Sel</th><th className="p-2 font-medium">Status</th><th className="p-2 font-medium">Title</th><th className="p-2 font-medium">Agent</th><th className="p-2 font-medium">Model</th><th className="p-2 font-medium">Started</th><th className="p-2 font-medium">Duration</th><th className="p-2 font-medium">Tool calls</th><th className="p-2 font-medium">Cost</th><th className="p-2 font-medium">Tokens</th><th className="p-2 font-medium">Cache</th>
                   </tr>
                 </thead>
                 <tbody>
