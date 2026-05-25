@@ -1,12 +1,13 @@
 import type { Database as BetterSqlite3Database } from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import type {
-  AgentMode,
-  AgentRow,
-  AgentStatus,
-  CloudAgentOptions,
-  ExecutionMode,
-  SettingSource,
+import {
+  executionModeSchema,
+  type AgentMode,
+  type AgentRow,
+  type AgentStatus,
+  type CloudAgentOptions,
+  type ExecutionMode,
+  type SettingSource,
 } from "@harness/shared";
 import {
   boolFromInt,
@@ -59,7 +60,7 @@ function rowToDomain(row: AgentDbRow): AgentRow {
     name: row.name,
     status: row.status as AgentStatus,
     mode: row.mode as AgentMode,
-    executionMode: row.execution_mode as ExecutionMode,
+    executionMode: executionModeSchema.parse(row.execution_mode),
     modelId: row.model_id,
     cwd: parseJsonOrNull<string[]>(row.cwd_json),
     settingSources: parseJsonOrNull<SettingSource[]>(row.setting_sources_json),
