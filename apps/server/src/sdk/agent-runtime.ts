@@ -339,7 +339,10 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
           ? rawActiveWorkspaceId
           : null;
       const executionMode: ExecutionMode = input.executionMode ?? row.executionMode;
-      const autoName = input.prompt.slice(0, 60).replace(/\n.*/s, "").trim() || null;
+      const rawName = input.prompt.slice(0, 60).replace(/\n.*/s, "").trim();
+      // Truncate at a word boundary so we don't chop mid-word.
+      const lastSpace = rawName.length >= 60 ? rawName.lastIndexOf(" ") : -1;
+      const autoName = (lastSpace > 0 ? rawName.slice(0, lastSpace) : rawName) || null;
       const sdkPrompt = executionMode === "ask"
         ? `${ASK_MODE_PREFIX}\n\n${input.prompt}`
         : input.prompt;
