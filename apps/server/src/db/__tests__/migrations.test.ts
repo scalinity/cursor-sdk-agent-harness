@@ -20,6 +20,7 @@ describe("migrations + verifyMigrations", () => {
       "runs",
       "runs_fts",
       "runs_fts_config",
+      "runs_fts_content",
       "runs_fts_data",
       "runs_fts_docsize",
       "runs_fts_idx",
