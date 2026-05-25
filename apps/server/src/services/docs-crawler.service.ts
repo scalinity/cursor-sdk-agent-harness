@@ -144,24 +144,33 @@ async function fetchWithTimeout(
   }
 }
 
+/**
+ * Pure robots.txt evaluator: returns false if a Disallow rule under a
+ * matching User-agent group (`*` or our crawler) covers `pathname`. Extracted
+ * from the network fetch so the parsing logic is unit-testable.
+ */
+export function isPathAllowedByRobotsTxt(robotsTxt: string, pathname: string): boolean {
+  const lines = robotsTxt.split("\n");
+  let inUserAgent = false;
+  for (const line of lines) {
+    const trimmed = line.trim().toLowerCase();
+    if (trimmed.startsWith("user-agent:")) {
+      const agent = trimmed.slice("user-agent:".length).trim();
+      inUserAgent = agent === "*" || agent === "cursorharness-docscrawler";
+    } else if (inUserAgent && trimmed.startsWith("disallow:")) {
+      const path = trimmed.slice("disallow:".length).trim();
+      if (path && pathname.startsWith(path)) return false;
+    }
+  }
+  return true;
+}
+
 async function isAllowedByRobots(url: URL): Promise<boolean> {
   try {
     const robotsUrl = `${url.origin}/robots.txt`;
     const resp = await fetchWithTimeout(robotsUrl, 5000);
     if (!resp.ok) return true;
-    const lines = resp.text.split("\n");
-    let inUserAgent = false;
-    for (const line of lines) {
-      const trimmed = line.trim().toLowerCase();
-      if (trimmed.startsWith("user-agent:")) {
-        const agent = trimmed.slice("user-agent:".length).trim();
-        inUserAgent = agent === "*" || agent === "cursorharness-docscrawler";
-      } else if (inUserAgent && trimmed.startsWith("disallow:")) {
-        const path = trimmed.slice("disallow:".length).trim();
-        if (path && url.pathname.startsWith(path)) return false;
-      }
-    }
-    return true;
+    return isPathAllowedByRobotsTxt(resp.text, url.pathname);
   } catch {
     return true;
   }

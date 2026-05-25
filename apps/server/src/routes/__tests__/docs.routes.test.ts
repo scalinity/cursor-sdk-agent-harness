@@ -155,4 +155,29 @@ describe("/api/docs/search", () => {
     const res = await app.inject({ method: "GET", url: "/api/docs/search" });
     expect(res.statusCode).toBe(400);
   });
+
+  it("does not 500 on FTS-operator characters in the query", async () => {
+    const { db, repos, app } = setup();
+    cleanup.push(() => app.close(), () => db.close());
+    await registerDocsRoutes(app, { docsRepo: repos.docs });
+
+    const sourceId = crypto.randomUUID();
+    repos.docs.insertSource(sourceId, "Test", "https://example.com", 100);
+    repos.docs.insertPage(
+      crypto.randomUUID(),
+      sourceId,
+      "https://example.com/g",
+      "Error handling guide",
+      "A guide about error-handling and the c++ operator in React.useState()",
+    );
+
+    // Each of these would throw SqliteError if passed raw to FTS5 MATCH.
+    for (const q of ["error-handling", "c++", "React.useState()", "hello OR", 'a "quote', "NEAR(x", "a:b"]) {
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/docs/search?q=${encodeURIComponent(q)}`,
+      });
+      expect(res.statusCode, `query: ${q}`).toBe(200);
+    }
+  });
 });
