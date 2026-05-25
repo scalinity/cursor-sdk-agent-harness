@@ -32,6 +32,7 @@ import {
   createWorkspaceCwdResolver,
 } from "./terminal/index.js";
 import { MAX_IMAGE_ATTACHMENTS, MAX_IMAGE_DATA_BYTES } from "@harness/shared";
+import { SearchService } from "./search/search-service.js";
 
 export interface AppDeps {
   env: Env;
@@ -45,6 +46,12 @@ export interface AppDeps {
   csrfSecretStore?: CsrfSecretStore;
   csrfTokenizer?: CsrfTokenizer;
   workspacePolicy?: WorkspacePolicy;
+  /**
+   * Phase 23 — semantic search facade (embedder + indexer + watcher).
+   * Tests inject one backed by the deterministic FakeEmbedder so the suite
+   * never downloads the ONNX model.
+   */
+  searchService?: SearchService;
   /**
    * Phase 06 SDK adapter. Production uses `createCursorSdkAdapter()` (the
    * default when omitted). Integration tests inject a stubbed adapter that
@@ -214,6 +221,16 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     perfCounters,
   });
 
+  // Phase 23 — semantic search facade. Default uses the real WASM embedder;
+  // tests inject one backed by the deterministic FakeEmbedder.
+  const searchService =
+    deps.searchService ??
+    new SearchService({
+      embeddingsRepo: repos.embeddings,
+      indexStatusRepo: repos.indexStatus,
+      logger: app.log,
+    });
+
   const sdk = deps.sdk ?? createCursorSdkAdapter();
   const agentRuntime = createAgentRuntime({
     agentsRepo: repos.agents,
@@ -228,6 +245,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     activeRuns,
     pipeline,
     allowlistRepo: repos.workspaceAllowlist,
+    searchService,
   });
 
   const approvalResponder =
@@ -281,6 +299,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   app.addHook("onClose", async () => {
     await agentRuntime.shutdown();
     terminalSession.dispose();
+    searchService.stopWatching();
     runBus.clear();
     pipeline.clear();
   });
@@ -318,10 +337,12 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       allowlistRepo: repos.workspaceAllowlist,
       docsRepo: repos.docs,
       notepadsRepo: repos.notepads,
+      searchService,
     },
     search: {
       settingsRepo: repos.settings,
       allowlistRepo: repos.workspaceAllowlist,
+      searchService,
     },
     rules: {
       settingsRepo: repos.settings,

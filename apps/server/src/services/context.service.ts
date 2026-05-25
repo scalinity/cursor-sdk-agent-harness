@@ -1,6 +1,11 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { ContextMention, ResolvedMention, ContextSearchResult } from "@harness/shared";
+import type {
+  ContextMention,
+  ResolvedMention,
+  ContextSearchResult,
+  SemanticSearchResult,
+} from "@harness/shared";
 import { grepSearch } from "./search.service.js";
 import type { DocsRepo } from "../db/repositories/docs.repo.js";
 import type { NotepadsRepo } from "../db/repositories/notepads.repo.js";
@@ -221,9 +226,26 @@ function assertWithinWorkspace(resolved: string, root: string): void {
 // Content resolution
 // ---------------------------------------------------------------------------
 
+/**
+ * Minimal structural contract the @codebase resolver needs from the semantic
+ * search service. Kept structural (not an import of SearchService) so the
+ * context service stays decoupled and easy to fake in tests.
+ */
+export interface SemanticSearchProvider {
+  isIndexed(workspaceId: string): boolean;
+  search(input: {
+    query: string;
+    workspaceId: string;
+    maxResults: number;
+    minScore: number;
+    filePattern?: string;
+  }): Promise<SemanticSearchResult>;
+}
+
 export interface ResolveMentionDeps {
   docsRepo?: DocsRepo | undefined;
   notepadsRepo?: NotepadsRepo | undefined;
+  searchService?: SemanticSearchProvider | undefined;
 }
 
 export async function resolveMention(
@@ -239,7 +261,7 @@ export async function resolveMention(
     case "symbol":
       return resolveSymbol(mention, workspaceRoot);
     case "codebase":
-      return resolveCodebase(mention, workspaceRoot);
+      return resolveCodebase(mention, workspaceRoot, deps?.searchService);
     case "rules":
       return {
         mention,
@@ -362,7 +384,34 @@ async function resolveSymbol(mention: ContextMention, root: string): Promise<Res
   return { mention, content: full, tokenEstimate: estimateTokens(full), truncated };
 }
 
-async function resolveCodebase(mention: ContextMention, root: string): Promise<ResolvedMention> {
+async function resolveCodebase(
+  mention: ContextMention,
+  root: string,
+  searchService?: SemanticSearchProvider | undefined,
+): Promise<ResolvedMention> {
+  // Prefer semantic search when the workspace is indexed; fall back to grep
+  // when it isn't (or when semantic returns nothing).
+  if (searchService && searchService.isIndexed(root)) {
+    const semantic = await searchService.search({
+      query: mention.value,
+      workspaceId: root,
+      maxResults: CODEBASE_MAX_RESULTS,
+      minScore: 0.3,
+    });
+    if (semantic.results.length > 0) {
+      const sections = semantic.results.map((r) => {
+        const header = `// ${r.path}:${r.startLine}-${r.endLine} (${Math.round(r.score * 100)}% match)`;
+        const body =
+          r.content.length > CODEBASE_RESULT_MAX_CHARS
+            ? r.content.slice(0, CODEBASE_RESULT_MAX_CHARS) + "\n[truncated]"
+            : r.content;
+        return `${header}\n${body}`;
+      });
+      const content = `// Codebase (semantic): ${mention.value}\n${sections.join("\n\n")}`;
+      return { mention, content, tokenEstimate: estimateTokens(content), truncated: false };
+    }
+  }
+
   const searchResult = await grepSearch({
     query: mention.value,
     workspaceRoot: root,

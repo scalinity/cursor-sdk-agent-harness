@@ -431,4 +431,48 @@ export type {
   SlashCommandVariable,
 } from "./enrichment.js";
 
+// Semantic codebase search (Phase 23): vector embeddings + index status
+export {
+  indexStatusStateSchema,
+  indexStatusSchema,
+  semanticSearchQuerySchema,
+  semanticSearchResultItemSchema,
+  semanticSearchResultSchema,
+  reindexResponseSchema,
+} from "./semantic-search.js";
+export type {
+  IndexStatusState,
+  IndexStatus,
+  SemanticSearchQuery,
+  SemanticSearchResultItem,
+  SemanticSearchResult,
+  ReindexResponse,
+} from "./semantic-search.js";
+
+// Multi-model providers (Phase 23): BYOK provider registry + unified models
+export {
+  providerKindSchema,
+  addableProviderKindSchema,
+  modelProviderSummarySchema,
+  listProvidersResponseSchema,
+  addProviderRequestSchema,
+  testProviderResponseSchema,
+  modelCapabilitiesSchema,
+  modelPricingHintSchema,
+  unifiedModelSchema,
+  listModelsResponseSchema,
+} from "./providers.js";
+export type {
+  ProviderKind,
+  AddableProviderKind,
+  ModelProviderSummary,
+  ListProvidersResponse,
+  AddProviderRequest,
+  TestProviderResponse,
+  ModelCapabilities,
+  ModelPricingHint,
+  UnifiedModel,
+  ListModelsResponse,
+} from "./providers.js";
+
 export const HARNESS_VERSION = "0.0.0" as const;

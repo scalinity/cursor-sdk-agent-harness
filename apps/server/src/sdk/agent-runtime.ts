@@ -9,7 +9,7 @@ import type {
   CreateRunRequest,
   ExecutionMode,
 } from "@harness/shared";
-import { resolveMention } from "../services/context.service.js";
+import { resolveMention, type SemanticSearchProvider } from "../services/context.service.js";
 import {
   readRulesFromWorkspace,
   resolveRulesForRun,
@@ -89,6 +89,8 @@ export interface AgentRuntimeDeps {
    */
   pipeline: PersistAndBroadcastPipeline;
   allowlistRepo: WorkspaceAllowlistRepo;
+  /** Phase 23 — semantic @codebase resolution at run time (optional). */
+  searchService?: SemanticSearchProvider | undefined;
 }
 
 export interface AgentRuntime {
@@ -424,7 +426,9 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
         const nonRuleMentions = mentions.filter((m) => m.kind !== "rules");
         if (nonRuleMentions.length > 0) {
           const resolved = await Promise.all(
-            nonRuleMentions.map((m) => resolveMention(m, activeWorkspaceId)),
+            nonRuleMentions.map((m) =>
+              resolveMention(m, activeWorkspaceId, { searchService: deps.searchService }),
+            ),
           );
           const contextSections = resolved.map((r) => r.content);
           contextBlock = `<context>\n${contextSections.join("\n---\n")}\n</context>`;

@@ -42,7 +42,8 @@
       "node-pty",
       "sqlite3",
       "electron",
-      "electron-winstaller"
+      "electron-winstaller",
+      "sharp"
     ]
   }
 }
