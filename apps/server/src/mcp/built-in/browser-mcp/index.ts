@@ -91,12 +91,27 @@ export async function startBrowserMcpServer(): Promise<BrowserMcpServer> {
   const port = typeof addr === "object" && addr !== null ? addr.port : 0;
   const baseUrl = `http://127.0.0.1:${port}`;
 
-  return {
+  const handle: BrowserMcpServer = {
     baseUrl,
     urlForAgent: (agentId: string) => `${baseUrl}/mcp/${encodeURIComponent(agentId)}`,
     close: () =>
       new Promise<void>((resolve) => {
+        activeMcpServer = null;
         httpServer.close(() => resolve());
       }),
   };
+  activeMcpServer = handle;
+  return handle;
+}
+
+/** Module-level handle, set once the MCP server starts. */
+let activeMcpServer: BrowserMcpServer | null = null;
+
+/**
+ * Returns the per-agent MCP endpoint URL if the browser MCP server is running,
+ * else null. Used by `agent-options-builder` to inject `harness_browser` into
+ * `Agent.create` options.
+ */
+export function getBrowserMcpUrl(agentId: string): string | null {
+  return activeMcpServer?.urlForAgent(agentId) ?? null;
 }

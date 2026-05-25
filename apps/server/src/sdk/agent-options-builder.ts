@@ -10,6 +10,10 @@ import type {
   WorkspaceDecision,
   WorkspacePolicy,
 } from "../security/workspace-policy.js";
+import {
+  getBrowserMcpUrl,
+  BROWSER_MCP_SERVER_NAME,
+} from "../mcp/built-in/browser-mcp/index.js";
 
 /**
  * Thrown when one or more of the candidate workspace cwds fails workspace
@@ -138,6 +142,15 @@ export async function buildAgentOptions(
     // is `type?: "stdio"` (no explicit undefined). The runtime shapes match,
     // but exactOptionalPropertyTypes requires us to bridge with a cast.
     mcp[server.name] = server.config as McpServerConfig;
+  }
+
+  // Phase 18 M2: inject the built-in browser MCP server when available (desktop
+  // mode — the BrowserBackend is registered and the loopback MCP server is
+  // running). Every agent in the desktop app gets browser tools; the model
+  // decides whether to use them. A per-agent opt-in toggle is a later polish.
+  const browserMcpUrl = getBrowserMcpUrl(agent.id);
+  if (browserMcpUrl) {
+    mcp[BROWSER_MCP_SERVER_NAME] = { url: browserMcpUrl };
   }
 
   const agentsDefinitions: NonNullable<AgentOptions["agents"]> = {};

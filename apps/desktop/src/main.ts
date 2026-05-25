@@ -41,6 +41,7 @@ protocol.registerSchemesAsPrivileged([
 
 let mainWindow: BrowserWindow | null = null;
 let serverClose: (() => Promise<void>) | null = null;
+let browserMcpClose: (() => Promise<void>) | null = null;
 // Owns the embedded Chromium views (one isolated session per agent). Created
 // once; the host window is (re)attached on each window creation.
 const browserController = new BrowserController();
@@ -60,12 +61,48 @@ async function startEmbeddedServer(): Promise<void> {
     startServer: (
       opts?: { envOverrides?: NodeJS.ProcessEnv },
     ) => Promise<{ close: () => Promise<void>; url: string }>;
+    registerBrowserBackend: (backend: unknown) => void;
+    startBrowserMcpServer: () => Promise<{ baseUrl: string; urlForAgent: (id: string) => string; close: () => Promise<void> }>;
   };
   const started = await mod.startServer({
     envOverrides: { HARNESS_DESKTOP: "1" },
   });
   serverClose = started.close;
   serverOrigin = started.url;
+
+  // Phase 18 M2: inject the BrowserController as the server's BrowserBackend
+  // so the built-in browser MCP tools reach the real Electron views. The
+  // adapter wraps the sync/async mismatch and maps return shapes. Agent-only
+  // methods (click/type/snapshot/screenshot/evaluate/waitFor) throw until
+  // implemented on BrowserController (task #8).
+  mod.registerBrowserBackend({
+    navigate: async (agentId: string, url: string) => {
+      const s = await browserController.navigate(agentId, url);
+      return { url: s.url, status: null, redirected: false };
+    },
+    back: async (agentId: string) => ({ url: browserController.back(agentId).url }),
+    forward: async (agentId: string) => ({ url: browserController.forward(agentId).url }),
+    reload: async (agentId: string) => ({ url: browserController.reload(agentId).url }),
+    state: async (agentId: string) => browserController.snapshotState(agentId),
+    consoleMessages: async (agentId: string, levels?: string[], since?: number) => {
+      const all = browserController.consoleMessages(agentId, since);
+      return levels ? all.filter((m) => levels.includes(m.level)) : all;
+    },
+    networkRequests: async (agentId: string, filter?: string, since?: number) => {
+      const all = browserController.networkRequests(agentId, since);
+      return filter ? all.filter((r) => r.url.includes(filter)) : all;
+    },
+    waitFor: async () => { throw new Error("browser_wait_for not implemented yet"); },
+    click: async () => { throw new Error("browser_click not implemented yet"); },
+    type: async () => { throw new Error("browser_type not implemented yet"); },
+    snapshot: async () => { throw new Error("browser_snapshot not implemented yet"); },
+    screenshot: async () => { throw new Error("browser_screenshot not implemented yet"); },
+    evaluate: async () => { throw new Error("browser_evaluate not implemented yet"); },
+  });
+
+  const mcpServer = await mod.startBrowserMcpServer();
+  browserMcpClose = mcpServer.close;
+  console.log(`[harness-desktop] browser MCP server at ${mcpServer.baseUrl}`);
 }
 
 async function startEmbeddedServerSafe(): Promise<void> {
@@ -204,8 +241,15 @@ app.on("before-quit", (event: Electron.Event) => {
   if (serverClose) {
     event.preventDefault();
     const close = serverClose;
+    const mcpClose = browserMcpClose;
     serverClose = null;
+    browserMcpClose = null;
     void (async () => {
+      try {
+        if (mcpClose) await mcpClose();
+      } catch (err: unknown) {
+        console.error("[harness-desktop] browser MCP close failed:", err);
+      }
       try {
         await close();
       } catch (err: unknown) {

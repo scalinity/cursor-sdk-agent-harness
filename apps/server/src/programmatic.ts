@@ -67,3 +67,16 @@ export async function startServer(
     },
   };
 }
+
+// Phase 18 browser MCP seam — re-exported so the Electron main process can
+// register its BrowserController and start the loopback MCP server via the
+// same dynamic `import("@harness/server/dist/programmatic.js")` path.
+export {
+  registerBrowserBackend,
+  startBrowserMcpServer,
+  BROWSER_MCP_SERVER_NAME,
+} from "./mcp/built-in/browser-mcp/index.js";
+export type {
+  BrowserBackend,
+  BrowserMcpServer,
+} from "./mcp/built-in/browser-mcp/index.js";
