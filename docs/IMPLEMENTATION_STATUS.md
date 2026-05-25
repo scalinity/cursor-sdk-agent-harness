@@ -120,10 +120,42 @@ preference), `app.ts`, `keychain/index.ts`. Web: `state/ui-store.ts`
 - Embedding spike (one-off): all-MiniLM-L6-v2 loaded via WASM, produced a
   384-dim normalized vector — confirms the real path works in-process.
 
+### Post-review remediation (review-5 + /address, `P23-*` commits)
+
+A 5-agent read-only review (3 debuggers + code-reviewer + code-auditor) ran
+against the changeset; all findings were addressed (no Linear per this repo's
+convention — tracked via `P23-*` Conventional Commits):
+
+- **C1** workspace removal now purges embeddings + index_status (was: orphaned
+  file content forever, unbounded growth, stale results on re-add).
+- **C2** the workspace walker never follows symlinks (explicit skip + test;
+  closes the symlink-escape vector).
+- **C3** provider `baseUrl` SSRF guard (cloud → public only; Ollama →
+  loopback-only, blocking the 169.254.169.254 metadata vector).
+- **C4/W1** provider runs register in `ActiveRuns` via a shared `CancelableRun`
+  seam → cancellable + aborted on shutdown; an aborted run finalizes as
+  CANCELLED, not ERROR.
+- **C5/W3/W4/W6** bounded timeouts on every provider call; `/test` validation
+  surfaces bad keys; Ollama reader released in `finally`; per-line NDJSON parse.
+- **W2** tool-less models get the Ask prefix regardless of mode. **W5** yield
+  between embed batches. **W7** `useProviders` Zod-validates responses. **W9**
+  shared `formatModelLabel`. **W10** file-walker + model-router tests.
+- **Suggestions**: semantic search scores on vectors only + fetches top-k
+  content (no full-content scan, no per-row vector copy); provider
+  enable/disable PATCH (wired the dead `setEnabled`); shared
+  `PROVIDER_KIND_LABELS`; `DEFAULT_SEMANTIC_MIN_SCORE`; Keychain-after-DB
+  ordering; drizzle `json_valid(models)` mirror; embedder revision seam.
+
+Consciously left (documented, low value for a local single-user app):
+provider-key/DB startup reconciliation, `index_status` read-consistency
+(advisory only), `confirm()` delete dialog, and the cosine norm-recompute
+micro-opt (the bigger Float32Array-copy cost was removed).
+
 ### Known limitations / deferred
 
-1. **Provider runs are not in the `ActiveRuns` cancel registry** — a non-Cursor
-   run isn't cancellable via the WS cancel route (chat-only runs finish fast).
+1. **Cancellation of a non-Cursor provider run is best-effort** — it streams
+   chat-only and finishes fast; cancel/terminate/shutdown now reach it
+   (P23-C4) and record CANCELLED.
 2. **Auto + Cursor model switching mid-agent**: an `auto` agent's first run
    creates the SDK agent under the resolved Cursor model; a later auto run that
    resolves to a *different* Cursor model reuses the cached handle (edge case).
