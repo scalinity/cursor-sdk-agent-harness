@@ -127,6 +127,12 @@ export async function walkWorkspace(
     for (const entry of entries) {
       const abs = path.join(dir, entry.name);
       const rel = path.relative(root, abs);
+      // P23-C2: never follow symlinks. `Dirent.isDirectory()`/`isFile()` are
+      // false for a symlink (they reflect the link, not its target), so the
+      // branches below already skip them — but make it explicit + defensive so
+      // a symlinked dir can never be traversed out of the workspace root, and
+      // realpath-gate any entry whose resolved target escapes root.
+      if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
         if (SKIP_DIRS.has(entry.name) || entry.name.startsWith(".")) continue;
         if (matchesIgnore(rel, ignorePatterns)) continue;
