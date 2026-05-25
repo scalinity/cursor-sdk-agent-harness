@@ -388,4 +388,47 @@ export type {
   SymbolKind,
 } from "./context.js";
 
+// Enrichment (Phase 22): Docs indexing, Notepads, Terminal AI, Slash commands
+export {
+  docsSourceStatusSchema,
+  docsSourceSchema,
+  addDocsSourceRequestSchema,
+  docsSearchQuerySchema,
+  docsSearchResultItemSchema,
+  docsSearchResultSchema,
+  notepadSchema,
+  notepadSummarySchema,
+  createNotepadRequestSchema,
+  updateNotepadContentRequestSchema,
+  renameNotepadRequestSchema,
+  generateCommandRequestSchema,
+  generateCommandResponseSchema,
+  slashCommandSchema,
+  createSlashCommandRequestSchema,
+  updateSlashCommandRequestSchema,
+  expandCommandRequestSchema,
+  expandCommandResponseSchema,
+  slashCommandVariableSchema,
+} from "./enrichment.js";
+export type {
+  DocsSourceStatus,
+  DocsSource,
+  AddDocsSourceRequest,
+  DocsSearchQuery,
+  DocsSearchResult,
+  Notepad,
+  NotepadSummary,
+  CreateNotepadRequest,
+  UpdateNotepadContentRequest,
+  RenameNotepadRequest,
+  GenerateCommandRequest,
+  GenerateCommandResponse,
+  SlashCommand,
+  CreateSlashCommandRequest,
+  UpdateSlashCommandRequest,
+  ExpandCommandRequest,
+  ExpandCommandResponse,
+  SlashCommandVariable,
+} from "./enrichment.js";
+
 export const HARNESS_VERSION = "0.0.0" as const;

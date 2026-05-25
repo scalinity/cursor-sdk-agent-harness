@@ -1,5 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { registerAgentsRoutes, type AgentsRoutesDeps } from "./agents.routes.js";
+import {
+  registerCommandsRoutes,
+  type CommandsRoutesDeps,
+} from "./commands.routes.js";
+import {
+  registerDocsRoutes,
+  type DocsRoutesDeps,
+} from "./docs.routes.js";
 import { registerEventsRoutes, type EventsRoutesDeps } from "./events.routes.js";
 import { registerFilesRoutes, type FilesRoutesDeps } from "./files.routes.js";
 import { registerGitRoutes, type GitRoutesDeps } from "./git.routes.js";
@@ -8,6 +16,10 @@ import {
   registerMcpServersRoutes,
   type McpServersRoutesDeps,
 } from "./mcp-servers.routes.js";
+import {
+  registerNotepadsRoutes,
+  type NotepadsRoutesDeps,
+} from "./notepads.routes.js";
 import {
   registerObservabilityRoutes,
   type ObservabilityRoutesDeps,
@@ -25,6 +37,10 @@ import {
   registerSubagentsRoutes,
   type SubagentsRoutesDeps,
 } from "./subagents.routes.js";
+import {
+  registerTerminalAiRoutes,
+  type TerminalAiRoutesDeps,
+} from "./terminal-ai.routes.js";
 import { registerUsageRoutes, type UsageRoutesDeps } from "./usage.routes.js";
 import {
   registerWorkspaceAllowlistRoutes,
@@ -59,6 +75,10 @@ export interface RouteDeps {
   context: ContextRoutesDeps;
   search: SearchRoutesDeps;
   rules: RulesRoutesDeps;
+  docs: DocsRoutesDeps;
+  notepads: NotepadsRoutesDeps;
+  commands: CommandsRoutesDeps;
+  terminalAi: TerminalAiRoutesDeps;
 }
 
 export async function registerRoutes(
@@ -81,4 +101,8 @@ export async function registerRoutes(
   await registerContextRoutes(app, deps.context);
   await registerSearchRoutes(app, deps.search);
   await registerRulesRoutes(app, deps.rules);
+  await registerDocsRoutes(app, deps.docs);
+  await registerNotepadsRoutes(app, deps.notepads);
+  await registerCommandsRoutes(app, deps.commands);
+  await registerTerminalAiRoutes(app, deps.terminalAi);
 }
