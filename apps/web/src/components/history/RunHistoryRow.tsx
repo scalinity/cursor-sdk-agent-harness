@@ -15,6 +15,12 @@ function costText(run: RunSummary): string {
   return formatMicros(run.costUsdMicros);
 }
 
+function cacheRate(run: RunSummary): string {
+  if (run.inputTokens === null || run.inputTokens === 0) return "--";
+  const cached = run.cachedInputTokens ?? 0;
+  return `${((100 * cached) / run.inputTokens).toFixed(0)}%`;
+}
+
 export function RunHistoryRow({ run, selected, onToggleSelected, onFilterAgent }: RunHistoryRowProps) {
   const tokens = run.usageSource === "unavailable" ? null : tokenTotal(run.inputTokens, run.outputTokens);
   const title = run.promptPreview.length > 80 ? `${run.promptPreview.slice(0, 80)}...` : run.promptPreview;
@@ -43,6 +49,7 @@ export function RunHistoryRow({ run, selected, onToggleSelected, onFilterAgent }
       </td>
       <td className="mono p-2 text-text-secondary">{costText(run)}</td>
       <td className="mono p-2 text-text-secondary">{formatTokens(tokens)}</td>
+      <td className="mono p-2 text-text-secondary">{cacheRate(run)}</td>
     </tr>
   );
 }
