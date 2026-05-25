@@ -167,7 +167,7 @@ function persistSelectedModel(modelId: ModelId): void {
 export const useUiStore = create<UiState>((set) => ({
   codeHidden: readInitialCodeHidden(),
   railHidden: readInitialRailHidden(),
-  rightPanelTab: "diff",
+  rightPanelTab: "terminal",
   csrfToken: null,
   connectionState: "idle",
   composerDraft: "",
