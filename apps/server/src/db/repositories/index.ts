@@ -1,8 +1,11 @@
 import type { Database as BetterSqlite3Database } from "better-sqlite3";
 import { AgentsRepo } from "./agents.repo.js";
 import { DocsRepo } from "./docs.repo.js";
+import { EmbeddingsRepo } from "./embeddings.repo.js";
 import { EventsRepo } from "./events.repo.js";
+import { IndexStatusRepo } from "./index-status.repo.js";
 import { McpServersRepo } from "./mcp-servers.repo.js";
+import { ModelProvidersRepo } from "./model-providers.repo.js";
 import { NotepadsRepo } from "./notepads.repo.js";
 import { RunsRepo } from "./runs.repo.js";
 import { SettingsRepo } from "./settings.repo.js";
@@ -13,8 +16,11 @@ import { WorkspaceAllowlistRepo } from "./workspace-allowlist.repo.js";
 export {
   AgentsRepo,
   DocsRepo,
+  EmbeddingsRepo,
   EventsRepo,
+  IndexStatusRepo,
   McpServersRepo,
+  ModelProvidersRepo,
   NotepadsRepo,
   RunsRepo,
   SettingsRepo,
@@ -26,6 +32,9 @@ export {
 export interface Repositories {
   readonly agents: AgentsRepo;
   readonly docs: DocsRepo;
+  readonly embeddings: EmbeddingsRepo;
+  readonly indexStatus: IndexStatusRepo;
+  readonly modelProviders: ModelProvidersRepo;
   readonly runs: RunsRepo;
   readonly events: EventsRepo;
   readonly settings: SettingsRepo;
@@ -40,6 +49,9 @@ export function createRepositories(raw: BetterSqlite3Database): Repositories {
   return {
     agents: new AgentsRepo(raw),
     docs: new DocsRepo(raw),
+    embeddings: new EmbeddingsRepo(raw),
+    indexStatus: new IndexStatusRepo(raw),
+    modelProviders: new ModelProvidersRepo(raw),
     runs: new RunsRepo(raw),
     events: new EventsRepo(raw),
     settings: new SettingsRepo(raw),

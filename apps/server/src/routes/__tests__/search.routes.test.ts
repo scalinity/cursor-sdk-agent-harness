@@ -6,6 +6,8 @@ import os from "node:os";
 import { openTestDb } from "../../db/__tests__/helpers.js";
 import { createRepositories } from "../../db/repositories/index.js";
 import { registerSearchRoutes } from "../search.routes.js";
+import { SearchService } from "../../search/search-service.js";
+import { FakeEmbedder } from "../../search/fake-embedder.js";
 
 async function createTempWorkspace(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "harness-search-test-"));
@@ -23,7 +25,13 @@ function setup(workspacePath: string | null) {
     repos.settings.set("app.activeWorkspaceId", workspacePath);
   }
   const app = Fastify({ logger: false });
-  return { db, repos, app };
+  const searchService = new SearchService({
+    embeddingsRepo: repos.embeddings,
+    indexStatusRepo: repos.indexStatus,
+    logger: app.log,
+    embedder: new FakeEmbedder(),
+  });
+  return { db, repos, app, searchService };
 }
 
 describe("/api/search/grep", () => {
@@ -40,11 +48,12 @@ describe("/api/search/grep", () => {
   });
 
   it("returns grep results for a matching query", async () => {
-    const { db, repos, app } = setup(tmpDir);
+    const { db, repos, app, searchService } = setup(tmpDir);
     cleanup.push(() => app.close(), () => db.close());
     await registerSearchRoutes(app, {
       settingsRepo: repos.settings,
       allowlistRepo: repos.workspaceAllowlist,
+      searchService,
     });
 
     const res = await app.inject({
@@ -58,11 +67,12 @@ describe("/api/search/grep", () => {
   });
 
   it("returns empty results for non-matching query", async () => {
-    const { db, repos, app } = setup(tmpDir);
+    const { db, repos, app, searchService } = setup(tmpDir);
     cleanup.push(() => app.close(), () => db.close());
     await registerSearchRoutes(app, {
       settingsRepo: repos.settings,
       allowlistRepo: repos.workspaceAllowlist,
+      searchService,
     });
 
     const res = await app.inject({
@@ -74,11 +84,12 @@ describe("/api/search/grep", () => {
   });
 
   it("returns 400 when no workspace is active", async () => {
-    const { db, repos, app } = setup(null);
+    const { db, repos, app, searchService } = setup(null);
     cleanup.push(() => app.close(), () => db.close());
     await registerSearchRoutes(app, {
       settingsRepo: repos.settings,
       allowlistRepo: repos.workspaceAllowlist,
+      searchService,
     });
 
     const res = await app.inject({
@@ -103,11 +114,12 @@ describe("/api/search/files", () => {
   });
 
   it("returns file results for a matching pattern", async () => {
-    const { db, repos, app } = setup(tmpDir);
+    const { db, repos, app, searchService } = setup(tmpDir);
     cleanup.push(() => app.close(), () => db.close());
     await registerSearchRoutes(app, {
       settingsRepo: repos.settings,
       allowlistRepo: repos.workspaceAllowlist,
+      searchService,
     });
 
     const res = await app.inject({

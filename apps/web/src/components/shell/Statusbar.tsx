@@ -27,6 +27,10 @@ export interface StatusbarProps {
   gitStatus?: GitStatusInfo;
   /** Phase 20 — number of active project rules in the workspace. */
   rulesCount?: number;
+  /** Phase 23 — semantic index status badge. */
+  indexStatus?:
+    | { status: string; indexedFiles: number; totalFiles: number; totalChunks: number }
+    | undefined;
 }
 
 function GitBranchIcon({ className }: { className?: string }) {
@@ -47,6 +51,7 @@ export function Statusbar({
   workspaceName,
   gitStatus,
   rulesCount,
+  indexStatus,
 }: StatusbarProps) {
   return (
     <div className="statusbar">
@@ -73,6 +78,23 @@ export function Statusbar({
             <span className="text-text-tertiary">·</span>
             <span className="inline-flex items-center gap-1 text-text-tertiary" title="Active project rules">
               Rules: {rulesCount}
+            </span>
+          </>
+        ) : null}
+        {indexStatus && indexStatus.status !== "pending" ? (
+          <>
+            <span className="text-text-tertiary">·</span>
+            <span
+              className="inline-flex items-center gap-1 text-text-tertiary"
+              title="Semantic codebase index"
+            >
+              {indexStatus.status === "indexing"
+                ? `Indexing ${
+                    indexStatus.totalFiles > 0
+                      ? Math.round((indexStatus.indexedFiles / indexStatus.totalFiles) * 100)
+                      : 0
+                  }%`
+                : `Index: ${indexStatus.totalChunks}`}
             </span>
           </>
         ) : null}

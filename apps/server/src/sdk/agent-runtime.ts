@@ -9,7 +9,7 @@ import type {
   CreateRunRequest,
   ExecutionMode,
 } from "@harness/shared";
-import { resolveMention } from "../services/context.service.js";
+import { resolveMention, type SemanticSearchProvider } from "../services/context.service.js";
 import {
   readRulesFromWorkspace,
   resolveRulesForRun,
@@ -27,6 +27,9 @@ import type { SettingsRepo } from "../db/repositories/settings.repo.js";
 import { buildAgentOptions } from "./agent-options-builder.js";
 import type { ActiveRuns } from "./active-runs.js";
 import { LiveAgents } from "./live-agents.js";
+import type { ModelRouter } from "../providers/model-router.js";
+import { ProviderRunController } from "../providers/provider-run.js";
+import { inferPricing } from "../providers/model-registry.js";
 import {
   createPipelineSink,
   type PersistAndBroadcastPipeline,
@@ -89,6 +92,14 @@ export interface AgentRuntimeDeps {
    */
   pipeline: PersistAndBroadcastPipeline;
   allowlistRepo: WorkspaceAllowlistRepo;
+  /** Phase 23 — semantic @codebase resolution at run time (optional). */
+  searchService?: SemanticSearchProvider | undefined;
+  /**
+   * Phase 23 — multi-model router. When present, non-Cursor models route to
+   * a direct provider client instead of the SDK. Absent ⇒ every model is
+   * treated as Cursor (the v1.1 behaviour; keeps existing tests unchanged).
+   */
+  modelRouter?: ModelRouter | undefined;
 }
 
 export interface AgentRuntime {
@@ -197,6 +208,25 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
 
   return {
     async create(input: CreateAgentRequest): Promise<AgentRow> {
+      // Phase 23 — non-Cursor models (provider ids) and the `auto` sentinel
+      // have no SDK agent. Persist a DB-only row (active immediately); the
+      // run-time fork in startRun drives them via a direct provider client.
+      if (deps.modelRouter && !deps.modelRouter.isCursorModel(input.modelId)) {
+        const row = deps.agentsRepo.create({
+          name: input.name,
+          status: "active",
+          mode: input.mode,
+          modelId: input.modelId,
+          cwd: input.cwd ?? null,
+          settingSources: input.settingSources ?? null,
+          sandboxEnabled: input.sandboxEnabled ?? null,
+          cloudOptions: input.cloudOptions ?? null,
+          mcpServerIds: input.mcpServerIds,
+          subagentDefinitionIds: input.subagentDefinitionIds,
+        });
+        deps.agentsRepo.updateLastActiveAt(row.id);
+        return row;
+      }
       const apiKey = await mustApiKey();
       // Persist-before-SDK pattern: insert the row as `creating` first, then
       // call the SDK, then flip to `active`. On failure we mark `error` so
@@ -366,19 +396,6 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
           `Agent ${input.agentId} is terminated. Resume it first.`,
         );
       }
-      // For local agents, re-validate every cwd before sending a new
-      // prompt. The allowlist may have changed between agent creation
-      // and now; we never trust stale state.
-      if (row.mode === "local") {
-        await buildAgentOptions({
-          agent: row,
-          apiKey: await mustApiKey(),
-          mcpServers: deps.mcpRepo.list(),
-          subagents: deps.subagentsRepo.list(),
-          workspacePolicy: deps.workspacePolicy,
-        });
-      }
-      const handle = await loadActiveAgent(row);
       const snapshot = getSettingsSnapshot(deps.settingsRepo);
       const runId = newRunId();
       // Tag the run with the workspace active at creation time so the
@@ -424,7 +441,9 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
         const nonRuleMentions = mentions.filter((m) => m.kind !== "rules");
         if (nonRuleMentions.length > 0) {
           const resolved = await Promise.all(
-            nonRuleMentions.map((m) => resolveMention(m, activeWorkspaceId)),
+            nonRuleMentions.map((m) =>
+              resolveMention(m, activeWorkspaceId, { searchService: deps.searchService }),
+            ),
           );
           const contextSections = resolved.map((r) => r.content);
           contextBlock = `<context>\n${contextSections.join("\n---\n")}\n</context>`;
@@ -448,37 +467,104 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
         }
       }
 
-      // Assemble: rules → context → mode prefix → user prompt
+      // ── Phase 23: resolve the model (Cursor vs provider, incl. `auto`) ──
+      // Resolve BEFORE assembling the prompt so a tool-less (non-Cursor) model
+      // gets the read-only Ask framing (P23-W2). Token estimate uses the
+      // context + user prompt (the final sdkPrompt isn't built yet).
+      const promptTokens = Math.ceil(
+        (rulesBlock.length + contextBlock.length + input.prompt.length) / 4,
+      );
+      const resolved = deps.modelRouter
+        ? await deps.modelRouter.resolve(row.modelId, { promptTokens, mode: executionMode })
+        : { unifiedId: row.modelId, modelName: row.modelId, provider: null, isCursor: true };
+
+      // Assemble: rules → context → mode prefix → user prompt. Non-Cursor
+      // models are chat-only, so force the Ask prefix regardless of mode.
       const promptParts: string[] = [];
       if (rulesBlock) promptParts.push(rulesBlock);
       if (contextBlock) promptParts.push(contextBlock);
-      if (executionMode === "ask") promptParts.push(ASK_MODE_PREFIX);
+      if (executionMode === "ask" || !resolved.isCursor) {
+        promptParts.push(ASK_MODE_PREFIX);
+      }
       promptParts.push(input.prompt);
       const sdkPrompt = promptParts.join("\n\n");
 
-      if (executionMode === "yolo") {
+      if (executionMode === "yolo" && resolved.isCursor) {
         deps.logger.warn(
           { runId, agentId: row.id },
           "YOLO mode active but approval auto-resolve unavailable (OQ-10 unresolved)",
         );
       }
+
       const runRow = deps.runsRepo.create({
         id: runId,
         agentId: row.id,
         status: "CREATING",
         promptPreview: input.prompt.slice(0, 256),
         name: autoName,
-        modelId: row.modelId,
+        modelId: resolved.unifiedId,
         mode: row.mode,
         executionMode,
         workspaceId: activeWorkspaceId,
         contextMetadata,
       });
+
+      // ── Non-Cursor provider path (chat-only: Ask) ─────────────────────
+      if (!resolved.isCursor && resolved.provider) {
+        const providerController = new ProviderRunController(
+          {
+            runId: runRow.id,
+            agentId: row.id,
+            modelName: resolved.modelName,
+            prompt: sdkPrompt,
+            provider: resolved.provider,
+            pricing: inferPricing(resolved.modelName),
+            runsRepo: deps.runsRepo,
+            pipeline: deps.pipeline,
+            logger: deps.logger,
+          },
+          (id) => {
+            // P23-C4: keep the registry in sync so cancel/terminate/shutdown
+            // can reach the run while it's live, and clean up on termination.
+            activeRuns.unregister(id);
+            deps.pipeline.dropRun(id);
+          },
+        );
+        activeRuns.register(providerController);
+        providerController.start();
+        deps.agentsRepo.updateLastActiveAt(row.id);
+        const persistedProvider = deps.runsRepo.getById(runRow.id);
+        return {
+          runId: runRow.id,
+          agentId: row.id,
+          status: persistedProvider?.status ?? "RUNNING",
+          startedAt: persistedProvider?.startedAt ?? new Date().toISOString(),
+        };
+      }
+
+      // ── Cursor SDK path ───────────────────────────────────────────────
+      // An `auto` agent that resolved to a Cursor model may be DB-only; load
+      // (or transparently create) the SDK agent under the resolved model.
+      const effectiveRow: AgentRow =
+        resolved.modelName === row.modelId ? row : { ...row, modelId: resolved.modelName };
+      if (effectiveRow.mode === "local") {
+        // Re-validate every cwd before sending — the allowlist may have
+        // changed since agent creation; never trust stale state.
+        await buildAgentOptions({
+          agent: effectiveRow,
+          apiKey: await mustApiKey(),
+          mcpServers: deps.mcpRepo.list(),
+          subagents: deps.subagentsRepo.list(),
+          workspacePolicy: deps.workspacePolicy,
+        });
+      }
+      const handle = await loadActiveAgent(effectiveRow);
+
       const controller = new RunController(
         {
           runId: runRow.id,
           agentId: row.id,
-          modelId: row.modelId,
+          modelId: resolved.modelName,
           mode: row.mode,
           prompt: sdkPrompt,
           ...(input.images && input.images.length > 0 ? { images: input.images } : {}),

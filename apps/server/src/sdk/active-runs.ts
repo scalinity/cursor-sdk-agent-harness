@@ -1,7 +1,24 @@
-import type { RunController } from "./run-controller.js";
+import type { RunInterruptedReason } from "@harness/shared";
+import type { Run } from "./sdk-adapter.js";
+import type { CancelResult } from "./run-controller.js";
 
 /**
- * In-memory registry of active `RunController` instances. Keyed by `runId`.
+ * P23-C4: the common shape the registry needs from any in-flight run, so both
+ * the Cursor `RunController` and the non-Cursor `ProviderRunController` can be
+ * registered, cancelled (WS cancel + agent terminate), and aborted on
+ * shutdown. `getRunHandle` is Cursor-only (the approval probe) and absent on
+ * provider runs.
+ */
+export interface CancelableRun {
+  readonly runId: string;
+  readonly agentId: string;
+  readonly abortController: AbortController;
+  cancel(reason?: RunInterruptedReason): Promise<CancelResult>;
+  getRunHandle?(): Run | null;
+}
+
+/**
+ * In-memory registry of active runs. Keyed by `runId`.
  * The `AgentRuntime.terminate(agentId)` flow uses `forAgent()` to abort
  * every active run owned by a terminated agent. The registry is purely
  * runtime state — durable run rows live in `runs` and survive process
@@ -9,9 +26,9 @@ import type { RunController } from "./run-controller.js";
  * Recovery, landing in Phase 14).
  */
 export class ActiveRuns {
-  private readonly byRunId = new Map<string, RunController>();
+  private readonly byRunId = new Map<string, CancelableRun>();
 
-  register(controller: RunController): void {
+  register(controller: CancelableRun): void {
     this.byRunId.set(controller.runId, controller);
   }
 
@@ -19,12 +36,12 @@ export class ActiveRuns {
     this.byRunId.delete(runId);
   }
 
-  get(runId: string): RunController | null {
+  get(runId: string): CancelableRun | null {
     return this.byRunId.get(runId) ?? null;
   }
 
-  forAgent(agentId: string): RunController[] {
-    const out: RunController[] = [];
+  forAgent(agentId: string): CancelableRun[] {
+    const out: CancelableRun[] = [];
     for (const c of this.byRunId.values()) {
       if (c.agentId === agentId) out.push(c);
     }
@@ -38,7 +55,7 @@ export class ActiveRuns {
    * can iterate safely while the underlying map mutates (e.g. an
    * abort that triggers an onTerminate callback).
    */
-  all(): RunController[] {
+  all(): CancelableRun[] {
     return Array.from(this.byRunId.values());
   }
 

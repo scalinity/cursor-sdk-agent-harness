@@ -18,6 +18,7 @@ import { useEnsureDefaultAgent } from "../hooks/useEnsureDefaultAgent.js";
 import { useErrorReporter } from "../hooks/useErrorReporter.js";
 import { useGitStatus } from "../hooks/useGitStatus.js";
 import { useRulesCount } from "../hooks/useRulesCount.js";
+import { useIndexStatus } from "../hooks/useIndexStatus.js";
 import { useUiStore } from "../state/ui-store.js";
 import { useRunStore } from "../state/run-store.js";
 import { Titlebar } from "../components/shell/Titlebar.js";
@@ -30,8 +31,7 @@ import { Toaster } from "../components/shell/Toaster.js";
 import { NewAgentDialog } from "../components/agents/NewAgentDialog.js";
 import { WorkspaceRequiredModal } from "../components/workspace/WorkspaceRequiredModal.js";
 import { cn } from "../lib/cn.js";
-import { MODEL_LABELS, type ContextMention, type SdkImage } from "@harness/shared";
-import { describeModel } from "../lib/model-label.js";
+import { formatModelLabel, type ContextMention, type SdkImage } from "@harness/shared";
 
 export function AppShell() {
   const csrf = useCsrfToken();
@@ -55,6 +55,7 @@ export function AppShell() {
   const setComposerDraft = useUiStore((s) => s.setComposerDraft);
   const gitStatus = useGitStatus();
   const rulesCount = useRulesCount();
+  const { status: indexStatus } = useIndexStatus();
 
   // Auto-provision a universal default "Coding Agent" for the active
   // workspace + selected model so the user never has to create an agent
@@ -243,13 +244,12 @@ export function AppShell() {
         <RightPane activeRunId={activeRunId} />
         <Statusbar
           connectionState={connectionState}
-          modelLabel={
-            activeAgent ? describeModel(activeAgent).modelLabel : MODEL_LABELS[selectedModelId]
-          }
+          modelLabel={formatModelLabel(activeAgent ? activeAgent.modelId : selectedModelId)}
           runningRunId={activeRunId}
           workspaceName={activeWorkspace.workspace?.label ?? activeWorkspace.workspace?.path ?? null}
           gitStatus={gitStatus}
           rulesCount={rulesCount}
+          indexStatus={indexStatus ?? undefined}
         />
         <NewAgentDialog
           open={newAgentOpen}

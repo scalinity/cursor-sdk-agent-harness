@@ -18,6 +18,8 @@ export interface WorkspaceAllowlistRoutesDeps {
   allowlist: WorkspaceAllowlistRepo;
   policy: WorkspacePolicy;
   settings: SettingsRepo;
+  /** P23-C1: purge a removed workspace's semantic index (optional in tests). */
+  searchService?: { purgeWorkspace(workspaceId: string): void } | undefined;
 }
 
 const deleteQuerySchema = z.object({
@@ -184,6 +186,11 @@ export async function registerWorkspaceAllowlistRoutes(
       if (deps.settings.get<string | null>(ACTIVE_WORKSPACE_SETTING_KEY) === req.params.entryId) {
         deps.settings.set(ACTIVE_WORKSPACE_SETTING_KEY, null);
       }
+      // P23-C1: removing a workspace must forget its indexed content — drop the
+      // embeddings + index status and stop watching it. Done BEFORE the
+      // allowlist delete so a failure leaves the entry intact (retryable)
+      // rather than orphaning embedded file content forever.
+      deps.searchService?.purgeWorkspace(entry.path);
       deps.allowlist.delete(req.params.entryId);
       return reply.code(204).send();
     },

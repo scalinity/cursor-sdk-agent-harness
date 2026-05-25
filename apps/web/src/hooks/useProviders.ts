@@ -1,0 +1,103 @@
+import { useCallback, useState } from "react";
+import {
+  listProvidersResponseSchema,
+  modelProviderSummarySchema,
+  testProviderResponseSchema,
+  type AddProviderRequest,
+  type ModelProviderSummary,
+  type TestProviderResponse,
+} from "@harness/shared";
+import { httpRequest } from "../lib/http-client.js";
+import { useMutatingRequest } from "./useMutatingRequest.js";
+import { useMountEffect } from "./useMountEffect.js";
+
+export interface UseProvidersResult {
+  providers: ModelProviderSummary[];
+  loading: boolean;
+  error: string | null;
+  addProvider: (req: AddProviderRequest) => Promise<ModelProviderSummary>;
+  deleteProvider: (id: string) => Promise<void>;
+  testProvider: (id: string) => Promise<TestProviderResponse>;
+  setEnabled: (id: string, enabled: boolean) => Promise<void>;
+  reload: () => void;
+}
+
+/** Phase 23 — BYOK provider registry CRUD (keys never round-trip the client). */
+export function useProviders(): UseProvidersResult {
+  const mutate = useMutatingRequest();
+  const [providers, setProviders] = useState<ModelProviderSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await httpRequest("/api/providers", {
+        responseSchema: listProvidersResponseSchema,
+      });
+      setProviders(data.items);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load providers");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useMountEffect(() => {
+    void load();
+  });
+
+  const addProvider = useCallback(
+    async (req: AddProviderRequest): Promise<ModelProviderSummary> => {
+      const created = await mutate("/api/providers", {
+        method: "POST",
+        body: req,
+        responseSchema: modelProviderSummarySchema,
+      });
+      setProviders((prev) => [...prev, created]);
+      return created;
+    },
+    [mutate],
+  );
+
+  const deleteProvider = useCallback(
+    async (id: string): Promise<void> => {
+      await mutate(`/api/providers/${id}`, { method: "DELETE" });
+      setProviders((prev) => prev.filter((p) => p.id !== id));
+    },
+    [mutate],
+  );
+
+  const testProvider = useCallback(
+    async (id: string): Promise<TestProviderResponse> => {
+      return mutate(`/api/providers/${id}/test`, {
+        method: "POST",
+        responseSchema: testProviderResponseSchema,
+      });
+    },
+    [mutate],
+  );
+
+  const setEnabled = useCallback(
+    async (id: string, enabled: boolean): Promise<void> => {
+      const updated = await mutate(`/api/providers/${id}`, {
+        method: "PATCH",
+        body: { enabled },
+        responseSchema: modelProviderSummarySchema,
+      });
+      setProviders((prev) => prev.map((p) => (p.id === id ? updated : p)));
+    },
+    [mutate],
+  );
+
+  return {
+    providers,
+    loading,
+    error,
+    addProvider,
+    deleteProvider,
+    testProvider,
+    setEnabled,
+    reload: () => void load(),
+  };
+}

@@ -1,6 +1,12 @@
 import { useCodebaseSearch } from "../hooks/useCodebaseSearch.js";
 import { cn } from "../lib/cn.js";
 
+const PLACEHOLDERS: Record<string, string> = {
+  grep: "Search text in codebase…",
+  files: "Search files by name…",
+  semantic: "Search by meaning (semantic)…",
+};
+
 export function SearchPanel() {
   const {
     query,
@@ -9,6 +15,7 @@ export function SearchPanel() {
     setSearchType,
     grepResults,
     fileResults,
+    semanticResults,
     isSearching,
     error,
   } = useCodebaseSearch();
@@ -19,7 +26,7 @@ export function SearchPanel() {
         <input
           type="text"
           className="search-panel__input"
-          placeholder={searchType === "grep" ? "Search text in codebase…" : "Search files by name…"}
+          placeholder={PLACEHOLDERS[searchType]}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -44,6 +51,16 @@ export function SearchPanel() {
           >
             Files
           </button>
+          <button
+            type="button"
+            className={cn(
+              "search-panel__toggle-btn",
+              searchType === "semantic" && "search-panel__toggle-btn--active",
+            )}
+            onClick={() => setSearchType("semantic")}
+          >
+            Semantic
+          </button>
         </div>
       </div>
 
@@ -56,7 +73,9 @@ export function SearchPanel() {
           Search your codebase
           <br />
           <span className="text-2xs text-text-tertiary">
-            Try a function name, variable, or text pattern
+            {searchType === "semantic"
+              ? "Describe what you're looking for in natural language"
+              : "Try a function name, variable, or text pattern"}
           </span>
         </div>
       ) : searchType === "grep" && grepResults ? (
@@ -111,6 +130,36 @@ export function SearchPanel() {
             <div className="search-panel__meta">Results truncated</div>
           ) : null}
         </div>
+      ) : searchType === "semantic" && semanticResults ? (
+        <>
+          <div className="search-panel__meta">
+            {semanticResults.results.length} result
+            {semanticResults.results.length !== 1 ? "s" : ""}
+            {" · index "}
+            {semanticResults.indexStatus.status}
+            {" · "}
+            {semanticResults.indexStatus.totalChunks} chunks
+          </div>
+          <div className="search-panel__results">
+            {semanticResults.results.length === 0 ? (
+              <div className="search-panel__empty">
+                {semanticResults.indexStatus.status === "indexed"
+                  ? "No relevant code found"
+                  : "Index not ready yet — try again shortly"}
+              </div>
+            ) : (
+              semanticResults.results.map((r, i) => (
+                <div key={`${r.path}:${r.startLine}:${i}`} className="search-result">
+                  <div className="search-result__path">
+                    {r.path}:{r.startLine}-{r.endLine}
+                    <span className="search-result__score"> {Math.round(r.score * 100)}%</span>
+                  </div>
+                  <div className="search-result__line">{r.content.split("\n")[0]}</div>
+                </div>
+              ))
+            )}
+          </div>
+        </>
       ) : null}
     </div>
   );

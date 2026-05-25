@@ -29,6 +29,146 @@ each phase. Use it as the single source of truth for "what is decided" vs
 | 19 | Execution Modes, Git Status, and Chat UX | ✅ complete | Three-mode execution system (Ask/Agent/YOLO), git branch+dirty in statusbar, code block copy+apply buttons, session rename, Cmd+N new session, FTS run search. Migration 0003, 7 new shared schemas, 4 new server routes, 7 new frontend components/hooks. 431 tests (282 server, 122 web, 10 shared, 6 eslint, 11 scripts). | **Milestone 1 — manual driving — complete & user-verified (browser fully functional).** Electron `WebContentsView` browser in the right-pane Browser tab, one isolated `persist:agent-<id>` session per agent (+ a standalone `manual` session so the tab works as a browser without an agent), driven manually (URL bar, back/fwd/reload/stop). Built-in browser MCP server + agent control + action visualization + console/network drawers + replay are **Milestone 2** (in progress). See the Phase 18 section below. |
 | 20 | Context Intelligence and Rules | ✅ complete | @-mention system (file/folder/symbol/codebase/rules), project rules (.harness/rules/ with always/glob/manual scopes), codebase search (grep+file via ripgrep with fallback). Migration 0004, 16 new shared schemas, 3 new server routes, 3 new services, 6 new frontend components/hooks, Search tab in right pane. 464 tests (306 server, 122 web, 30 shared, 6 eslint, 11 scripts). |
 | 22 | Enrichment: Docs Indexing, Notepads, Terminal AI, Slash Commands | ✅ complete | Custom documentation indexing (crawl + FTS5 search + @docs mentions), persistent Notepads (@notepad mentions, editor page), Terminal AI (Cmd+K pattern-based command generation with dangerous-command detection), user-definable slash commands (CRUD + template expansion + built-in /explain, /review, /test, /fix, /refactor). Migration 0005, 19 new shared schemas (enrichment.ts), 3 new repos (docs, notepads, slash-commands), 4 new server routes, 1 new service (docs-crawler), 4 new hooks, 4 new components/pages, extended @-mention system with docs+notepad kinds. 500+ tests (350 server, 122 web). |
+| 23 | Semantic Search and Multi-Model Support | ✅ complete | Vector semantic codebase search (all-MiniLM-L6-v2 384-dim via @xenova/transformers ONNX **WASM**; boundary-aware chunker, incremental indexer + fs.watch, brute-force cosine) with @codebase semantic-preference→grep fallback. Multi-model providers (BYOK Anthropic/OpenAI/Google/Ollama, chat-only) via ModelRouter + ProviderRunController emitting identical canonical events; Keychain-backed keys. Auto mode (per-task heuristic). Migration 0007, shared semantic-search.ts + providers.ts, provider/index settings pages, statusbar index badge, SearchPanel Semantic toggle, unified model selector. Gates green: server 408 (+1 gated embed smoke), web 124, shared, eslint, scripts. |
+
+---
+
+## Phase 23 Outcomes — Semantic Search and Multi-Model Support
+
+### Summary
+
+Two major capabilities: (1) **vector semantic codebase search** — workspace
+files are chunked, embedded with all-MiniLM-L6-v2 (384-dim) in-process, stored
+in SQLite, and queried by cosine similarity; `@codebase` mentions prefer
+semantic results when the workspace is indexed and fall back to grep otherwise.
+(2) **multi-model BYOK providers** — Anthropic / OpenAI / Google / Ollama
+configured with user keys (Keychain), surfaced in a unified model list, with a
+run-routing fork so non-Cursor (chat-only) models bypass the SDK and stream
+through a `ProviderRunController` that emits the *same* canonical events as the
+Cursor path. Plus **Auto mode** (heuristic per-task model selection).
+
+### Key decisions (binding)
+
+1. **Embeddings run on the ONNX WASM backend, not native.** `@xenova/transformers@2.17.2`
+   pulls `sharp` (native, image-only — unused for text) and an *optional*
+   `onnxruntime-node` (native). pnpm's build-script gate leaves `onnxruntime-node`
+   unbuilt, so transformers.js falls back to `onnxruntime-web` (WASM) — sidestepping
+   the Electron-ABI fragility that already burdens better-sqlite3/node-pty. `sharp`
+   is added to `pnpm.onlyBuiltDependencies` (its N-API prebuilt is ABI-stable and
+   loads under Electron without a rebuild) only because transformers.js imports it
+   eagerly at module load. The embedder forces `env.backends.onnx.wasm` and lazy
+   dynamic-imports the module so server boot stays fast.
+2. **Workspace identifier = absolute path.** `embeddings.workspace_id` and
+   `index_status.workspace_id` use the active workspace's path (consistent with
+   `runs.workspace_id` and `getActiveWorkspaceRoot`).
+3. **`content_hash` is the file-level SHA-256, stored on every chunk** — enables
+   single-lookup incremental skip of unchanged files.
+4. **Tests never download the model.** All unit/integration tests inject a
+   deterministic hashing-vectorizer `FakeEmbedder` (real lexical signal). The real
+   model is exercised only by an `RUN_EMBED_SMOKE`-gated test + the manual smoke.
+5. **Non-Cursor models are chat-only** (Ask). They have no tool-use; the model
+   selector tags them "(Ask only)". `ProviderRunController` feeds synthetic
+   SDK-shaped messages (`system.init` → `assistant` deltas → `status`) through the
+   existing normalizer + persist-and-broadcast pipeline, then finalizes the run
+   row — guaranteeing replay/live parity with Cursor runs.
+6. **Run routing forks on model kind.** A bare id ⇒ Cursor SDK; `auto` ⇒ heuristic
+   resolution at run time; `{providerId}:{model}` ⇒ direct provider client.
+   `createAgent` makes a DB-only agent (no SDK agent) for provider/auto models;
+   `createAgentRequestSchema.modelId` relaxed from the Cursor enum to a unified
+   string id (`unifiedModelIdSchema`).
+7. **usage_source = "sdk_final_result"** for provider-reported tokens; cost
+   computed from per-model pricing hints (micro-USD) when available, else null.
+
+### Schema changes
+
+- Migration `0007_semantic_search.sql`: `embeddings` (BLOB Float32 vectors +
+  indexes), `index_status` (per-workspace progress), `model_providers`
+  (provider config; keys live in Keychain, only the account name is stored).
+- `packages/shared`: new `semantic-search.ts` (index status, query/result,
+  reindex) and `providers.ts` (provider kinds, redacted summary, add/test,
+  unified model + capabilities/pricing). `models.ts` gains `AUTO_MODEL_ID` +
+  `unifiedModelIdSchema`. `createAgentRequestSchema.modelId` widened.
+
+### Files created (highlights)
+
+Server: `search/{vector,embedder,fake-embedder,chunker,file-walker,indexer,
+file-watcher,search-service,semantic-search.service}.ts`,
+`db/repositories/{embeddings,index-status,model-providers}.repo.ts`,
+`providers/{provider,model-registry,model-router,provider-run,anthropic-,
+openai-,google-,ollama-provider}.ts`, `keychain/provider-keys.ts`,
+`routes/providers.routes.ts`. Web: `hooks/{useModels,useProviders,
+useIndexStatus}.ts`, `components/settings/{ProvidersSettings,IndexSettings}.tsx`.
+
+### Files modified (key)
+
+Server: `db/schema.ts`, `db/repositories/index.ts`, `routes/{index,search,
+context}.routes.ts`, `sdk/agent-runtime.ts` (run-routing fork + DB-only
+provider agents), `services/context.service.ts` (@codebase semantic
+preference), `app.ts`, `keychain/index.ts`. Web: `state/ui-store.ts`
+(`selectedModelId` widened to string), `components/shell/{Composer,Statusbar}.tsx`,
+`hooks/{useCodebaseSearch,useEnsureDefaultAgent}.ts`, `components/SearchPanel.tsx`,
+`app/AppShell.tsx`, `pages/Settings.tsx`. Root: `package.json`
+(`pnpm.onlyBuiltDependencies += sharp`), `apps/server/package.json` (+4 deps).
+
+### Commands run and results
+
+- `pnpm typecheck` — all 5 workspaces clean (desktop requires `@harness/server`
+  built first; `pnpm -F @harness/server build` produces `dist/programmatic.js`).
+- `pnpm lint` — clean.
+- `pnpm test` — green: server 408 + 1 skipped (RUN_EMBED_SMOKE gated), web 124,
+  shared 3 files, eslint-plugin 3 files, scripts 11.
+- Embedding spike (one-off): all-MiniLM-L6-v2 loaded via WASM, produced a
+  384-dim normalized vector — confirms the real path works in-process.
+
+### Post-review remediation (review-5 + /address, `P23-*` commits)
+
+A 5-agent read-only review (3 debuggers + code-reviewer + code-auditor) ran
+against the changeset; all findings were addressed (no Linear per this repo's
+convention — tracked via `P23-*` Conventional Commits):
+
+- **C1** workspace removal now purges embeddings + index_status (was: orphaned
+  file content forever, unbounded growth, stale results on re-add).
+- **C2** the workspace walker never follows symlinks (explicit skip + test;
+  closes the symlink-escape vector).
+- **C3** provider `baseUrl` SSRF guard (cloud → public only; Ollama →
+  loopback-only, blocking the 169.254.169.254 metadata vector).
+- **C4/W1** provider runs register in `ActiveRuns` via a shared `CancelableRun`
+  seam → cancellable + aborted on shutdown; an aborted run finalizes as
+  CANCELLED, not ERROR.
+- **C5/W3/W4/W6** bounded timeouts on every provider call; `/test` validation
+  surfaces bad keys; Ollama reader released in `finally`; per-line NDJSON parse.
+- **W2** tool-less models get the Ask prefix regardless of mode. **W5** yield
+  between embed batches. **W7** `useProviders` Zod-validates responses. **W9**
+  shared `formatModelLabel`. **W10** file-walker + model-router tests.
+- **Suggestions**: semantic search scores on vectors only + fetches top-k
+  content (no full-content scan, no per-row vector copy); provider
+  enable/disable PATCH (wired the dead `setEnabled`); shared
+  `PROVIDER_KIND_LABELS`; `DEFAULT_SEMANTIC_MIN_SCORE`; Keychain-after-DB
+  ordering; drizzle `json_valid(models)` mirror; embedder revision seam.
+
+Consciously left (documented, low value for a local single-user app):
+provider-key/DB startup reconciliation, `index_status` read-consistency
+(advisory only), `confirm()` delete dialog, and the cosine norm-recompute
+micro-opt (the bigger Float32Array-copy cost was removed).
+
+### Known limitations / deferred
+
+1. **Cancellation of a non-Cursor provider run is best-effort** — it streams
+   chat-only and finishes fast; cancel/terminate/shutdown now reach it
+   (P23-C4) and record CANCELLED.
+2. **Auto + Cursor model switching mid-agent**: an `auto` agent's first run
+   creates the SDK agent under the resolved Cursor model; a later auto run that
+   resolves to a *different* Cursor model reuses the cached handle (edge case).
+3. **Mode gating in the UI is advisory** — non-Cursor models show "(Ask only)";
+   the server is chat-only for them regardless of the agent's execution mode.
+4. **Desktop bundle** must exclude `onnxruntime-node` (force WASM) and ship
+   `onnxruntime-web`'s `.wasm` + `sharp`'s N-API binary; handled at build time.
+5. **listModels for Google/Ollama** is a static/known list (no validating list
+   API); Anthropic/OpenAI hit their real list endpoints on add/test.
+
+### Next phase
+
+Phase 24 — Advanced Agent Features. Prompt: `24_ADVANCED_AGENT_FEATURES.md`.
 
 ---
 

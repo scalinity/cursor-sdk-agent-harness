@@ -1,12 +1,15 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
+  AUTO_MODEL_ID,
   MODEL_LABELS,
+  PROVIDER_KIND_LABELS,
   type AgentSummary,
   type ContextMention,
   type ModelId,
   type SdkImage,
 } from "@harness/shared";
 import { useUiStore } from "../../state/ui-store.js";
+import { useModels } from "../../hooks/useModels.js";
 import { useErrorReporter } from "../../hooks/useErrorReporter.js";
 import { useSpeechToText } from "../../hooks/useSpeechToText.js";
 import { useMentionAutocomplete } from "../../hooks/useMentionAutocomplete.js";
@@ -23,11 +26,6 @@ import {
   MAX_IMAGE_ATTACHMENTS,
   type ComposerAttachment,
 } from "../../lib/attachments.js";
-
-/** Known models, presented Fast-first in the dropdown. */
-const MODEL_OPTIONS: ReadonlyArray<SelectOption<ModelId>> = (
-  Object.keys(MODEL_LABELS) as ModelId[]
-).map((id) => ({ value: id, label: MODEL_LABELS[id] }));
 
 export interface ComposerProps {
   activeAgent: AgentSummary | null;
@@ -46,6 +44,7 @@ export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerPr
   const setDraft = useUiStore((s) => s.setComposerDraft);
   const selectedModelId = useUiStore((s) => s.selectedModelId);
   const setSelectedModelId = useUiStore((s) => s.setSelectedModelId);
+  const { models } = useModels();
   const [busy, setBusy] = useState(false);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -84,6 +83,29 @@ export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerPr
   // landed and the active agent actually runs the model the user picked — only
   // then is it safe to send, so a model switch never runs on the old model.
   const ready = activeAgent !== null && activeAgent.modelId === selectedModelId;
+
+  // Phase 23 — options across all providers + Auto. Non-Cursor models carry a
+  // "(Ask only)" badge since they have no tool-use. The current selection is
+  // always present so the trigger renders correctly even mid-load.
+  const modelOptions = useMemo<ReadonlyArray<SelectOption<string>>>(() => {
+    const opts: SelectOption<string>[] = [{ value: AUTO_MODEL_ID, label: "✦ Auto" }];
+    if (models.length > 0) {
+      for (const m of models) {
+        const suffix = m.provider === "cursor" ? "" : ` · ${PROVIDER_KIND_LABELS[m.provider]}`;
+        const askOnly = m.capabilities.toolUse ? "" : " (Ask only)";
+        opts.push({ value: m.id, label: `${m.name}${suffix}${askOnly}` });
+      }
+    } else {
+      // Baseline before /api/models resolves: the built-in Cursor models.
+      for (const id of Object.keys(MODEL_LABELS) as ModelId[]) {
+        opts.push({ value: id, label: MODEL_LABELS[id] });
+      }
+    }
+    if (!opts.some((o) => o.value === selectedModelId)) {
+      opts.push({ value: selectedModelId, label: selectedModelId });
+    }
+    return opts;
+  }, [models, selectedModelId]);
 
   const addFiles = useCallback(
     async (files: FileList | File[]) => {
@@ -278,7 +300,7 @@ export function Composer({ activeAgent, onSubmit, heroMode = false }: ComposerPr
           </button>
           <Select
             value={selectedModelId}
-            options={MODEL_OPTIONS}
+            options={modelOptions}
             onChange={setSelectedModelId}
             disabled={busy}
             placement="top"

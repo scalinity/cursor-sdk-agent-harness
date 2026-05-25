@@ -25,20 +25,19 @@
  */
 import { useCallback, useEffect, useRef } from "react";
 import {
+  formatModelLabel,
   listMcpServersResponseSchema,
   listSubagentsResponseSchema,
-  MODEL_LABELS,
   type AgentSummary,
   type CreateAgentRequest,
-  type ModelId,
 } from "@harness/shared";
 import { httpRequest } from "../lib/http-client.js";
 import { useErrorReporter } from "./useErrorReporter.js";
 
 const DEFAULT_AGENT_MAP_KEY = "harness:defaultAgentIds";
 
-function defaultAgentName(modelId: ModelId): string {
-  return `Coding Agent (${MODEL_LABELS[modelId]})`;
+function defaultAgentName(modelId: string): string {
+  return `Coding Agent (${formatModelLabel(modelId)})`;
 }
 
 function readDefaultAgentMap(): Record<string, string> {
@@ -72,7 +71,7 @@ function writeDefaultAgentId(mapKey: string, agentId: string): void {
 export interface UseEnsureDefaultAgentInput {
   activeWorkspaceId: string | null;
   workspacePath: string | null;
-  modelId: ModelId;
+  modelId: string;
   agents: AgentSummary[];
   activeAgent: AgentSummary | null;
   createAgent: (request: CreateAgentRequest) => Promise<AgentSummary>;

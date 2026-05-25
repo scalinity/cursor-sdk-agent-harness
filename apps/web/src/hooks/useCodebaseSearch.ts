@@ -1,9 +1,13 @@
 import { useCallback, useRef, useState } from "react";
-import type { GrepSearchResult, FileSearchResult } from "@harness/shared";
+import type {
+  GrepSearchResult,
+  FileSearchResult,
+  SemanticSearchResult,
+} from "@harness/shared";
 import { httpRequest } from "../lib/http-client.js";
 import { useMountEffect } from "./useMountEffect.js";
 
-export type SearchType = "grep" | "files";
+export type SearchType = "grep" | "files" | "semantic";
 
 export interface UseCodebaseSearchResult {
   query: string;
@@ -12,6 +16,7 @@ export interface UseCodebaseSearchResult {
   setSearchType: (t: SearchType) => void;
   grepResults: GrepSearchResult | null;
   fileResults: FileSearchResult | null;
+  semanticResults: SemanticSearchResult | null;
   isSearching: boolean;
   error: string | null;
 }
@@ -21,43 +26,43 @@ export function useCodebaseSearch(): UseCodebaseSearchResult {
   const [searchType, setSearchType] = useState<SearchType>("grep");
   const [grepResults, setGrepResults] = useState<GrepSearchResult | null>(null);
   const [fileResults, setFileResults] = useState<FileSearchResult | null>(null);
+  const [semanticResults, setSemanticResults] = useState<SemanticSearchResult | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const doSearch = useCallback(
-    async (q: string, type: SearchType) => {
-      if (q.length === 0) {
+  const doSearch = useCallback(async (q: string, type: SearchType) => {
+    if (q.length === 0) {
+      setGrepResults(null);
+      setFileResults(null);
+      setSemanticResults(null);
+      return;
+    }
+    setIsSearching(true);
+    setError(null);
+    try {
+      if (type === "grep") {
+        const data = await httpRequest("/api/search/grep", { query: { q } });
+        setGrepResults(data as unknown as GrepSearchResult);
+        setFileResults(null);
+        setSemanticResults(null);
+      } else if (type === "files") {
+        const data = await httpRequest("/api/search/files", { query: { pattern: q } });
+        setFileResults(data as unknown as FileSearchResult);
+        setGrepResults(null);
+        setSemanticResults(null);
+      } else {
+        const data = await httpRequest("/api/search/semantic", { query: { q } });
+        setSemanticResults(data as unknown as SemanticSearchResult);
         setGrepResults(null);
         setFileResults(null);
-        return;
       }
-      setIsSearching(true);
-      setError(null);
-      try {
-        if (type === "grep") {
-          const data = await httpRequest(
-            "/api/search/grep",
-            { query: { q } },
-          );
-          setGrepResults(data as unknown as GrepSearchResult);
-          setFileResults(null);
-        } else {
-          const data = await httpRequest(
-            "/api/search/files",
-            { query: { pattern: q } },
-          );
-          setFileResults(data as unknown as FileSearchResult);
-          setGrepResults(null);
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Search failed");
-      } finally {
-        setIsSearching(false);
-      }
-    },
-    [],
-  );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Search failed");
+    } finally {
+      setIsSearching(false);
+    }
+  }, []);
 
   const setQuery = useCallback(
     (q: string) => {
@@ -93,6 +98,7 @@ export function useCodebaseSearch(): UseCodebaseSearchResult {
     setSearchType: changeSearchType,
     grepResults,
     fileResults,
+    semanticResults,
     isSearching,
     error,
   };

@@ -80,7 +80,9 @@ export function buildApprovalResponder(deps: ApprovalResponderDeps): ApprovalRes
       // Pull the Run handle off the controller. The controller exposes
       // it via a read-only accessor we add for this exact purpose; if
       // start() hasn't resolved yet we have no Run to call into.
-      const run = controller.getRunHandle();
+      // getRunHandle is Cursor-only; a provider (chat-only) run never receives
+      // approval requests, so treat an absent handle like a null one.
+      const run = controller.getRunHandle?.() ?? null;
       if (run === null) {
         throw new UnimplementedApprovalError(
           "Run handle not yet available (start() has not resolved).",

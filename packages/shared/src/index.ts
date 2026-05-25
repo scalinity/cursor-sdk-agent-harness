@@ -33,7 +33,9 @@ export type {
 
 // Models, modes, statuses, sources
 export {
+  AUTO_MODEL_ID,
   DEFAULT_MODEL_ID,
+  formatModelLabel,
   MODEL_LABELS,
   SDK_RUN_TERMINAL_STATUSES,
   agentModeSchema,
@@ -41,6 +43,7 @@ export {
   executionModeSchema,
   mcpValidationStatusSchema,
   modelIdSchema,
+  unifiedModelIdSchema,
   knownLanguageSchema,
   replaySpeedSchema,
   sdkRunStatusSchema,
@@ -53,6 +56,7 @@ export type {
   ExecutionMode,
   McpValidationStatus,
   ModelId,
+  UnifiedModelId,
   KnownLanguage,
   ReplaySpeed,
   SdkRunStatus,
@@ -430,5 +434,53 @@ export type {
   ExpandCommandResponse,
   SlashCommandVariable,
 } from "./enrichment.js";
+
+// Semantic codebase search (Phase 23): vector embeddings + index status
+export {
+  DEFAULT_SEMANTIC_MIN_SCORE,
+  indexStatusStateSchema,
+  indexStatusSchema,
+  semanticSearchQuerySchema,
+  semanticSearchResultItemSchema,
+  semanticSearchResultSchema,
+  reindexResponseSchema,
+} from "./semantic-search.js";
+export type {
+  IndexStatusState,
+  IndexStatus,
+  SemanticSearchQuery,
+  SemanticSearchResultItem,
+  SemanticSearchResult,
+  ReindexResponse,
+} from "./semantic-search.js";
+
+// Multi-model providers (Phase 23): BYOK provider registry + unified models
+export {
+  providerKindSchema,
+  addableProviderKindSchema,
+  PROVIDER_KIND_LABELS,
+  modelProviderSummarySchema,
+  listProvidersResponseSchema,
+  addProviderRequestSchema,
+  updateProviderRequestSchema,
+  testProviderResponseSchema,
+  modelCapabilitiesSchema,
+  modelPricingHintSchema,
+  unifiedModelSchema,
+  listModelsResponseSchema,
+} from "./providers.js";
+export type {
+  ProviderKind,
+  AddableProviderKind,
+  ModelProviderSummary,
+  ListProvidersResponse,
+  AddProviderRequest,
+  UpdateProviderRequest,
+  TestProviderResponse,
+  ModelCapabilities,
+  ModelPricingHint,
+  UnifiedModel,
+  ListModelsResponse,
+} from "./providers.js";
 
 export const HARNESS_VERSION = "0.0.0" as const;

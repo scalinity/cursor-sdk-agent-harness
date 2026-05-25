@@ -7,7 +7,11 @@ import type { SettingsRepo } from "../db/repositories/settings.repo.js";
 import type { WorkspaceAllowlistRepo } from "../db/repositories/workspace-allowlist.repo.js";
 import type { DocsRepo } from "../db/repositories/docs.repo.js";
 import type { NotepadsRepo } from "../db/repositories/notepads.repo.js";
-import { contextSearch, resolveMention } from "../services/context.service.js";
+import {
+  contextSearch,
+  resolveMention,
+  type SemanticSearchProvider,
+} from "../services/context.service.js";
 import { getActiveWorkspaceRoot } from "../config/active-workspace.js";
 
 export interface ContextRoutesDeps {
@@ -15,6 +19,7 @@ export interface ContextRoutesDeps {
   allowlistRepo: WorkspaceAllowlistRepo;
   docsRepo?: DocsRepo | undefined;
   notepadsRepo?: NotepadsRepo | undefined;
+  searchService?: SemanticSearchProvider | undefined;
 }
 
 export async function registerContextRoutes(
@@ -50,6 +55,7 @@ export async function registerContextRoutes(
         resolveMention(m, root, {
           docsRepo: deps.docsRepo,
           notepadsRepo: deps.notepadsRepo,
+          searchService: deps.searchService,
         }),
       ),
     );

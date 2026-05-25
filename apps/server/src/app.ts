@@ -8,6 +8,7 @@ import { createPerfCounters, type PerfCounters } from "./observability/perf-coun
 import {
   CursorApiKeyStore,
   CsrfSecretStore,
+  ProviderKeyStore,
 } from "./keychain/index.js";
 import { assertBindAllowed } from "./security/bind-policy.js";
 import { CsrfTokenizer, csrfPlugin } from "./security/csrf.js";
@@ -32,6 +33,8 @@ import {
   createWorkspaceCwdResolver,
 } from "./terminal/index.js";
 import { MAX_IMAGE_ATTACHMENTS, MAX_IMAGE_DATA_BYTES } from "@harness/shared";
+import { SearchService } from "./search/search-service.js";
+import { ModelRouter } from "./providers/model-router.js";
 
 export interface AppDeps {
   env: Env;
@@ -45,6 +48,15 @@ export interface AppDeps {
   csrfSecretStore?: CsrfSecretStore;
   csrfTokenizer?: CsrfTokenizer;
   workspacePolicy?: WorkspacePolicy;
+  /**
+   * Phase 23 — semantic search facade (embedder + indexer + watcher).
+   * Tests inject one backed by the deterministic FakeEmbedder so the suite
+   * never downloads the ONNX model.
+   */
+  searchService?: SearchService;
+  /** Phase 23 — BYOK provider key store + model router (tests may inject). */
+  providerKeyStore?: ProviderKeyStore;
+  modelRouter?: ModelRouter;
   /**
    * Phase 06 SDK adapter. Production uses `createCursorSdkAdapter()` (the
    * default when omitted). Integration tests inject a stubbed adapter that
@@ -214,6 +226,22 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     perfCounters,
   });
 
+  // Phase 23 — semantic search facade. Default uses the real WASM embedder;
+  // tests inject one backed by the deterministic FakeEmbedder.
+  const searchService =
+    deps.searchService ??
+    new SearchService({
+      embeddingsRepo: repos.embeddings,
+      indexStatusRepo: repos.indexStatus,
+      logger: app.log,
+    });
+
+  // Phase 23 — BYOK provider key store + multi-model router.
+  const providerKeyStore =
+    deps.providerKeyStore ?? new ProviderKeyStore({ service: env.KEYCHAIN_SERVICE });
+  const modelRouter =
+    deps.modelRouter ?? new ModelRouter({ modelProvidersRepo: repos.modelProviders, providerKeyStore });
+
   const sdk = deps.sdk ?? createCursorSdkAdapter();
   const agentRuntime = createAgentRuntime({
     agentsRepo: repos.agents,
@@ -228,6 +256,8 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     activeRuns,
     pipeline,
     allowlistRepo: repos.workspaceAllowlist,
+    searchService,
+    modelRouter,
   });
 
   const approvalResponder =
@@ -281,6 +311,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   app.addHook("onClose", async () => {
     await agentRuntime.shutdown();
     terminalSession.dispose();
+    searchService.stopWatching();
     runBus.clear();
     pipeline.clear();
   });
@@ -292,6 +323,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       allowlist: repos.workspaceAllowlist,
       policy: workspacePolicy,
       settings: repos.settings,
+      searchService,
     },
     agents: { runtime: agentRuntime, agentsRepo: repos.agents },
     runs: {
@@ -318,10 +350,12 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       allowlistRepo: repos.workspaceAllowlist,
       docsRepo: repos.docs,
       notepadsRepo: repos.notepads,
+      searchService,
     },
     search: {
       settingsRepo: repos.settings,
       allowlistRepo: repos.workspaceAllowlist,
+      searchService,
     },
     rules: {
       settingsRepo: repos.settings,
@@ -331,6 +365,12 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     notepads: { notepadsRepo: repos.notepads },
     commands: { slashCommandsRepo: repos.slashCommands },
     terminalAi: {},
+    providers: {
+      modelProvidersRepo: repos.modelProviders,
+      providerKeyStore,
+      modelRouter,
+      logger: app.log,
+    },
   });
 
   // Seed built-in slash commands on first install
