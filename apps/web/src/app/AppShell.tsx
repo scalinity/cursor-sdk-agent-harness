@@ -39,7 +39,7 @@ export function AppShell() {
   useSettings();
   useToastSweeper();
   const { agents, activeAgent, selectAgent, createAgent } = useAgents();
-  const { runs, deleteRun } = useRunHistory();
+  const { runs, deleteRun, reload: reloadRuns } = useRunHistory();
   const [newAgentOpen, setNewAgentOpen] = useState(false);
   const activeRunId = useRunStore((s) => s.activeRunId);
   const setActiveRunId = useRunStore((s) => s.setActiveRunId);
@@ -121,6 +121,13 @@ export function AppShell() {
       });
     },
     [activeAgent, csrf],
+  );
+
+  const onRenameRun = useCallback(
+    (_runId: string, _name: string) => {
+      void reloadRuns();
+    },
+    [reloadRuns],
   );
 
   const onDeleteRun = useCallback(
@@ -238,6 +245,7 @@ export function AppShell() {
           onPickWorkspace={() => void workspacePicker.pick()}
           onNewSession={newSession}
           onDeleteRun={onDeleteRun}
+          onRenameRun={onRenameRun}
         />
         <CenterPane
           activeAgent={activeAgent}
