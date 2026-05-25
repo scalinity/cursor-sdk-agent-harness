@@ -1,5 +1,6 @@
 import {
   agentDetailResponseSchema,
+  agentSummarySchema,
   createAgentRequestSchema,
   listAgentsQuerySchema,
   listAgentsResponseSchema,
@@ -90,14 +91,22 @@ export async function registerAgentsRoutes(
     if (!parsed.success) return send422(reply, parsed.error);
     try {
       const row = await deps.runtime.create(parsed.data);
-      return reply.code(201).send({
+      return reply.code(201).send(agentSummarySchema.parse({
         id: row.id,
         name: row.name,
         status: row.status,
         mode: row.mode,
+        executionMode: row.executionMode,
         modelId: row.modelId,
+        runCount: 0,
+        activeRunCount: 0,
+        totalCostUsdMicros: 0,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        lastActiveAt: row.lastActiveAt,
         createdAt: row.createdAt,
-      });
+        terminatedAt: row.terminatedAt,
+      }));
     } catch (err) {
       if (err instanceof WorkspaceRejectedError) {
         return sendWorkspaceRejection(reply, err);
