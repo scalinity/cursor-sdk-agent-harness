@@ -122,11 +122,56 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
       liveAgents.set(row.id, handle);
       return handle;
     } catch (err) {
-      throw new AgentRuntimeError(
-        "SDK_RESUME_FAILED",
-        err instanceof Error ? err.message : String(err),
-        err,
+      // The SDK shards durable agents by the cwd they were created under
+      // (~/.cursor/projects/<cwd>/sdk-agent-store/<hash>/index.db), while the
+      // harness keeps a single global `agents` table. So a harness row can
+      // outlive its SDK-side record whenever the resolved cwd drifts from the
+      // one the agent was created under (e.g. the desktop app launched from
+      // Finder resolves a different store than a dev server) or after the user
+      // clears ~/.cursor — resume then throws `Agent <id> not found`. Rather
+      // than dead-ending the user's prompt (the composer's "Agent ... not
+      // found" toast), transparently re-create the SDK agent under our durable
+      // id (buildAgentOptions sets opts.agentId = row.id, which the SDK honors)
+      // so the send proceeds and future resumes round-trip. Mirrors the
+      // create-time id handling above and RunController's wedged-run retry.
+      if (!isAgentNotFoundError(err)) {
+        throw new AgentRuntimeError(
+          "SDK_RESUME_FAILED",
+          err instanceof Error ? err.message : String(err),
+          err,
+        );
+      }
+      deps.logger.warn(
+        { err, agentId: row.id },
+        "resume reported the agent missing from the SDK store; re-creating it under the same id so the send can proceed",
       );
+      try {
+        const handle = await deps.sdk.createAgent(opts);
+        if (handle.agentId !== row.id) {
+          // The SDK minted a fresh id instead of honoring ours. We can't
+          // silently swap the row id mid-send — the in-flight run is already
+          // tagged with row.id — so surface a clear error rather than leave
+          // the harness and SDK pointing at different ids.
+          try {
+            handle.close();
+          } catch {
+            // best-effort
+          }
+          throw new AgentRuntimeError(
+            "SDK_RESUME_FAILED",
+            `SDK re-created agent under a different id (${handle.agentId} != ${row.id}); cannot reconcile mid-send`,
+          );
+        }
+        liveAgents.set(row.id, handle);
+        return handle;
+      } catch (recreateErr) {
+        if (recreateErr instanceof AgentRuntimeError) throw recreateErr;
+        throw new AgentRuntimeError(
+          "SDK_RESUME_FAILED",
+          recreateErr instanceof Error ? recreateErr.message : String(recreateErr),
+          recreateErr,
+        );
+      }
     }
   }
 
@@ -456,6 +501,18 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
   };
 }
 
+/**
+ * True when an SDK call rejected because the durable agent is absent from the
+ * SDK's on-disk store. Matched on the error text — `@cursor/sdk@1.0.13` throws
+ * `Agent <id> not found` (errors.ts / local run-store) with no machine-readable
+ * code. Deliberately does NOT match the SDK's `Run <id> not found for agent
+ * <id>` message: there "not found" precedes "for agent", so the agent-id-then-
+ * "not found" pattern below can't match it.
+ */
+function isAgentNotFoundError(err: unknown): boolean {
+  return err instanceof Error && /\bagent\s+\S+\s+not found\b/i.test(err.message);
+}
+
 function buildSummary(
   row: AgentRow,
   aggregates:
@@ -485,4 +542,3 @@ function buildSummary(
     terminatedAt: row.terminatedAt,
   };
 }
-

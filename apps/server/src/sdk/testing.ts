@@ -170,6 +170,13 @@ export interface StubSdkAdapterOptions {
    */
   onCreate?: (options: AgentOptions) => void | Promise<void>;
   /**
+   * Hook invoked by `resumeAgent`. The test can throw here to simulate the
+   * SDK reporting the durable agent missing from its on-disk store (e.g.
+   * `Agent <id> not found`); otherwise a `StubSDKAgent` for `agentId` is
+   * returned.
+   */
+  onResume?: (agentId: string, options: Partial<AgentOptions>) => void | Promise<void>;
+  /**
    * Hook invoked by `send`. Receives the prompt and produces a `StubRun`
    * configuration. Default produces a finished run with no events.
    */
@@ -188,7 +195,8 @@ export function createStubSdkAdapter(opts: StubSdkAdapterOptions = {}): SdkAdapt
       if (opts.onCreate) await opts.onCreate(options);
       return new StubSDKAgent(options.agentId ?? `stub-${Math.random().toString(36).slice(2, 10)}`);
     },
-    async resumeAgent(agentId) {
+    async resumeAgent(agentId, options) {
+      if (opts.onResume) await opts.onResume(agentId, options);
       return new StubSDKAgent(agentId);
     },
     async send(agent, message: string | SdkUserMessageInput, sendOptions) {
