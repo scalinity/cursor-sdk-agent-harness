@@ -17,6 +17,8 @@ interface DocsSourceDbRow {
 interface FtsRow {
   page_id: string;
   source_id: string;
+  source_name: string;
+  url: string;
   title: string;
   snippet: string;
   rank: number;
@@ -163,14 +165,21 @@ export class DocsRepo {
     snippet: string;
     rank: number;
   }> {
+    // JOIN page + source so name/url come back in one query instead of a
+    // per-row lookup. The inner JOIN also drops any orphaned FTS rows whose
+    // page no longer exists, so stale blank-url hits never surface.
     const baseQuery = `
       SELECT
         f.page_id,
         f.source_id,
+        s.name AS source_name,
+        p.url AS url,
         f.title,
         snippet(docs_fts, 3, '<mark>', '</mark>', '...', 40) AS snippet,
         rank
       FROM docs_fts f
+      JOIN docs_pages p ON p.id = f.page_id
+      JOIN docs_sources s ON s.id = f.source_id
       WHERE docs_fts MATCH ?
       ${sourceId ? "AND f.source_id = ?" : ""}
       ORDER BY rank
@@ -188,28 +197,10 @@ export class DocsRepo {
 
     const ftsRows = this.raw.prepare(baseQuery).all(...params) as FtsRow[];
 
-    const sourceNames = new Map<string, string>();
-    for (const row of ftsRows) {
-      if (!sourceNames.has(row.source_id)) {
-        const src = this.getSource(row.source_id);
-        sourceNames.set(row.source_id, src?.name ?? "Unknown");
-      }
-    }
-
-    const pageUrls = new Map<string, string>();
-    for (const row of ftsRows) {
-      if (!pageUrls.has(row.page_id)) {
-        const page = this.raw
-          .prepare("SELECT url FROM docs_pages WHERE id = ?")
-          .get(row.page_id) as { url: string } | undefined;
-        pageUrls.set(row.page_id, page?.url ?? "");
-      }
-    }
-
     return ftsRows.map((row, i) => ({
       sourceId: row.source_id,
-      sourceName: sourceNames.get(row.source_id) ?? "Unknown",
-      url: pageUrls.get(row.page_id) ?? "",
+      sourceName: row.source_name,
+      url: row.url,
       title: row.title,
       snippet: row.snippet,
       rank: i + 1,
