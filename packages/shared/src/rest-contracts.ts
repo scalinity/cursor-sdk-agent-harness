@@ -12,6 +12,7 @@ import {
   sdkRunStatusSchema,
   settingSourceSchema,
   usageSourceSchema,
+  themeSettingSchema,
 } from "./models.js";
 import { serverFrameSchema } from "./ws-protocol.js";
 import {
@@ -354,6 +355,9 @@ export const settingsSnapshotSchema = z.object({
   sandboxEnabledByDefault: z.boolean(),
   defaultReplaySpeed: replaySpeedSchema,
   rawEventRetentionDays: z.number().int().min(1).max(3650),
+  ui: z.object({
+    theme: themeSettingSchema,
+  }),
   pricing: z.object({
     composer25Fast: z.object({
       inputPerMillionUsdMicros: z.number().int().nonnegative(),
@@ -378,6 +382,11 @@ export const updateSettingsRequestSchema = z.object({
   sandboxEnabledByDefault: z.boolean().optional(),
   defaultReplaySpeed: replaySpeedSchema.optional(),
   rawEventRetentionDays: z.number().int().min(1).max(3650).optional(),
+  ui: z
+    .object({
+      theme: themeSettingSchema.optional(),
+    })
+    .optional(),
 });
 export type UpdateSettingsRequest = z.infer<typeof updateSettingsRequestSchema>;
 

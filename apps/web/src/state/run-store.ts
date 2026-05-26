@@ -47,11 +47,9 @@ export interface CanonicalRunEvent extends CanonicalEventBase {
   kind: string;
   payload: unknown;
   /**
-   * True if this frame was emitted during after_seq replay. The wire-level
-   * frame schema does not yet carry this field (Phase 09 adds it server-side
-   * along with the streaming surfaces that need it); for Phase 08 the flag is
-   * advisory and set by callers (none currently set it). Documented here as
-   * a seam so Phase 09 can wire it without rewriting the store.
+   * True if this frame was emitted during after_seq replay. The server sets
+   * this on replay frames, and tests/hooks may also pass it explicitly when
+   * feeding stored frames through the same ingest path.
    */
   replayed?: boolean;
 }
@@ -251,7 +249,7 @@ export const useRunStore = create<RunState>((set) => ({
       const evt = frame.event;
       const runId = evt.run_id;
       const agentId = evt.agent_id;
-      const replayed = options?.replayed ?? false;
+      const replayed = options?.replayed ?? frame.replayed ?? false;
 
       // Defensive copy of event state so we never mutate the prior snapshot.
       const prevEvents = state.eventsByRunId[runId];

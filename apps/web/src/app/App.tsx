@@ -2,6 +2,8 @@ import { lazy, Suspense } from "react";
 import { Routes, Route } from "react-router-dom";
 import { TokensQA } from "../pages/TokensQA.js";
 import { AppShell } from "./AppShell.js";
+import { useSettingsBootstrap } from "../hooks/useSettings.js";
+import { useThemeController } from "../hooks/useTheme.js";
 
 const RunHistory = lazy(async () => {
   const module = await import("../pages/RunHistory.js");
@@ -44,6 +46,9 @@ const NotepadsPage = lazy(async () => {
 });
 
 export function App() {
+  useSettingsBootstrap();
+  useThemeController();
+
   return (
     <Routes>
       <Route path="/" element={<AppShell />} />

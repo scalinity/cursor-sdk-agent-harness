@@ -1,0 +1,72 @@
+/*
+ * Cursor SDK Agent Harness — Light Theme Tokens
+ *
+ * Overrides theme-specific custom properties from tokens.css. Static layout,
+ * typography, radius, and motion tokens inherit from :root so light mode only
+ * owns palette and elevation differences.
+ */
+[data-theme="light"] {
+  /* ---- Color: Surface ---- */
+  --color-background:        oklch(0.975 0.003 250);
+  --color-surface-1:         oklch(0.955 0.005 250);
+  --color-surface-2:         oklch(0.925 0.008 250);
+  --color-surface-3:         oklch(0.885 0.012 250);
+
+  /* ---- Color: Text ---- */
+  --color-text-primary:      oklch(0.17  0.010 250);
+  --color-text-secondary:    oklch(0.34  0.012 250);
+  --color-text-tertiary:     oklch(0.46  0.010 250);
+  --color-text-quaternary:   oklch(0.56  0.008 250);
+  --color-text-inverse:      oklch(0.985 0.003 250);
+
+  /* ---- Color: Border ---- */
+  --color-border-subtle:     oklch(0.89  0.006 250);
+  --color-border-strong:     oklch(0.76  0.010 250);
+  --color-border-default:    oklch(0.83  0.008 250);
+
+  /* ---- Color: Accent ---- */
+  --color-accent-primary:         oklch(0.45 0.125 72);
+  --color-accent-primary-hover:   oklch(0.40 0.130 72);
+  --color-accent-primary-pressed: oklch(0.36 0.120 72);
+  --color-accent-soft:            oklch(0.52 0.110 72);
+  --color-accent-bg:              oklch(0.91 0.038 72);
+
+  /* ---- Color: Semantic ---- */
+  --color-success:           oklch(0.42 0.130 150);
+  --color-success-bg:        oklch(0.91 0.040 150);
+  --color-danger:            oklch(0.48 0.165 25);
+  --color-danger-bg:         oklch(0.92 0.040 25);
+  --color-info:              oklch(0.43 0.120 240);
+  --color-violet:            oklch(0.48 0.130 295);
+  --color-warning:           oklch(0.45 0.120 95);
+  --color-warning-bg:        oklch(0.93 0.045 95);
+
+  /* ---- Color: Terminal ANSI palette ---- */
+  --term-background:     var(--color-background);
+  --term-foreground:     var(--color-text-primary);
+  --term-cursor:         var(--color-accent-primary);
+  --term-selection:      oklch(0.52 0.11 72 / 0.22);
+  --term-black:          oklch(0.24 0.010 250);
+  --term-red:            var(--color-danger);
+  --term-green:          var(--color-success);
+  --term-yellow:         var(--color-warning);
+  --term-blue:           var(--color-info);
+  --term-magenta:        var(--color-violet);
+  --term-cyan:           oklch(0.44 0.115 200);
+  --term-white:          var(--color-text-secondary);
+  --term-bright-black:   oklch(0.48 0.010 250);
+  --term-bright-red:     oklch(0.55 0.170 25);
+  --term-bright-green:   oklch(0.50 0.140 150);
+  --term-bright-yellow:  oklch(0.54 0.130 95);
+  --term-bright-blue:    oklch(0.52 0.125 240);
+  --term-bright-magenta: oklch(0.56 0.140 295);
+  --term-bright-cyan:    oklch(0.52 0.125 200);
+  --term-bright-white:   var(--color-accent-primary);
+
+  /* ---- Elevation ---- */
+  --shadow-0: none;
+  --shadow-1: 0 1px 2px oklch(0 0 0 / 0.04);
+  --shadow-2: 0 4px 12px oklch(0 0 0 / 0.06);
+  --shadow-3: 0 12px 32px oklch(0 0 0 / 0.08);
+  --shadow-4: 0 24px 64px oklch(0 0 0 / 0.10);
+}

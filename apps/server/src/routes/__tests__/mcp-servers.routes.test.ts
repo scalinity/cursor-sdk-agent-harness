@@ -110,7 +110,7 @@ describe("/api/mcp-servers", () => {
     });
 
     const res = await app.inject({
-      method: "GET",
+      method: "POST",
       url: `/api/mcp-servers/${row.id}/reveal`,
     });
     expect(res.statusCode).toBe(200);
@@ -135,12 +135,12 @@ describe("/api/mcp-servers", () => {
       validatorOverride: async () => ({ status: "valid" as const, transport: "http" as const }),
     });
     const first = await app.inject({
-      method: "GET",
+      method: "POST",
       url: `/api/mcp-servers/${row.id}/reveal`,
     });
     expect(first.statusCode).toBe(200);
     const second = await app.inject({
-      method: "GET",
+      method: "POST",
       url: `/api/mcp-servers/${row.id}/reveal`,
     });
     expect(second.statusCode).toBe(429);

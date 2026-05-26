@@ -39,6 +39,7 @@ export class ProviderRunController implements CancelableRun {
   readonly abortController = new AbortController();
   private settled: Promise<void> | null = null;
   private cancelReason: RunInterruptedReason | null = null;
+  private terminalEventAppended = false;
 
   constructor(
     private readonly init: ProviderRunInit,
@@ -82,79 +83,136 @@ export class ProviderRunController implements CancelableRun {
   }
 
   private async run(): Promise<void> {
-    const startedAt = Date.now();
-    this.emit({ type: "system", subtype: "init", agent_id: this.agentId, run_id: this.runId });
-    this.init.runsRepo.updateStatus(this.runId, "RUNNING");
-    this.emit({ type: "status", agent_id: this.agentId, run_id: this.runId, status: "RUNNING" });
-
-    let finalText = "";
-    let usage: ProviderUsage | null = null;
-    let errored: string | null = null;
-
     try {
-      for await (const ev of this.init.provider.sendMessage(this.init.prompt, {
-        model: this.init.modelName,
-        systemPrompt: this.init.systemPrompt,
-        signal: this.abortController.signal,
-      })) {
-        if (ev.type === "text_delta") {
-          finalText += ev.content;
-          this.emit({
-            type: "assistant",
-            agent_id: this.agentId,
-            run_id: this.runId,
-            message: { role: "assistant", content: [{ type: "text", text: ev.content }] },
-          });
-        } else if (ev.type === "thinking_delta") {
-          this.emit({
-            type: "thinking",
-            agent_id: this.agentId,
-            run_id: this.runId,
-            text: ev.content,
-          });
-        } else if (ev.type === "usage") {
-          usage = ev.usage;
-        } else if (ev.type === "error") {
-          errored = ev.message;
+      const startedAt = Date.now();
+      this.emit({ type: "system", subtype: "init", agent_id: this.agentId, run_id: this.runId });
+      this.init.runsRepo.updateStatus(this.runId, "RUNNING");
+      this.emit({ type: "status", agent_id: this.agentId, run_id: this.runId, status: "RUNNING" });
+
+      let finalText = "";
+      let usage: ProviderUsage | null = null;
+      let errored: string | null = null;
+
+      try {
+        for await (const ev of this.init.provider.sendMessage(this.init.prompt, {
+          model: this.init.modelName,
+          systemPrompt: this.init.systemPrompt,
+          signal: this.abortController.signal,
+        })) {
+          if (ev.type === "text_delta") {
+            finalText += ev.content;
+            this.emit({
+              type: "assistant",
+              agent_id: this.agentId,
+              run_id: this.runId,
+              message: { role: "assistant", content: [{ type: "text", text: ev.content }] },
+            });
+          } else if (ev.type === "thinking_delta") {
+            this.emit({
+              type: "thinking",
+              agent_id: this.agentId,
+              run_id: this.runId,
+              text: ev.content,
+            });
+          } else if (ev.type === "usage") {
+            usage = ev.usage;
+          } else if (ev.type === "error") {
+            errored = ev.message;
+          }
         }
+      } catch (err) {
+        errored = err instanceof Error ? err.message : String(err);
+      }
+
+      const durationMs = Date.now() - startedAt;
+      const tokenUsage = this.buildUsage(usage);
+
+      if (this.abortController.signal.aborted) {
+        // P23-W1: an aborted run is a cancellation, not a stream error — record
+        // CANCELLED so history/usage don't mislabel it as a failure.
+        const reason = this.cancelReason ?? "user_cancelled";
+        this.emit({ type: "status", agent_id: this.agentId, run_id: this.runId, status: "CANCELLED" });
+        this.init.runsRepo.setCancelled(this.runId, reason);
+        this.init.runsRepo.setUsage(this.runId, tokenUsage);
+        this.appendRunInterrupted(reason);
+      } else if (errored) {
+        this.emit({ type: "status", agent_id: this.agentId, run_id: this.runId, status: "ERROR" });
+        this.init.runsRepo.setInterrupted(this.runId, "stream_error", errored);
+        this.init.runsRepo.setUsage(this.runId, tokenUsage);
+        this.appendRunInterrupted("stream_error", errored);
+      } else {
+        this.emit({
+          type: "status",
+          agent_id: this.agentId,
+          run_id: this.runId,
+          status: "FINISHED",
+        });
+        this.init.runsRepo.finalize(this.runId, {
+          status: "FINISHED",
+          finalText: finalText.length > 0 ? finalText : null,
+          finalResult: null,
+          gitMetadata: null,
+          durationMs,
+          usage: tokenUsage,
+          lastTurnInputTokens: null,
+          lastTurnOutputTokens: null,
+        });
+        this.appendRunFinalResult(finalText, durationMs, tokenUsage);
       }
     } catch (err) {
-      errored = err instanceof Error ? err.message : String(err);
+      const message = err instanceof Error ? err.message : String(err);
+      this.init.logger.error({ err, runId: this.runId }, "provider run terminalization failed");
+      this.init.runsRepo.setInterrupted(this.runId, "stream_error", message);
+      this.appendRunInterrupted("stream_error", message);
+    } finally {
+      // onTerminate owns cleanup (unregister from activeRuns + pipeline.dropRun).
+      this.onTerminate(this.runId);
     }
+  }
 
-    const durationMs = Date.now() - startedAt;
-    const tokenUsage = this.buildUsage(usage);
+  private appendRunFinalResult(
+    finalText: string,
+    durationMs: number,
+    usage: TokenUsage,
+  ): void {
+    if (this.terminalEventAppended) return;
+    this.init.pipeline.appendCanonicalEvent({
+      runId: this.runId,
+      agentId: this.agentId,
+      sdkType: "status",
+      kind: "run.final_result",
+      status: "FINISHED",
+      payload: {
+        ...(finalText.length > 0 ? { text: finalText } : {}),
+        model: { id: this.init.modelName },
+        duration_ms: durationMs,
+        usage,
+      },
+    });
+    this.terminalEventAppended = true;
+  }
 
-    if (this.abortController.signal.aborted) {
-      // P23-W1: an aborted run is a cancellation, not a stream error — record
-      // CANCELLED so history/usage don't mislabel it as a failure.
-      this.emit({ type: "status", agent_id: this.agentId, run_id: this.runId, status: "CANCELLED" });
-      this.init.runsRepo.setCancelled(this.runId, this.cancelReason ?? "user_cancelled");
-      this.init.runsRepo.setUsage(this.runId, tokenUsage);
-    } else if (errored) {
-      this.emit({ type: "status", agent_id: this.agentId, run_id: this.runId, status: "ERROR" });
-      this.init.runsRepo.setInterrupted(this.runId, "stream_error", errored);
-      this.init.runsRepo.setUsage(this.runId, tokenUsage);
-    } else {
-      this.emit({
-        type: "status",
-        agent_id: this.agentId,
-        run_id: this.runId,
-        status: "FINISHED",
+  private appendRunInterrupted(reason: RunInterruptedReason, message?: string | null): void {
+    if (this.terminalEventAppended) return;
+    try {
+      this.init.pipeline.appendCanonicalEvent({
+        runId: this.runId,
+        agentId: this.agentId,
+        sdkType: "status",
+        kind: "run.interrupted",
+        status: reason === "user_cancelled" || reason === "agent_terminated" ? "CANCELLED" : "ERROR",
+        payload: {
+          reason,
+          ...(message ? { message } : {}),
+        },
       });
-      this.init.runsRepo.finalize(this.runId, {
-        status: "FINISHED",
-        finalText: finalText.length > 0 ? finalText : null,
-        finalResult: null,
-        gitMetadata: null,
-        durationMs,
-        usage: tokenUsage,
-        lastTurnInputTokens: null,
-        lastTurnOutputTokens: null,
-      });
+      this.terminalEventAppended = true;
+    } catch (err) {
+      this.init.logger.error(
+        { err, runId: this.runId, reason },
+        "failed to append provider run.interrupted canonical event",
+      );
     }
-    // onTerminate owns cleanup (unregister from activeRuns + pipeline.dropRun).
-    this.onTerminate(this.runId);
   }
 
   private buildUsage(usage: ProviderUsage | null): TokenUsage {

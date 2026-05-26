@@ -2,6 +2,8 @@ import { useUiStore, type RightPanelTab } from "../../state/ui-store.js";
 import type { ComponentType } from "react";
 import { desktopBridge } from "../../lib/desktop-bridge.js";
 import { cn } from "../../lib/cn.js";
+import { useTheme } from "../../hooks/useTheme.js";
+import { THEME_LABELS } from "../../lib/theme-options.js";
 import {
   PanelLeftIcon,
   PanelRightIcon,
@@ -10,6 +12,9 @@ import {
   TerminalIcon,
   GlobeIcon,
   PlusIcon,
+  SunIcon,
+  MoonIcon,
+  MonitorIcon,
   type IconProps,
 } from "./ToolbarIcons.js";
 
@@ -35,6 +40,14 @@ const PANEL_TABS: ReadonlyArray<{
   { tab: "browser", label: "Browser", hint: "Browser (not yet available)", Icon: GlobeIcon },
 ];
 
+const THEME_ICONS = {
+  dark: MoonIcon,
+  light: SunIcon,
+  system: MonitorIcon,
+} as const;
+
+const THEME_LABEL_PREFIX = "Switch theme";
+
 export function Titlebar({ onNewSession, onCancelRun }: TitlebarProps = {}) {
   const codeHidden = useUiStore((s) => s.codeHidden);
   const setCodeHidden = useUiStore((s) => s.setCodeHidden);
@@ -43,6 +56,8 @@ export function Titlebar({ onNewSession, onCancelRun }: TitlebarProps = {}) {
   const toggleRailHidden = useUiStore((s) => s.toggleRailHidden);
   const rightPanelTab = useUiStore((s) => s.rightPanelTab);
   const openRightPanel = useUiStore((s) => s.openRightPanel);
+  const { theme, cycleTheme } = useTheme();
+  const ThemeIcon = THEME_ICONS[theme];
 
   // The Electron window uses `titleBarStyle: "hiddenInset"` on macOS, so the
   // native traffic-light buttons live in the top-left of our titlebar strip.
@@ -67,6 +82,7 @@ export function Titlebar({ onNewSession, onCancelRun }: TitlebarProps = {}) {
       <button
         type="button"
         onClick={toggleRailHidden}
+        aria-label={railHidden ? "Show sidebar" : "Hide sidebar"}
         aria-pressed={!railHidden}
         title={railHidden ? "Show sidebar" : "Hide sidebar"}
         className="tb-icon-btn"
@@ -86,6 +102,7 @@ export function Titlebar({ onNewSession, onCancelRun }: TitlebarProps = {}) {
               key={tab}
               type="button"
               onClick={() => onPanelToggle(tab)}
+              aria-label={active ? `Hide ${hint}` : `Show ${hint}`}
               aria-pressed={active}
               title={hint}
               className={cn("tb-icon-btn", active && "tb-icon-btn--active")}
@@ -97,6 +114,16 @@ export function Titlebar({ onNewSession, onCancelRun }: TitlebarProps = {}) {
       </div>
 
       <span className="tb-sep" aria-hidden="true" />
+
+      <button
+        type="button"
+        onClick={() => void cycleTheme()}
+        aria-label={`${THEME_LABEL_PREFIX}, current ${THEME_LABELS[theme]}`}
+        title={`Theme: ${THEME_LABELS[theme]}`}
+        className="tb-icon-btn"
+      >
+        <ThemeIcon className="size-4" />
+      </button>
 
       {onCancelRun ? (
         <button
@@ -114,6 +141,7 @@ export function Titlebar({ onNewSession, onCancelRun }: TitlebarProps = {}) {
         <button
           type="button"
           onClick={onNewSession}
+          aria-label="New chat"
           title="New chat"
           className="tb-icon-btn"
         >
@@ -125,6 +153,7 @@ export function Titlebar({ onNewSession, onCancelRun }: TitlebarProps = {}) {
       <button
         type="button"
         onClick={toggleCodeHidden}
+        aria-label={codeHidden ? "Show panel" : "Hide panel"}
         aria-pressed={!codeHidden}
         title={codeHidden ? "Show panel (⌘J)" : "Hide panel (⌘J)"}
         className={cn("tb-icon-btn", !codeHidden && "tb-icon-btn--active")}

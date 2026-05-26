@@ -34,138 +34,39 @@ each phase. Use it as the single source of truth for "what is decided" vs
 
 ---
 
-## Phase 23 Outcomes — Semantic Search and Multi-Model Support
+## Review Orchestrator Pass — 2026-05-25
 
 ### Summary
 
-Two major capabilities: (1) **vector semantic codebase search** — workspace
-files are chunked, embedded with all-MiniLM-L6-v2 (384-dim) in-process, stored
-in SQLite, and queried by cosine similarity; `@codebase` mentions prefer
-semantic results when the workspace is indexed and fall back to grep otherwise.
-(2) **multi-model BYOK providers** — Anthropic / OpenAI / Google / Ollama
-configured with user keys (Keychain), surfaced in a unified model list, with a
-run-routing fork so non-Cursor (chat-only) models bypass the SDK and stream
-through a `ProviderRunController` that emits the *same* canonical events as the
-Cursor path. Plus **Auto mode** (heuristic per-task model selection).
+Ran a deep multi-agent review across architecture, correctness, reliability,
+performance, security, data/secrets, frontend design, and verification. Applied
+high-confidence fixes in the current dirty slice: theme/settings ownership,
+search stale-response guards, token resolution, terminal spawn/WS lifecycle,
+workspace path security, no-follow file writes, missing-Origin policy, MCP reveal
+CSRF protection, websocket raw frame caps, terminal command quoting, and semantic
+index purge wiring.
 
-### Key decisions (binding)
+### Verification
 
-1. **Embeddings run on the ONNX WASM backend, not native.** `@xenova/transformers@2.17.2`
-   pulls `sharp` (native, image-only — unused for text) and an *optional*
-   `onnxruntime-node` (native). pnpm's build-script gate leaves `onnxruntime-node`
-   unbuilt, so transformers.js falls back to `onnxruntime-web` (WASM) — sidestepping
-   the Electron-ABI fragility that already burdens better-sqlite3/node-pty. `sharp`
-   is added to `pnpm.onlyBuiltDependencies` (its N-API prebuilt is ABI-stable and
-   loads under Electron without a rebuild) only because transformers.js imports it
-   eagerly at module load. The embedder forces `env.backends.onnx.wasm` and lazy
-   dynamic-imports the module so server boot stays fast.
-2. **Workspace identifier = absolute path.** `embeddings.workspace_id` and
-   `index_status.workspace_id` use the active workspace's path (consistent with
-   `runs.workspace_id` and `getActiveWorkspaceRoot`).
-3. **`content_hash` is the file-level SHA-256, stored on every chunk** — enables
-   single-lookup incremental skip of unchanged files.
-4. **Tests never download the model.** All unit/integration tests inject a
-   deterministic hashing-vectorizer `FakeEmbedder` (real lexical signal). The real
-   model is exercised only by an `RUN_EMBED_SMOKE`-gated test + the manual smoke.
-5. **Non-Cursor models are chat-only** (Ask). They have no tool-use; the model
-   selector tags them "(Ask only)". `ProviderRunController` feeds synthetic
-   SDK-shaped messages (`system.init` → `assistant` deltas → `status`) through the
-   existing normalizer + persist-and-broadcast pipeline, then finalizes the run
-   row — guaranteeing replay/live parity with Cursor runs.
-6. **Run routing forks on model kind.** A bare id ⇒ Cursor SDK; `auto` ⇒ heuristic
-   resolution at run time; `{providerId}:{model}` ⇒ direct provider client.
-   `createAgent` makes a DB-only agent (no SDK agent) for provider/auto models;
-   `createAgentRequestSchema.modelId` relaxed from the Cursor enum to a unified
-   string id (`unifiedModelIdSchema`).
-7. **usage_source = "sdk_final_result"** for provider-reported tokens; cost
-   computed from per-model pricing hints (micro-USD) when available, else null.
+- `pnpm typecheck` — pass (root script now rebuilds `@harness/shared` first so consumers do not read stale `dist` types).
+- `pnpm lint` — pass.
+- `pnpm test` — pass: shared 39, eslint-plugin 6, CLI 23, web 142, server 464 passing / 1 skipped, desktop 0 test files, scripts 11.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass; rebuilt web/server/desktop and packaged macOS app.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app`.
 
-### Schema changes
+### Remaining Review Notes
 
-- Migration `0007_semantic_search.sql`: `embeddings` (BLOB Float32 vectors +
-  indexes), `index_status` (per-workspace progress), `model_providers`
-  (provider config; keys live in Keychain, only the account name is stored).
-- `packages/shared`: new `semantic-search.ts` (index status, query/result,
-  reindex) and `providers.ts` (provider kinds, redacted summary, add/test,
-  unified model + capabilities/pricing). `models.ts` gains `AUTO_MODEL_ID` +
-  `unifiedModelIdSchema`. `createAgentRequestSchema.modelId` widened.
+- MCP server configs can still persist secret-bearing config fields as plaintext
+  in SQLite. The reveal route is now CSRF-protected POST, but at-rest secret
+  storage should move to Keychain references or encryption in a dedicated pass.
+- Broader retention policy is unchanged: canonical event payloads and semantic
+  chunks remain local plaintext until a full-content retention/delete pass is
+  specified.
+- Some large pre-existing performance findings remain future work: timeline
+  virtualization for very large lists, run-store event indexing, and semantic
+  search indexing/query optimization.
 
-### Files created (highlights)
-
-Server: `search/{vector,embedder,fake-embedder,chunker,file-walker,indexer,
-file-watcher,search-service,semantic-search.service}.ts`,
-`db/repositories/{embeddings,index-status,model-providers}.repo.ts`,
-`providers/{provider,model-registry,model-router,provider-run,anthropic-,
-openai-,google-,ollama-provider}.ts`, `keychain/provider-keys.ts`,
-`routes/providers.routes.ts`. Web: `hooks/{useModels,useProviders,
-useIndexStatus}.ts`, `components/settings/{ProvidersSettings,IndexSettings}.tsx`.
-
-### Files modified (key)
-
-Server: `db/schema.ts`, `db/repositories/index.ts`, `routes/{index,search,
-context}.routes.ts`, `sdk/agent-runtime.ts` (run-routing fork + DB-only
-provider agents), `services/context.service.ts` (@codebase semantic
-preference), `app.ts`, `keychain/index.ts`. Web: `state/ui-store.ts`
-(`selectedModelId` widened to string), `components/shell/{Composer,Statusbar}.tsx`,
-`hooks/{useCodebaseSearch,useEnsureDefaultAgent}.ts`, `components/SearchPanel.tsx`,
-`app/AppShell.tsx`, `pages/Settings.tsx`. Root: `package.json`
-(`pnpm.onlyBuiltDependencies += sharp`), `apps/server/package.json` (+4 deps).
-
-### Commands run and results
-
-- `pnpm typecheck` — all 5 workspaces clean (desktop requires `@harness/server`
-  built first; `pnpm -F @harness/server build` produces `dist/programmatic.js`).
-- `pnpm lint` — clean.
-- `pnpm test` — green: server 408 + 1 skipped (RUN_EMBED_SMOKE gated), web 124,
-  shared 3 files, eslint-plugin 3 files, scripts 11.
-- Embedding spike (one-off): all-MiniLM-L6-v2 loaded via WASM, produced a
-  384-dim normalized vector — confirms the real path works in-process.
-
-### Post-review remediation (review-5 + /address, `P23-*` commits)
-
-A 5-agent read-only review (3 debuggers + code-reviewer + code-auditor) ran
-against the changeset; all findings were addressed (no Linear per this repo's
-convention — tracked via `P23-*` Conventional Commits):
-
-- **C1** workspace removal now purges embeddings + index_status (was: orphaned
-  file content forever, unbounded growth, stale results on re-add).
-- **C2** the workspace walker never follows symlinks (explicit skip + test;
-  closes the symlink-escape vector).
-- **C3** provider `baseUrl` SSRF guard (cloud → public only; Ollama →
-  loopback-only, blocking the 169.254.169.254 metadata vector).
-- **C4/W1** provider runs register in `ActiveRuns` via a shared `CancelableRun`
-  seam → cancellable + aborted on shutdown; an aborted run finalizes as
-  CANCELLED, not ERROR.
-- **C5/W3/W4/W6** bounded timeouts on every provider call; `/test` validation
-  surfaces bad keys; Ollama reader released in `finally`; per-line NDJSON parse.
-- **W2** tool-less models get the Ask prefix regardless of mode. **W5** yield
-  between embed batches. **W7** `useProviders` Zod-validates responses. **W9**
-  shared `formatModelLabel`. **W10** file-walker + model-router tests.
-- **Suggestions**: semantic search scores on vectors only + fetches top-k
-  content (no full-content scan, no per-row vector copy); provider
-  enable/disable PATCH (wired the dead `setEnabled`); shared
-  `PROVIDER_KIND_LABELS`; `DEFAULT_SEMANTIC_MIN_SCORE`; Keychain-after-DB
-  ordering; drizzle `json_valid(models)` mirror; embedder revision seam.
-
-Consciously left (documented, low value for a local single-user app):
-provider-key/DB startup reconciliation, `index_status` read-consistency
-(advisory only), `confirm()` delete dialog, and the cosine norm-recompute
-micro-opt (the bigger Float32Array-copy cost was removed).
-
-### Known limitations / deferred
-
-1. **Cancellation of a non-Cursor provider run is best-effort** — it streams
-   chat-only and finishes fast; cancel/terminate/shutdown now reach it
-   (P23-C4) and record CANCELLED.
-2. **Auto + Cursor model switching mid-agent**: an `auto` agent's first run
-   creates the SDK agent under the resolved Cursor model; a later auto run that
-   resolves to a *different* Cursor model reuses the cached handle (edge case).
-3. **Mode gating in the UI is advisory** — non-Cursor models show "(Ask only)";
-   the server is chat-only for them regardless of the agent's execution mode.
-4. **Desktop bundle** must exclude `onnxruntime-node` (force WASM) and ship
-   `onnxruntime-web`'s `.wasm` + `sharp`'s N-API binary; handled at build time.
-5. **listModels for Google/Ollama** is a static/known list (no validating list
-   API); Anthropic/OpenAI hit their real list endpoints on add/test.
+---
 
 ### Next phase
 
@@ -3552,3 +3453,165 @@ Merged the source-only CLI/headless lane from the stale `phase-24b-interactive-c
 - `pnpm typecheck && pnpm lint && pnpm test` ✅ — 65 server test files / 453 passed + 1 skipped, 28 web test files / 134 passed, 9 CLI test files / 23 passed, 4 shared test files / 39 passed, 3 eslint-plugin test files / 6 passed, scripts 11 passed
 - `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` ✅
 - Desktop install: copied `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` to `/Applications/Cursor SDK Agent Harness.app` ✅ — installed timestamp May 25 19:32:20 2026
+
+---
+
+## Review Orchestrator Pass — 2026-05-25
+
+### Summary
+
+Ran a deep multi-agent review across architecture, correctness, reliability,
+performance, security, data/secrets, frontend design, and verification. Applied
+high-confidence fixes in the current dirty slice: theme/settings ownership,
+search stale-response guards, token resolution, terminal spawn/WS lifecycle,
+workspace path security, no-follow file writes, missing-Origin policy, MCP reveal
+CSRF protection, websocket raw frame caps, terminal command quoting, and semantic
+index purge wiring.
+
+### Verification
+
+- `pnpm typecheck` — pass (root script now rebuilds `@harness/shared` first so consumers do not read stale `dist` types).
+- `pnpm lint` — pass.
+- `pnpm test` — pass: shared 39, eslint-plugin 6, CLI 23, web 142, server 464 passing / 1 skipped, desktop 0 test files, scripts 11.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass; rebuilt web/server/desktop and packaged macOS app.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app`.
+
+### Remaining Review Notes
+
+- MCP server configs can still persist secret-bearing config fields as plaintext
+  in SQLite. The reveal route is now CSRF-protected POST, but at-rest secret
+  storage should move to Keychain references or encryption in a dedicated pass.
+- Broader retention policy is unchanged: canonical event payloads and semantic
+  chunks remain local plaintext until a full-content retention/delete pass is
+  specified.
+- Some large pre-existing performance findings remain future work: timeline
+  virtualization for very large lists, run-store event indexing, and semantic
+  search indexing/query optimization.
+
+---
+
+### Next phase
+
+---
+
+## Terminal AI Command Affordance — 2026-05-25
+
+### Summary
+
+Added a visible AI Command control to the embedded terminal surface. The control opens a compact approval panel from the terminal toolbar or Cmd+K, sends natural-language prompts to `POST /api/terminal/generate-command` with the active workspace cwd, previews the generated command/explanation/danger status, and requires the user to explicitly choose Copy, Insert, or Run. Insert writes the command to the PTY without Enter; Run writes the command plus terminal Enter; dangerous commands visibly warn and make Insert the primary safe action.
+
+### Files modified
+
+- `apps/web/src/components/shell/TerminalSurface.tsx` — toolbar affordance, Cmd+K opener, active cwd wiring, approved Insert/Run writes through the terminal hook.
+- `apps/web/src/components/TerminalCommandBar.tsx` — preview panel with Copy, Insert, Run, Edit, error display, dangerous-command safe-primary state.
+- `apps/web/src/hooks/useTerminalSession.ts` — exposes `sendInput` so programmatic terminal writes stay inside the hook-owned xterm/WS integration.
+- `apps/web/src/hooks/useTerminalAI.ts` — validates command-generation responses with the shared schema.
+- `apps/web/src/styles/app-shell.css` — tokenized terminal toolbar and command-panel styling.
+- `apps/web/src/components/shell/TerminalSurface.test.tsx` — coverage for affordance rendering, Cmd+K, route payload, Insert without run, Run with terminal Enter, and dangerous-command warning/no auto-run behavior.
+- `docs/IMPLEMENTATION_STATUS.md` — recorded this status entry.
+
+### Verification
+
+- `pnpm -F @harness/web test src/components/shell/TerminalSurface.test.tsx` — pass, 6 tests.
+- `pnpm typecheck` — pass.
+- `pnpm lint` — pass.
+- `pnpm test` — pass: shared 39, eslint-plugin 6, CLI 23, web 148, server 467 passing / 1 skipped, desktop 0 test files, scripts 11.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass; rebuilt web/server/desktop and packaged macOS app.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` — installed timestamp May 25 20:25:04 2026.
+
+---
+
+## Desktop Embedded Server Port-Collision Fix — 2026-05-25
+
+### Summary
+
+Diagnosed the terminal AI `CSRF token unavailable for POST /api/terminal/generate-command` error and `ws idle` status as a desktop server startup failure, not an xterm command-generation problem. A stale standalone `node apps/server/dist/index.js` process was already bound to `127.0.0.1:4783`, so the packaged Electron app could not start its desktop-mode embedded server and the renderer never received a usable CSRF token. Programmatic server startup now accepts a listen-port override, and the desktop main process binds the embedded server to an OS-assigned loopback port, then passes the resolved URL to the renderer as before.
+
+### Files modified
+
+- `apps/server/src/programmatic.ts` — added `listenPort`, returns/logs the actual bound port, and preserves the resolved URL contract.
+- `apps/desktop/src/main.ts` — starts the embedded server on port `0` to avoid collisions with stale/default harness servers.
+- `apps/server/src/__tests__/programmatic.test.ts` — regression coverage for ephemeral desktop startup plus `app://harness` CSRF access.
+- `docs/IMPLEMENTATION_STATUS.md` — recorded this status entry.
+
+### Verification
+
+- Reproduced the failure with the regression test: `listen EADDRINUSE: address already in use 127.0.0.1:4783`.
+- `pnpm -F @harness/server test src/__tests__/programmatic.test.ts` — pass, 1 test.
+- `pnpm typecheck` — pass.
+- `pnpm lint` — pass.
+- `pnpm test` — pass: shared 39, eslint-plugin 6, CLI 24, web 148, server 468 passing / 1 skipped, desktop 0 test files, scripts 11.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass; rebuilt web/server/desktop and packaged macOS app.
+- Reinstalled and relaunched `/Applications/Cursor SDK Agent Harness.app` — installed timestamp May 25 20:34:38 2026.
+- Runtime check: new app process listens on random loopback ports `58913` and `58914` while stale `4783` remains occupied; `GET http://127.0.0.1:58913/api/security/csrf-token` with `Origin: app://harness` returns 200.
+
+---
+
+### Next phase
+
+---
+
+## Terminal AI UI Removal + Terminal Emblem Color — 2026-05-25
+
+### Summary
+
+Removed the visible terminal AI Command affordance and overlay from the embedded terminal flow. The terminal is again a direct xterm shell surface only; Cmd+K no longer opens a natural-language command generator, and no client code calls `POST /api/terminal/generate-command` from the terminal pane. Updated the xterm ANSI palette so bright-white terminal output maps to the existing orange accent token, restoring the Claude Code emblem color without hardcoded component styling.
+
+### Files modified
+
+- `apps/web/src/components/shell/TerminalSurface.tsx` — removed toolbar state, Cmd+K handling, and command-panel rendering.
+- `apps/web/src/components/shell/TerminalSurface.test.tsx` — replaced AI-command tests with removal coverage and reconnecting status coverage.
+- `apps/web/src/hooks/useTerminalSession.ts` — removed the now-unused programmatic `sendInput` API while keeping PTY side effects inside the hook.
+- `apps/web/src/components/TerminalCommandBar.tsx` — deleted obsolete terminal AI command overlay component.
+- `apps/web/src/hooks/useTerminalAI.ts` — deleted obsolete terminal AI generation hook.
+- `apps/web/src/styles/app-shell.css` — removed terminal AI toolbar and command-panel styles.
+- `apps/web/src/styles/tokens.css` and `apps/web/src/styles/tokens-light.css` — mapped `--term-bright-white` to `--color-accent-primary`.
+- `apps/web/src/styles/theme-tokens.test.ts` — added regression coverage for the terminal bright-white accent mapping.
+- `apps/cli/src/repl/*.tsx` and `apps/cli/src/repl/theme.ts` — narrow gate cleanup for pre-existing CLI strictness issues surfaced by `pnpm lint`/`pnpm typecheck` (no control-regex literal, type-only React import, and optional Ink color props omitted instead of passed as `undefined`).
+- `docs/IMPLEMENTATION_STATUS.md` — recorded this status entry.
+
+### Verification
+
+- `pnpm -F @harness/web test src/components/shell/TerminalSurface.test.tsx src/styles/theme-tokens.test.ts` — pass, 6 tests.
+- `pnpm typecheck` — pass.
+- `pnpm lint` — pass.
+- `pnpm test` — pass: shared 39, eslint-plugin 6, CLI 24, web 146, server 468 passing / 1 skipped, desktop 0 test files, scripts 11.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass; rebuilt web/server/desktop and packaged macOS app.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` — installed timestamp May 25 20:52:40 2026.
+
+---
+
+### Next phase
+
+---
+
+## Agent Harness + Chat Streaming Review — 2026-05-26
+
+### Summary
+
+Ran a focused review-orchestrator pass across the agent harness and chat streaming flow: SDK run control, normalization, persist-and-broadcast, WS replay/subscription handling, client run-store ingestion, and streaming UI projections. Addressed the highest-confidence correctness/reliability findings in the current dirty slice: terminal run outcomes now produce canonical replayable events, persisted event loss is fatal to the run instead of silently skipped, server replay metadata survives live client ingest, retryable subscribe failures trigger bounded resubscribe, and queued cancel frames are no longer replaced by navigation subscribe/unsubscribe frames.
+
+### Files modified
+
+- `apps/server/src/sdk/run-controller.ts` — appends `run.final_result` / `run.interrupted` canonical events for Cursor runs, propagates sink failures into run interruption, and guarantees cleanup via `finally`.
+- `apps/server/src/providers/provider-run.ts` — mirrors terminal canonical events for non-Cursor provider runs and guarantees cleanup via `finally`.
+- `apps/server/src/sdk/persist-and-broadcast.ts` — throws on canonical event insert failure so the caller cannot falsely continue after durable event loss.
+- `apps/server/src/ws/ws-plugin.ts` — cleans up failed subscribe replay attempts and returns a retryable resync error.
+- `apps/web/src/state/run-store.ts` — preserves server-emitted `replayed` metadata during normal WS ingestion.
+- `apps/web/src/hooks/useAgentStream.ts` — tracks subscribe frame ids and retries retryable subscribe errors with current cursors.
+- `apps/web/src/hooks/useWebSocket.ts` — keeps `cancel_run` queueing separate from subscribe/unsubscribe dedupe.
+- `apps/server/src/sdk/__tests__/run-controller.test.ts`, `apps/server/src/sdk/__tests__/persist-and-broadcast.test.ts`, `apps/server/src/__tests__/integration/ws-stream.test.ts`, and `apps/web/src/state/__tests__/run-store.test.ts` — regression coverage for terminal events, fatal persist failures, replay counts, and replay metadata.
+- `docs/IMPLEMENTATION_STATUS.md` — recorded this status entry.
+
+### Verification
+
+- `pnpm typecheck` — pass.
+- `pnpm lint` — pass.
+- `pnpm test` — pass: shared 39, eslint-plugin 6, CLI 34, web 147, server 468 passing / 1 skipped, desktop 0 test files, scripts 11.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass; rebuilt web/server/desktop and packaged macOS app.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` — installed timestamp May 25 21:47:10 2026.
+
+### Remaining Review Notes
+
+- Performance reviewers still recommend a larger future pass on chunked client event storage, incremental timeline/tool projections, and lightweight large-payload replay rows. These are broader architectural optimizations and were not folded into this reliability patch.
+- Additional direct tests for `EventTimeline` and `useAgentStream` lifecycle edge cases remain useful follow-up coverage.

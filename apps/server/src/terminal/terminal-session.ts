@@ -35,6 +35,11 @@ export interface TerminalClient {
   send(frame: TerminalServerFrame): void;
 }
 
+export interface TerminalViewport {
+  cols: number;
+  rows: number;
+}
+
 export interface TerminalLogger {
   info(obj: unknown, msg?: string): void;
   warn(obj: unknown, msg?: string): void;
@@ -80,9 +85,7 @@ const DEFAULT_ROWS = 24;
  * table or routed through the run bus.
  */
 export class TerminalSession {
-  private readonly opts: Required<
-    Pick<CreateTerminalSessionOptions, "resolveCwd" | "logger">
-  > & {
+  private readonly opts: Required<Pick<CreateTerminalSessionOptions, "resolveCwd" | "logger">> & {
     shell: string;
     shellArgs: string[];
     spawnPty: SpawnPty;
@@ -121,15 +124,20 @@ export class TerminalSession {
    * buffered screen. Returns a detach function. The PTY is NOT killed on
    * detach — it is long-lived.
    */
-  async attach(client: TerminalClient): Promise<() => void> {
+  async attach(client: TerminalClient, initialViewport?: TerminalViewport): Promise<() => void> {
     if (this.disposed) {
       client.send({ type: "error", message: "Terminal is shutting down" });
       return () => {};
+    }
+    if (initialViewport) {
+      this.resize(initialViewport.cols, initialViewport.rows);
     }
     // If the active workspace changed since the live shell was spawned, replace
     // it with a fresh shell rooted in the new directory before (re)attaching.
     await this.reconcileWorkspaceCwd();
     try {
+      await this.ensureStarted();
+      await this.reconcileWorkspaceCwd();
       await this.ensureStarted();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to start shell";
@@ -245,6 +253,7 @@ export class TerminalSession {
   }
 
   private async spawn(): Promise<void> {
+    if (this.disposed) throw new Error("Terminal is shutting down");
     let cwd: string;
     try {
       cwd = await this.opts.resolveCwd();
@@ -252,9 +261,11 @@ export class TerminalSession {
       this.opts.logger.warn({ err }, "terminal: cwd resolution failed; using home");
       cwd = os.homedir();
     }
+    if (this.disposed) throw new Error("Terminal is shutting down");
     this.cwd = cwd;
 
     ensureSpawnHelperExecutable(this.opts.logger);
+    if (this.disposed) throw new Error("Terminal is shutting down");
 
     const pty = this.opts.spawnPty({
       shell: this.opts.shell,
@@ -264,6 +275,14 @@ export class TerminalSession {
       cols: this.cols,
       rows: this.rows,
     });
+    if (this.disposed) {
+      try {
+        pty.kill();
+      } catch {
+        // already dead
+      }
+      throw new Error("Terminal is shutting down");
+    }
 
     pty.onData((data) => {
       if (this.pty !== pty) return; // stale output from a shell we replaced
@@ -325,7 +344,9 @@ const SCRUB_PATTERNS = [/TOKEN$/i, /SECRET$/i, /PASSWORD$/i, /_KEY$/i];
  * Copy `process.env` into a plain string record, dropping known and
  * pattern-matched secrets and any undefined entries. Ensures a sane `TERM`.
  */
-function scrubbedEnv(source: NodeJS.ProcessEnv | Record<string, string> = process.env): Record<string, string> {
+function scrubbedEnv(
+  source: NodeJS.ProcessEnv | Record<string, string> = process.env,
+): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(source)) {
     if (value === undefined) continue;
@@ -347,7 +368,13 @@ const defaultSpawnPty: SpawnPty = (opts) => {
     spawn(
       file: string,
       args: string[],
-      options: { name: string; cols: number; rows: number; cwd: string; env: Record<string, string> },
+      options: {
+        name: string;
+        cols: number;
+        rows: number;
+        cwd: string;
+        env: Record<string, string>;
+      },
     ): PtyProcess;
   };
   return nodePty.spawn(opts.shell, opts.args, {

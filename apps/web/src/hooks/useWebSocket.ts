@@ -16,7 +16,8 @@
  * is flushed in order. The queue is capped at OUTBOUND_QUEUE_LIMIT so a
  * long outage doesn't grow unbounded; old subscribe/unsubscribe frames
  * for the same run_id are deduped (newer supersedes older) to avoid
- * replaying obsolete intent after reconnect.
+ * replaying obsolete navigation intent after reconnect. `cancel_run` is
+ * kept separate because it is a user action, not subscription state.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { serverFrameSchema, type ClientFrame, type ServerFrame } from "@harness/shared";
@@ -76,10 +77,11 @@ function buildWsUrl(url: string, csrfToken: string): string {
  * Pushes a frame into the bounded outbound queue, deduping where it's
  * safe to do so:
  *
- * - For `subscribe_run` / `unsubscribe_run` / `cancel_run`, an older
- *   queued frame targeting the same `run_id` is replaced. This avoids
- *   replaying a stale subscribe-then-unsubscribe pair to a run the user
- *   has since abandoned.
+ * - For `subscribe_run` / `unsubscribe_run`, an older queued frame targeting
+ *   the same `run_id` is replaced. This avoids replaying a stale
+ *   subscribe-then-unsubscribe pair to a run the user has since abandoned.
+ * - For `cancel_run`, only an older queued cancel for the same run is
+ *   replaced. Navigation subscription frames must never drop a cancel.
  * - Other frame types append.
  *
  * When the queue exceeds OUTBOUND_QUEUE_LIMIT, the oldest non-heartbeat
@@ -87,19 +89,21 @@ function buildWsUrl(url: string, csrfToken: string): string {
  */
 function enqueue(internal: InternalState, frame: ClientFrame): void {
   const queue = internal.outboundQueue;
-  if (
-    frame.type === "subscribe_run" ||
-    frame.type === "unsubscribe_run" ||
-    frame.type === "cancel_run"
-  ) {
+  if (frame.type === "subscribe_run" || frame.type === "unsubscribe_run") {
     for (let i = 0; i < queue.length; i++) {
       const existing = queue[i]!;
       if (
-        (existing.type === "subscribe_run" ||
-          existing.type === "unsubscribe_run" ||
-          existing.type === "cancel_run") &&
+        (existing.type === "subscribe_run" || existing.type === "unsubscribe_run") &&
         existing.run_id === frame.run_id
       ) {
+        queue[i] = frame;
+        return;
+      }
+    }
+  } else if (frame.type === "cancel_run") {
+    for (let i = 0; i < queue.length; i++) {
+      const existing = queue[i]!;
+      if (existing.type === "cancel_run" && existing.run_id === frame.run_id) {
         queue[i] = frame;
         return;
       }

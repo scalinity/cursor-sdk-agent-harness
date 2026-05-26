@@ -1,4 +1,4 @@
-import { useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { wsUrl } from "../lib/api-base.js";
@@ -10,12 +10,10 @@ import {
 } from "../lib/terminal-client.js";
 import { useUiStore } from "../state/ui-store.js";
 import { useMountEffect } from "./useMountEffect.js";
+import { useCsrfToken } from "./useCsrfToken.js";
+import { useThemeValue } from "./useTheme.js";
 
-export type TerminalConnectionStatus =
-  | "connecting"
-  | "connected"
-  | "exited"
-  | "disconnected";
+export type TerminalConnectionStatus = "connecting" | "connected" | "exited" | "disconnected";
 
 export interface UseTerminalSessionResult {
   hostRef: RefObject<HTMLDivElement | null>;
@@ -24,18 +22,24 @@ export interface UseTerminalSessionResult {
 
 /** Delay before re-dialing after a close or shell exit (fresh shell respawn). */
 const RECONNECT_DELAY_MS = 600;
+const MAX_RECONNECT_DELAY_MS = 5_000;
 
 /** Build the `/ws/terminal` URL with the CSRF query param (browsers can't set
  *  custom headers on a WS upgrade), resolving relative→absolute like the run
  *  socket does. */
-function buildTerminalWsUrl(csrfToken: string): string {
+function buildTerminalWsUrl(csrfToken: string, viewport: { cols: number; rows: number }): string {
   const base = wsUrl("/ws/terminal");
   const isAbsolute = base.startsWith("ws://") || base.startsWith("wss://");
   const full = isAbsolute
     ? base
     : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}${base}`;
   const sep = full.includes("?") ? "&" : "?";
-  return `${full}${sep}csrf=${encodeURIComponent(csrfToken)}`;
+  const params = new URLSearchParams({
+    csrf: csrfToken,
+    cols: String(viewport.cols),
+    rows: String(viewport.rows),
+  });
+  return `${full}${sep}${params.toString()}`;
 }
 
 /**
@@ -46,6 +50,10 @@ function buildTerminalWsUrl(csrfToken: string): string {
  */
 export function useTerminalSession(): UseTerminalSessionResult {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const { resolvedTheme } = useThemeValue();
+  const csrf = useCsrfToken();
   const [status, setStatus] = useState<TerminalConnectionStatus>("connecting");
 
   useMountEffect(() => {
@@ -64,12 +72,16 @@ export function useTerminalSession(): UseTerminalSessionResult {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
+    terminalRef.current = term;
+    fitRef.current = fit;
     safeFit(fit);
 
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let storeUnsub: (() => void) | undefined;
     let disposed = false;
+    let reconnectAttempts = 0;
+    let refreshedAfterPolicyClose = false;
     // The directory the server last reported for the live shell. A change means
     // the workspace switched and the server respawned the shell, so we clear the
     // stale screen. null until the first `ready`, so a tab-switch reattach to the
@@ -98,7 +110,12 @@ export function useTerminalSession(): UseTerminalSessionResult {
     const scheduleReconnect = (): void => {
       if (disposed) return;
       clearTimeout(reconnectTimer);
-      reconnectTimer = setTimeout(connect, RECONNECT_DELAY_MS);
+      const delay = Math.min(
+        RECONNECT_DELAY_MS * 2 ** reconnectAttempts,
+        MAX_RECONNECT_DELAY_MS,
+      );
+      reconnectAttempts += 1;
+      reconnectTimer = setTimeout(connect, delay);
     };
 
     function connect(): void {
@@ -118,15 +135,18 @@ export function useTerminalSession(): UseTerminalSessionResult {
         return;
       }
       setStatus("connecting");
-      const ws = new WebSocket(buildTerminalWsUrl(token));
+      safeFit(fit);
+      const ws = new WebSocket(buildTerminalWsUrl(token, { cols: term.cols, rows: term.rows }));
       socket = ws;
       ws.onopen = () => {
-        if (!disposed) setStatus("connected");
+        if (disposed || socket !== ws) return;
+        reconnectAttempts = 0;
+        refreshedAfterPolicyClose = false;
+        setStatus("connected");
       };
       ws.onmessage = (event: MessageEvent) => {
-        const frame = parseTerminalServerFrame(
-          typeof event.data === "string" ? event.data : "",
-        );
+        if (disposed || socket !== ws) return;
+        const frame = parseTerminalServerFrame(typeof event.data === "string" ? event.data : "");
         if (!frame) return;
         switch (frame.type) {
           case "ready":
@@ -152,13 +172,20 @@ export function useTerminalSession(): UseTerminalSessionResult {
             return;
         }
       };
-      ws.onclose = () => {
+      ws.onclose = (event: CloseEvent) => {
+        if (socket !== ws) return;
         socket = null;
         if (disposed) return;
         setStatus((prev) => (prev === "exited" ? prev : "disconnected"));
+        if (event.code === 1008 && !refreshedAfterPolicyClose) {
+          refreshedAfterPolicyClose = true;
+          void csrf.refresh().finally(scheduleReconnect);
+          return;
+        }
         scheduleReconnect();
       };
       ws.onerror = () => {
+        if (socket !== ws) return;
         // The close handler drives the reconnect; nothing to do here.
       };
     }
@@ -193,8 +220,23 @@ export function useTerminalSession(): UseTerminalSessionResult {
         socket = null;
       }
       term.dispose();
+      terminalRef.current = null;
+      fitRef.current = null;
     };
   });
+
+  useEffect(() => {
+    const host = hostRef.current;
+    const term = terminalRef.current;
+    const fit = fitRef.current;
+    if (!host || !term) return;
+
+    const appearance = readTerminalAppearance(host);
+    term.options.theme = appearance.theme;
+    term.options.fontFamily = appearance.fontFamily;
+    term.options.fontSize = appearance.fontSize;
+    if (fit) safeFit(fit);
+  }, [resolvedTheme]);
 
   return { hostRef, status };
 }

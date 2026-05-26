@@ -1,6 +1,7 @@
 /**
  * useSettings — wraps `/api/settings` and `/api/settings/api-key`.
- * The fetch fires once on mount; callers re-run via `reload()`.
+ * The bootstrap fetch is deduped across consumers; mutation helpers sequence
+ * full-snapshot responses so stale requests cannot overwrite newer settings.
  */
 import { useCallback, useEffect } from "react";
 import {
@@ -27,11 +28,19 @@ export interface UseSettingsResult {
   deleteApiKey: () => Promise<void>;
 }
 
-export function useSettings(): UseSettingsResult {
-  const snapshot = useSettingsStore((s) => s.snapshot);
-  const apiKeyPresent = useSettingsStore((s) => s.apiKeyPresent);
-  const loading = useSettingsStore((s) => s.loading);
-  const lastError = useSettingsStore((s) => s.lastError);
+export type UseSettingsActions = Pick<
+  UseSettingsResult,
+  "reload" | "updateSettings" | "updatePricing" | "setApiKey" | "deleteApiKey"
+>;
+
+let reloadInFlight: Promise<void> | null = null;
+let settingsMutationSeq = 0;
+
+function errorMessage(prefix: string, value: unknown): string {
+  return value instanceof Error ? `${prefix}: ${value.message}` : `${prefix}: request failed`;
+}
+
+export function useSettingsActions(): UseSettingsActions {
   const setSnapshot = useSettingsStore((s) => s.setSnapshot);
   const setApiKeyPresence = useSettingsStore((s) => s.setApiKeyPresence);
   const setLoading = useSettingsStore((s) => s.setLoading);
@@ -39,65 +48,78 @@ export function useSettings(): UseSettingsResult {
   const { refresh: refreshCsrfToken } = useCsrfToken();
 
   const reload = useCallback(async () => {
-    setLoading(true);
-    setLastError(null);
-    // Use allSettled so a transient failure in one endpoint doesn't block
-    // the other from hydrating (RV2-W14). The two endpoints are independent
-    // — settings snapshot and api-key presence — and the UI degrades better
-    // when at least one half is populated.
-    const [snapResult, keyResult] = await Promise.allSettled([
-      httpRequest("/api/settings", { responseSchema: settingsSnapshotSchema }),
-      httpRequest("/api/settings/api-key", { responseSchema: apiKeyPresenceResponseSchema }),
-    ]);
-    const errors: string[] = [];
-    if (snapResult.status === "fulfilled") {
-      setSnapshot(snapResult.value);
-    } else {
-      errors.push(
-        snapResult.reason instanceof Error
-          ? `settings: ${snapResult.reason.message}`
-          : `settings: load failed`,
-      );
-    }
-    if (keyResult.status === "fulfilled") {
-      setApiKeyPresence(keyResult.value.present, keyResult.value.lastValidatedAt ?? null);
-    } else {
-      errors.push(
-        keyResult.reason instanceof Error
-          ? `api-key: ${keyResult.reason.message}`
-          : `api-key: load failed`,
-      );
-    }
-    setLastError(errors.length > 0 ? errors.join("; ") : null);
-    setLoading(false);
+    if (reloadInFlight) return reloadInFlight;
+    const promise = (async () => {
+      setLoading(true);
+      setLastError(null);
+      // Use allSettled so a transient failure in one endpoint doesn't block
+      // the other from hydrating (RV2-W14). The two endpoints are independent
+      // — settings snapshot and api-key presence — and the UI degrades better
+      // when at least one half is populated.
+      const [snapResult, keyResult] = await Promise.allSettled([
+        httpRequest("/api/settings", { responseSchema: settingsSnapshotSchema }),
+        httpRequest("/api/settings/api-key", { responseSchema: apiKeyPresenceResponseSchema }),
+      ]);
+      const errors: string[] = [];
+      if (snapResult.status === "fulfilled") {
+        setSnapshot(snapResult.value);
+      } else {
+        errors.push(errorMessage("settings", snapResult.reason));
+      }
+      if (keyResult.status === "fulfilled") {
+        setApiKeyPresence(keyResult.value.present, keyResult.value.lastValidatedAt ?? null);
+      } else {
+        errors.push(errorMessage("api-key", keyResult.reason));
+      }
+      setLastError(errors.length > 0 ? errors.join("; ") : null);
+      setLoading(false);
+    })().finally(() => {
+      reloadInFlight = null;
+    });
+    reloadInFlight = promise;
+    return promise;
   }, [setSnapshot, setApiKeyPresence, setLoading, setLastError]);
 
   const updateSettings = useCallback(
     async (patch: UpdateSettingsRequest) => {
-      const next = await mutatingRequest("/api/settings", {
-        method: "PATCH",
-        body: patch,
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken,
-        responseSchema: settingsSnapshotSchema,
-      });
-      setSnapshot(next);
+      const mutationId = ++settingsMutationSeq;
+      setLastError(null);
+      try {
+        const next = await mutatingRequest("/api/settings", {
+          method: "PATCH",
+          body: patch,
+          getCsrfToken: () => useUiStore.getState().csrfToken,
+          refreshCsrfToken,
+          responseSchema: settingsSnapshotSchema,
+        });
+        if (mutationId === settingsMutationSeq) setSnapshot(next);
+      } catch (e) {
+        if (mutationId === settingsMutationSeq) setLastError(errorMessage("settings", e));
+        throw e;
+      }
     },
-    [refreshCsrfToken, setSnapshot],
+    [refreshCsrfToken, setSnapshot, setLastError],
   );
 
   const updatePricing = useCallback(
     async (patch: UpdatePricingRequest) => {
-      const next = await mutatingRequest("/api/settings/pricing", {
-        method: "PATCH",
-        body: patch,
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken,
-        responseSchema: settingsSnapshotSchema,
-      });
-      setSnapshot(next);
+      const mutationId = ++settingsMutationSeq;
+      setLastError(null);
+      try {
+        const next = await mutatingRequest("/api/settings/pricing", {
+          method: "PATCH",
+          body: patch,
+          getCsrfToken: () => useUiStore.getState().csrfToken,
+          refreshCsrfToken,
+          responseSchema: settingsSnapshotSchema,
+        });
+        if (mutationId === settingsMutationSeq) setSnapshot(next);
+      } catch (e) {
+        if (mutationId === settingsMutationSeq) setLastError(errorMessage("pricing", e));
+        throw e;
+      }
     },
-    [refreshCsrfToken, setSnapshot],
+    [refreshCsrfToken, setSnapshot, setLastError],
   );
 
   const setApiKey = useCallback(
@@ -124,6 +146,28 @@ export function useSettings(): UseSettingsResult {
     setApiKeyPresence(next.present, next.lastValidatedAt ?? null);
   }, [refreshCsrfToken, setApiKeyPresence]);
 
+  return { reload, updateSettings, updatePricing, setApiKey, deleteApiKey };
+}
+
+export function useSettingsBootstrap(): void {
+  const snapshot = useSettingsStore((s) => s.snapshot);
+  const actions = useSettingsActions();
+  const { reload } = actions;
+
+  useEffect(() => {
+    if (snapshot) return;
+    void reload();
+  }, [snapshot, reload]);
+}
+
+export function useSettings(): UseSettingsResult {
+  const snapshot = useSettingsStore((s) => s.snapshot);
+  const apiKeyPresent = useSettingsStore((s) => s.apiKeyPresent);
+  const loading = useSettingsStore((s) => s.loading);
+  const lastError = useSettingsStore((s) => s.lastError);
+  const actions = useSettingsActions();
+  const { reload } = actions;
+
   useEffect(() => {
     if (snapshot) return;
     void reload();
@@ -134,10 +178,6 @@ export function useSettings(): UseSettingsResult {
     apiKeyPresent,
     loading,
     error: lastError,
-    reload,
-    updateSettings,
-    updatePricing,
-    setApiKey,
-    deleteApiKey,
+    ...actions,
   };
 }

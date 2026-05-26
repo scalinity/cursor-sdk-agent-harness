@@ -30,6 +30,15 @@ export function isDangerous(command: string): boolean {
   return DANGEROUS_PATTERNS.some((p) => p.test(command));
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function normalizedFindUnit(value: string | undefined): string {
+  const unit = (value ?? "k")[0]?.toLowerCase() ?? "k";
+  return /^[bkmg]$/.test(unit) ? unit : "k";
+}
+
 interface PatternRule {
   match: RegExp;
   generate: (m: RegExpMatchArray, prompt: string) => string;
@@ -39,7 +48,7 @@ interface PatternRule {
 const PATTERNS: PatternRule[] = [
   {
     match: /(?:search|grep)\s+(?:for\s+)?["']?([^"']+?)["']?\s+(?:in|across)\s+(.+)/i,
-    generate: (m) => `grep -rn "${m[1]}" ${m[2]}`,
+    generate: (m) => `grep -rn -- ${shellQuote(m[1] ?? "")} ${shellQuote((m[2] ?? ".").trim())}`,
     explain: "Search for a pattern in files",
   },
   {
@@ -57,19 +66,19 @@ const PATTERNS: PatternRule[] = [
     generate: (m) => {
       const ext = m[1]!.toLowerCase();
       const size = m[2]!;
-      const unit = (m[3] ?? "k")[0]!.toLowerCase();
-      return `find . -name "*.${ext}" -size +${size}${unit}`;
+      const unit = normalizedFindUnit(m[3]);
+      return `find . -name ${shellQuote(`*.${ext}`)} -size +${size}${unit}`;
     },
     explain: "Find files by extension and minimum size",
   },
   {
     match: /(?:list|show|find)\s+(?:all\s+)?(\w+)\s+files?/i,
-    generate: (m) => `find . -name "*.${m[1]!.toLowerCase()}" -type f`,
+    generate: (m) => `find . -name ${shellQuote(`*.${m[1]!.toLowerCase()}`)} -type f`,
     explain: "Find files by extension",
   },
   {
     match: /(?:search|find|grep)\s+(?:for\s+)?["']?([^"']+?)["']?/i,
-    generate: (m) => `grep -rn "${m[1]}" .`,
+    generate: (m) => `grep -rn -- ${shellQuote(m[1] ?? "")} .`,
     explain: "Search for a pattern in the current directory",
   },
   {
@@ -79,7 +88,7 @@ const PATTERNS: PatternRule[] = [
   },
   {
     match: /(?:show|display|cat|read)\s+(.+)/i,
-    generate: (m) => `cat ${m[1]!.trim()}`,
+    generate: (m) => `cat -- ${shellQuote(m[1]!.trim())}`,
     explain: "Display file contents",
   },
   {

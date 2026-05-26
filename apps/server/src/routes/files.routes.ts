@@ -8,7 +8,9 @@ import {
 } from "@harness/shared";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { z } from "zod";
-import { mkdir, writeFile, unlink, realpath as fsRealpath } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { mkdir, open as fsOpen, unlink, realpath as fsRealpath } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import { Buffer } from "node:buffer";
 import path from "node:path";
 import {
@@ -159,9 +161,30 @@ export async function registerFilesRoutes(
       });
     }
 
-    // Write the file
+    // Write the file. O_NOFOLLOW rejects an existing symlink target before any
+    // bytes are written; the post-write realpath check remains as a race guard.
     const buf = Buffer.from(content, "utf-8");
-    await writeFile(resolvedTarget, buf);
+    const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+    let handle: FileHandle | undefined;
+    try {
+      handle = await fsOpen(
+        resolvedTarget,
+        fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | noFollow,
+        0o666,
+      );
+      await handle.writeFile(buf);
+    } catch (err) {
+      const code = err instanceof Error && "code" in err ? String(err.code) : null;
+      if (code === "ELOOP") {
+        return reply.code(403).send({
+          code: "SYMLINK_TARGET_REJECTED",
+          message: "Refusing to write through a symlink target.",
+        });
+      }
+      throw err;
+    } finally {
+      await handle?.close().catch(() => undefined);
+    }
 
     // Post-write TOCTOU check: verify the written file is still inside the
     // workspace root. A race between path check and write could place the

@@ -11,3 +11,10 @@ export function rawDataToString(data: RawData): string {
   if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8");
   return (data as Buffer).toString("utf8");
 }
+
+export function rawDataByteLength(data: RawData): number {
+  if (typeof data === "string") return Buffer.byteLength(data, "utf8");
+  if (Array.isArray(data)) return data.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  if (data instanceof ArrayBuffer) return data.byteLength;
+  return (data as Buffer).byteLength;
+}

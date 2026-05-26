@@ -8,6 +8,9 @@ import { RunsRepo } from "../../db/repositories/runs.repo.js";
 import { RunController, newRunId } from "../run-controller.js";
 import type { SdkAdapter, SendOptions } from "../sdk-adapter.js";
 import { createStubSdkAdapter, StubRun, StubSDKAgent } from "../testing.js";
+import type { PersistAndBroadcastPipeline } from "../persist-and-broadcast.js";
+
+type RecordedTerminalEvent = Parameters<PersistAndBroadcastPipeline["appendCanonicalEvent"]>[0];
 
 const pricing: SettingsSnapshot["pricing"] = {
   composer25Fast: {
@@ -30,6 +33,8 @@ interface Fixture {
   runs: RunsRepo;
   logger: FastifyBaseLogger;
   agentId: string;
+  terminalEvents: RecordedTerminalEvent[];
+  pipeline: Pick<PersistAndBroadcastPipeline, "appendCanonicalEvent">;
   cleanup: () => void;
 }
 
@@ -38,6 +43,7 @@ function setupFixture(): Fixture {
   const agents = new AgentsRepo(db.raw);
   const runs = new RunsRepo(db.raw);
   const logger = pino({ level: "silent" }) as unknown as FastifyBaseLogger;
+  const terminalEvents: RecordedTerminalEvent[] = [];
   const agent = agents.create({
     id: "agent-rc-test",
     name: "rc-test",
@@ -51,6 +57,12 @@ function setupFixture(): Fixture {
     runs,
     logger,
     agentId: agent.id,
+    terminalEvents,
+    pipeline: {
+      appendCanonicalEvent: (event) => {
+        terminalEvents.push(event);
+      },
+    },
     cleanup: () => db.raw.close(),
   };
 }
@@ -89,6 +101,7 @@ describe("RunController", () => {
         runsRepo: f.runs,
         pricing,
         sink: async () => undefined,
+        pipeline: f.pipeline,
         logger: f.logger,
       },
       () => undefined,
@@ -154,6 +167,13 @@ describe("RunController", () => {
     const row = f.runs.getById(runId);
     expect(row?.status).toBe("CANCELLED");
     expect(row?.interruptedReason).toBe("user_cancelled");
+    expect(f.terminalEvents).toContainEqual(
+      expect.objectContaining({
+        runId,
+        kind: "run.interrupted",
+        payload: { reason: "user_cancelled" },
+      }),
+    );
   });
 
   it("cancel() returns unsupported and writes ERROR + cancel_unavailable when SDK reports no cancel support (FIX-G)", async () => {
@@ -172,6 +192,13 @@ describe("RunController", () => {
     const row = f.runs.getById(runId);
     expect(row?.status).toBe("ERROR");
     expect(row?.interruptedReason).toBe("stream_error");
+    expect(f.terminalEvents).toContainEqual(
+      expect.objectContaining({
+        runId,
+        kind: "run.interrupted",
+        payload: { reason: "stream_error", message: "cancel_unavailable" },
+      }),
+    );
   });
 
   it("setStatus refuses to regress a FINISHED row to RUNNING (CRIT-1)", async () => {
@@ -217,6 +244,7 @@ describe("RunController", () => {
         runsRepo: f.runs,
         pricing,
         sink: async () => undefined,
+        pipeline: f.pipeline,
         logger: f.logger,
       },
       () => undefined,
@@ -225,6 +253,13 @@ describe("RunController", () => {
     await controller.awaitSettled();
     const row = f.runs.getById(runId);
     expect(row?.status).toBe("FINISHED");
+    expect(f.terminalEvents).toContainEqual(
+      expect.objectContaining({
+        runId,
+        kind: "run.final_result",
+        payload: expect.objectContaining({ usage: expect.any(Object) }),
+      }),
+    );
   });
 
   it("AgentsRepo.swapId transactionally relabels an agent's durable id (FIX-D)", () => {

@@ -145,3 +145,62 @@ describe("GET /api/files/read", () => {
     expect(res.statusCode).toBe(422);
   });
 });
+
+describe("POST /api/files/write", () => {
+  let tmpDir: string;
+  let cleanup: Array<() => Promise<void> | void> = [];
+
+  beforeEach(async () => {
+    tmpDir = await createTempWorkspace();
+    cleanup = [];
+  });
+  afterEach(async () => {
+    for (const fn of cleanup.reverse()) await fn();
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("writes a file inside the active workspace", async () => {
+    const { db, repos, app } = setup(tmpDir);
+    cleanup.push(() => app.close(), () => db.close());
+    await registerFilesRoutes(app, {
+      settingsRepo: repos.settings,
+      workspaceAllowlist: repos.workspaceAllowlist,
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/files/write",
+      payload: { path: "src/generated.ts", content: "export const ok = true;\n" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(await fs.readFile(path.join(tmpDir, "src", "generated.ts"), "utf8")).toBe(
+      "export const ok = true;\n",
+    );
+  });
+
+  it("rejects writing through an existing symlink target", async () => {
+    const outsideDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "harness-files-out-")));
+    cleanup.push(() => fs.rm(outsideDir, { recursive: true, force: true }));
+    const outsideFile = path.join(outsideDir, "secret.txt");
+    await fs.writeFile(outsideFile, "keep me\n");
+    await fs.symlink(outsideFile, path.join(tmpDir, "link.txt"));
+
+    const { db, repos, app } = setup(tmpDir);
+    cleanup.push(() => app.close(), () => db.close());
+    await registerFilesRoutes(app, {
+      settingsRepo: repos.settings,
+      workspaceAllowlist: repos.workspaceAllowlist,
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/files/write",
+      payload: { path: "link.txt", content: "owned\n" },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("SYMLINK_TARGET_REJECTED");
+    expect(await fs.readFile(outsideFile, "utf8")).toBe("keep me\n");
+  });
+});

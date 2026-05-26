@@ -8,8 +8,9 @@ import { useTerminalSession } from "../../hooks/useTerminalSession.js";
  */
 export function TerminalSurface() {
   const { hostRef, status } = useTerminalSession();
+
   return (
-    <div className="terminal-surface">
+    <div className="terminal-surface" data-testid="terminal-surface">
       <div ref={hostRef} className="terminal-surface__host" />
       {status === "disconnected" ? (
         <div className="terminal-surface__status">reconnecting…</div>

@@ -80,6 +80,12 @@ describe("run-store", () => {
     expect(state.assistantText).toBe("Hi");
   });
 
+  it("preserves server replay metadata without requiring caller options", () => {
+    useRunStore.getState().ingestServerFrame({ ...assistantFrame(1, "Hi"), replayed: true });
+    const state = useRunStore.getState().eventsByRunId["run-1"]!;
+    expect(state.events[0]?.replayed).toBe(true);
+  });
+
   it("updates run status projection on sdk.status frames", () => {
     useRunStore.getState().ingestServerFrame(statusFrame(1, "RUNNING"));
     expect(useRunStore.getState().byId["run-1"]?.status).toBe("RUNNING");

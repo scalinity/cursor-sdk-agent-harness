@@ -123,6 +123,28 @@ describe("security perimeter", () => {
       expect(res.statusCode).toBe(200);
     });
 
+    it("rejects safe requests with no Origin from non-loopback clients", async () => {
+      h = await buildHarness();
+      const res = await h.app.inject({
+        method: "GET",
+        url: "/api/health/live",
+        remoteAddress: "203.0.113.10",
+      });
+      expect(res.statusCode).toBe(403);
+      expect(res.json()).toEqual({ code: "ORIGIN_MISSING" });
+    });
+
+    it("rejects mutating requests with no Origin even from loopback", async () => {
+      h = await buildHarness();
+      const res = await h.app.inject({
+        method: "PATCH",
+        url: "/api/settings",
+        payload: {},
+      });
+      expect(res.statusCode).toBe(403);
+      expect(res.json()).toEqual({ code: "ORIGIN_MISSING" });
+    });
+
     it("rejects an OPTIONS preflight with a foreign Origin", async () => {
       h = await buildHarness();
       const res = await h.app.inject({

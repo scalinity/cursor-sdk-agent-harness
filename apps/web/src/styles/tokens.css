@@ -17,12 +17,17 @@
   --color-surface-1:         oklch(0.188 0.007 70);
   --color-surface-2:         oklch(0.212 0.008 70);
   --color-surface-3:         oklch(0.245 0.009 70);
+  --color-surface:           var(--color-background);
+  --color-surface-hover:     var(--color-surface-2);
+  --color-surface-selected:  var(--color-surface-3);
+  --color-surface-elevated:  var(--color-surface-2);
 
   /* ---- Color: Text (mockup --fg / --fg-1 / --fg-2 / --fg-3) ---- */
   --color-text-primary:      oklch(0.945 0.006 80);
   --color-text-secondary:    oklch(0.82  0.007 80);
   --color-text-tertiary:     oklch(0.64  0.008 80);
   --color-text-quaternary:   oklch(0.48  0.009 80);
+  --color-text-muted:        var(--color-text-tertiary);
   /* Inverse text for high-contrast plates (e.g. accent-primary fill).
      Aliased to the background so the coupling stays visible: amber buttons
      read against the same coffee-dark colour the app paints behind them. */
@@ -33,6 +38,8 @@
   --color-border-strong:     oklch(0.34  0.009 70);
   /* `default` keeps spec §3.5 naming alignment; aliased to subtle here. */
   --color-border-default:    oklch(0.282 0.008 70);
+  --color-border:            var(--color-border-default);
+  --color-border-focus:      var(--color-accent-primary);
 
   /* ---- Color: Accent (mockup --accent / --accent-soft / --accent-bg) ---- */
   --color-accent-primary:        oklch(0.80 0.135 72);
@@ -40,12 +47,14 @@
   --color-accent-primary-pressed:oklch(0.76 0.13  72);
   --color-accent-soft:           oklch(0.46 0.09  72);
   --color-accent-bg:             oklch(0.26 0.05  72);
+  --color-accent:                var(--color-accent-primary);
 
   /* ---- Color: Semantic (mockup --green / --red / --blue / --violet / --yellow) ---- */
   --color-success:           oklch(0.78 0.13 150);
   --color-success-bg:        oklch(0.30 0.06 150);
   --color-danger:            oklch(0.72 0.16 25);
   --color-danger-bg:         oklch(0.30 0.08 25);
+  --color-error:             var(--color-danger);
   --color-info:              oklch(0.78 0.10 240);
   --color-violet:            oklch(0.76 0.11 295);
   --color-warning:           oklch(0.85 0.13 95);
@@ -75,11 +84,13 @@
   --term-bright-blue:    oklch(0.82 0.10 240);
   --term-bright-magenta: oklch(0.82 0.11 295);
   --term-bright-cyan:    oklch(0.85 0.10 200);
-  --term-bright-white:   var(--color-text-primary);
+  --term-bright-white:   var(--color-accent-primary);
 
   /* ---- Typography ---- */
   --font-family-sans: 'Inter', system-ui, sans-serif;
   --font-family-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  --font-sans: var(--font-family-sans);
+  --font-mono: var(--font-family-mono);
   --font-feature-default: "ss01", "cv11", "calt";
   --font-feature-mono:    "calt", "liga";
 
@@ -117,7 +128,9 @@
 
   /* ---- Spacing (4px base scale, 0..12 = 0..64px) ---- */
   --space-0:  0px;
+  --space-0-5: 2px;
   --space-1:  4px;
+  --space-1-5: 6px;
   --space-2:  8px;
   --space-3:  12px;
   --space-4:  16px;
@@ -132,6 +145,7 @@
 
   /* ---- Radius (mockup uses 4–8px on chrome; xl reserved for large cards) ---- */
   --radius-none: 0px;
+  --radius-xs:   3px;
   --radius-sm:   4px;
   --radius-md:   5px;
   --radius-lg:   7px;
@@ -155,6 +169,7 @@
   --shadow-2: 0 4px 12px rgb(0 0 0 / 0.26);
   --shadow-3: 0 12px 32px rgb(0 0 0 / 0.34);
   --shadow-4: 0 24px 64px rgb(0 0 0 / 0.42);
+  --shadow-lg: var(--shadow-3);
 }
 /* Note: body OpenType features (`ss01`/`cv11`/`calt`) are applied in
    tailwind.css's `@layer base` on html/body — `tokens.css` stays a pure

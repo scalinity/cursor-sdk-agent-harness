@@ -617,6 +617,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
             pipeline: deps.pipeline,
             logger: deps.logger,
           }),
+          pipeline: deps.pipeline,
           logger: deps.logger,
         },
         (c) => {

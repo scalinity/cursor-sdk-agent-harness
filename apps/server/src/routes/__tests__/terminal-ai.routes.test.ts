@@ -37,6 +37,34 @@ describe("/api/terminal/generate-command", () => {
     expect(body.dangerous).toBe(false);
   });
 
+  it("shell-quotes generated grep and cat arguments", async () => {
+    const { app } = setup();
+    cleanup.push(() => app.close());
+    await registerTerminalAiRoutes(app, {});
+
+    const grep = await app.inject({
+      method: "POST",
+      url: "/api/terminal/generate-command",
+      payload: {
+        prompt: "search for TODO; rm -rf / in src/app.ts",
+        cwd: "/tmp/test",
+      },
+    });
+    const grepBody = JSON.parse(grep.payload);
+    expect(grepBody.command).toBe("grep -rn -- 'TODO; rm -rf /' 'src/app.ts'");
+
+    const cat = await app.inject({
+      method: "POST",
+      url: "/api/terminal/generate-command",
+      payload: {
+        prompt: "cat README.md; rm -rf /",
+        cwd: "/tmp/test",
+      },
+    });
+    const catBody = JSON.parse(cat.payload);
+    expect(catBody.command).toBe("cat -- 'README.md; rm -rf /'");
+  });
+
   it("generates a find command for file searches", async () => {
     const { app } = setup();
     cleanup.push(() => app.close());

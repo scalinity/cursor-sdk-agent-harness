@@ -4,6 +4,7 @@
  * SQLite, and CSRF secrets. The CLI entry (`index.ts`) is a thin wrapper that
  * calls this and then process.exit's on fatal error.
  */
+import type { AddressInfo } from "node:net";
 import { buildApp, type BuiltApp } from "./app.js";
 import { loadEnv, type Env } from "./config/env.js";
 import { openDb } from "./db/client.js";
@@ -18,6 +19,11 @@ export interface StartServerOptions {
    * shell.
    */
   envOverrides?: NodeJS.ProcessEnv;
+  /**
+   * Optional listen port override. `0` asks the OS for a free loopback port;
+   * useful for packaged desktop where the resolved URL is bridged to the renderer.
+   */
+  listenPort?: number;
 }
 
 export interface StartedServer {
@@ -49,18 +55,21 @@ export async function startServer(
   });
 
   const built = await buildApp({ env, repos });
-  await built.app.listen({ host: env.HOST, port: env.PORT });
+  const requestedPort = options.listenPort ?? env.PORT;
+  await built.app.listen({ host: env.HOST, port: requestedPort });
+  const address = built.app.server.address() as AddressInfo | string | null;
+  const port = typeof address === "object" && address !== null ? address.port : requestedPort;
 
   built.app.log.info(
-    { host: env.HOST, port: env.PORT, webOrigin: env.WEB_ORIGIN },
+    { host: env.HOST, port, configuredPort: env.PORT, webOrigin: env.WEB_ORIGIN },
     "cursor-sdk-agent-harness server listening",
   );
 
   return {
     built,
     env,
-    port: env.PORT,
-    url: `http://${env.HOST}:${env.PORT}`,
+    port,
+    url: `http://${env.HOST}:${port}`,
     close: async () => {
       await built.app.close();
       dbClient.raw.close();

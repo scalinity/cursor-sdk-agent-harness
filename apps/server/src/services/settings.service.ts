@@ -1,11 +1,12 @@
 import {
   DEFAULT_PRICING_MICROS,
   PRICING_SETTING_KEYS,
+  themeSettingSchema,
   type SettingsSnapshot,
   type UpdateSettingsRequest,
   type UpdatePricingRequest,
 } from "@harness/shared";
-import type { SettingsRepo } from "../db/repositories/settings.repo.js";
+import type { SettingWrite, SettingsRepo } from "../db/repositories/settings.repo.js";
 
 const TOP_LEVEL_KEYS = {
   defaultModelId: "defaultModelId",
@@ -14,6 +15,7 @@ const TOP_LEVEL_KEYS = {
   sandboxEnabledByDefault: "sandboxEnabledByDefault",
   defaultReplaySpeed: "defaultReplaySpeed",
   rawEventRetentionDays: "rawEventRetentionDays",
+  uiTheme: "settings.ui.theme",
 } as const;
 
 const SNAPSHOT_KEYS: ReadonlyArray<string> = [
@@ -23,6 +25,7 @@ const SNAPSHOT_KEYS: ReadonlyArray<string> = [
   TOP_LEVEL_KEYS.sandboxEnabledByDefault,
   TOP_LEVEL_KEYS.defaultReplaySpeed,
   TOP_LEVEL_KEYS.rawEventRetentionDays,
+  TOP_LEVEL_KEYS.uiTheme,
   PRICING_SETTING_KEYS.fastInput,
   PRICING_SETTING_KEYS.fastOutput,
   PRICING_SETTING_KEYS.fastCachedInput,
@@ -62,6 +65,11 @@ function pickStringArray<T extends string>(
   return Array.isArray(raw) ? (raw as T[]) : fallback;
 }
 
+function pickTheme(map: Map<string, unknown>, key: string): SettingsSnapshot["ui"]["theme"] {
+  const parsed = themeSettingSchema.safeParse(map.get(key));
+  return parsed.success ? parsed.data : "dark";
+}
+
 function pickNullableString(
   map: Map<string, unknown>,
   key: string,
@@ -99,6 +107,9 @@ export function getSettingsSnapshot(repo: SettingsRepo): SettingsSnapshot {
       "instant",
     ),
     rawEventRetentionDays: pickNumber(m, TOP_LEVEL_KEYS.rawEventRetentionDays, 180),
+    ui: {
+      theme: pickTheme(m, TOP_LEVEL_KEYS.uiTheme),
+    },
     pricing: {
       composer25Fast: {
         inputPerMillionUsdMicros: pickNumber(m, PRICING_SETTING_KEYS.fastInput, DEFAULT_PRICING_MICROS.composer25Fast.inputPerMillionUsdMicros),
@@ -133,24 +144,29 @@ export function applySettingsUpdate(
   repo: SettingsRepo,
   patch: UpdateSettingsRequest,
 ): SettingsSnapshot {
+  const writes: SettingWrite[] = [];
   if (patch.defaultModelId !== undefined) {
-    repo.set(TOP_LEVEL_KEYS.defaultModelId, patch.defaultModelId);
+    writes.push({ key: TOP_LEVEL_KEYS.defaultModelId, value: patch.defaultModelId });
   }
   if (patch.defaultExecutionMode !== undefined) {
-    repo.set(TOP_LEVEL_KEYS.defaultExecutionMode, patch.defaultExecutionMode);
+    writes.push({ key: TOP_LEVEL_KEYS.defaultExecutionMode, value: patch.defaultExecutionMode });
   }
   if (patch.defaultSettingSources !== undefined) {
-    repo.set(TOP_LEVEL_KEYS.defaultSettingSources, patch.defaultSettingSources);
+    writes.push({ key: TOP_LEVEL_KEYS.defaultSettingSources, value: patch.defaultSettingSources });
   }
   if (patch.sandboxEnabledByDefault !== undefined) {
-    repo.set(TOP_LEVEL_KEYS.sandboxEnabledByDefault, patch.sandboxEnabledByDefault);
+    writes.push({ key: TOP_LEVEL_KEYS.sandboxEnabledByDefault, value: patch.sandboxEnabledByDefault });
   }
   if (patch.defaultReplaySpeed !== undefined) {
-    repo.set(TOP_LEVEL_KEYS.defaultReplaySpeed, patch.defaultReplaySpeed);
+    writes.push({ key: TOP_LEVEL_KEYS.defaultReplaySpeed, value: patch.defaultReplaySpeed });
   }
   if (patch.rawEventRetentionDays !== undefined) {
-    repo.set(TOP_LEVEL_KEYS.rawEventRetentionDays, patch.rawEventRetentionDays);
+    writes.push({ key: TOP_LEVEL_KEYS.rawEventRetentionDays, value: patch.rawEventRetentionDays });
   }
+  if (patch.ui?.theme !== undefined) {
+    writes.push({ key: TOP_LEVEL_KEYS.uiTheme, value: patch.ui.theme });
+  }
+  repo.setMany(writes);
   return getSettingsSnapshot(repo);
 }
 
@@ -159,44 +175,49 @@ export function applyPricingUpdate(
   patch: UpdatePricingRequest,
   now: Date = new Date(),
 ): SettingsSnapshot {
+  const writes: SettingWrite[] = [];
   if (patch.composer25Fast?.inputPerMillionUsdMicros !== undefined) {
-    repo.set(PRICING_SETTING_KEYS.fastInput, patch.composer25Fast.inputPerMillionUsdMicros);
+    writes.push({
+      key: PRICING_SETTING_KEYS.fastInput,
+      value: patch.composer25Fast.inputPerMillionUsdMicros,
+    });
   }
   if (patch.composer25Fast?.outputPerMillionUsdMicros !== undefined) {
-    repo.set(
-      PRICING_SETTING_KEYS.fastOutput,
-      patch.composer25Fast.outputPerMillionUsdMicros,
-    );
+    writes.push({
+      key: PRICING_SETTING_KEYS.fastOutput,
+      value: patch.composer25Fast.outputPerMillionUsdMicros,
+    });
   }
   if (patch.composer25Fast?.cachedInputPerMillionUsdMicros !== undefined) {
-    repo.set(
-      PRICING_SETTING_KEYS.fastCachedInput,
-      patch.composer25Fast.cachedInputPerMillionUsdMicros,
-    );
+    writes.push({
+      key: PRICING_SETTING_KEYS.fastCachedInput,
+      value: patch.composer25Fast.cachedInputPerMillionUsdMicros,
+    });
   }
   if (patch.composer25?.inputPerMillionUsdMicros !== undefined) {
-    repo.set(
-      PRICING_SETTING_KEYS.standardInput,
-      patch.composer25.inputPerMillionUsdMicros,
-    );
+    writes.push({
+      key: PRICING_SETTING_KEYS.standardInput,
+      value: patch.composer25.inputPerMillionUsdMicros,
+    });
   }
   if (patch.composer25?.outputPerMillionUsdMicros !== undefined) {
-    repo.set(
-      PRICING_SETTING_KEYS.standardOutput,
-      patch.composer25.outputPerMillionUsdMicros,
-    );
+    writes.push({
+      key: PRICING_SETTING_KEYS.standardOutput,
+      value: patch.composer25.outputPerMillionUsdMicros,
+    });
   }
   if (patch.composer25?.cachedInputPerMillionUsdMicros !== undefined) {
-    repo.set(
-      PRICING_SETTING_KEYS.standardCachedInput,
-      patch.composer25.cachedInputPerMillionUsdMicros,
-    );
+    writes.push({
+      key: PRICING_SETTING_KEYS.standardCachedInput,
+      value: patch.composer25.cachedInputPerMillionUsdMicros,
+    });
   }
   if (patch.promoMultiplier !== undefined) {
-    repo.set(PRICING_SETTING_KEYS.promoMultiplier, patch.promoMultiplier);
+    writes.push({ key: PRICING_SETTING_KEYS.promoMultiplier, value: patch.promoMultiplier });
   }
   if (patch.markVerified === true) {
-    repo.set(PRICING_SETTING_KEYS.lastVerifiedAt, now.toISOString());
+    writes.push({ key: PRICING_SETTING_KEYS.lastVerifiedAt, value: now.toISOString() });
   }
+  repo.setMany(writes);
   return getSettingsSnapshot(repo);
 }

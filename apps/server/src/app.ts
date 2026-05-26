@@ -317,6 +317,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       allowlist: repos.workspaceAllowlist,
       policy: workspacePolicy,
       settings: repos.settings,
+      searchService,
     },
     agents: { runtime: agentRuntime, agentsRepo: repos.agents },
     runs: {

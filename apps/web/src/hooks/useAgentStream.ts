@@ -36,6 +36,7 @@ import type { ContextMention, SdkImage } from "@harness/shared";
 // app://harness and must reach the embedded server cross-origin); plain
 // "/ws" in browser/dev, resolved against window.location by useWebSocket.
 const WS_URL = wsUrl("/ws");
+const MAX_SUBSCRIBE_RETRIES = 3;
 
 export interface UseAgentStreamInput {
   agentId: string | null;
@@ -101,6 +102,9 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
   // every prior subscription. The set survives socket churn within this
   // hook lifetime; cleared on unmount.
   const subscribedRef = useRef<Set<string>>(new Set());
+  const subscribeFrameRunIdsRef = useRef<Map<string, string>>(new Map());
+  const subscribeRetryCountRef = useRef<Map<string, number>>(new Map());
+  const sendRef = useRef<(frame: ClientFrame) => void>(() => undefined);
 
   const [cancelUnavailable, setCancelUnavailable] = useState<
     { message: string } | null
@@ -111,11 +115,41 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
   // would still raise the banner.
   const lastCancelFrameIdRef = useRef<string | null>(null);
 
+  const sendSubscribe = useCallback((runId: string) => {
+    const frame = buildSubscribeFrame(runId);
+    subscribeFrameRunIdsRef.current.set(frame.id, runId);
+    subscribedRef.current.add(runId);
+    sendRef.current(frame);
+  }, []);
+
   const onFrame = useCallback(
     (frame: ServerFrame) => {
-      // The wire-level frame doesn't carry a `replayed` flag yet (Phase 09
-      // adds it server-side). For Phase 08 every ingest is treated as
-      // live; the run-store dedupes by seq so replay-overlap is harmless.
+      if (frame.type === "ack" && frame.ack_for) {
+        const runId = subscribeFrameRunIdsRef.current.get(frame.ack_for);
+        if (runId) {
+          subscribeFrameRunIdsRef.current.delete(frame.ack_for);
+          subscribeRetryCountRef.current.delete(runId);
+        }
+      }
+      if (frame.type === "error" && frame.retryable && frame.ack_for) {
+        const runId = subscribeFrameRunIdsRef.current.get(frame.ack_for);
+        if (runId) {
+          subscribeFrameRunIdsRef.current.delete(frame.ack_for);
+          if (!subscribedRef.current.has(runId)) return;
+          const attempts = subscribeRetryCountRef.current.get(runId) ?? 0;
+          if (attempts >= MAX_SUBSCRIBE_RETRIES) {
+            console.warn("[useAgentStream] retryable subscribe failed repeatedly", {
+              runId,
+              attempts,
+              message: frame.message,
+            });
+            return;
+          }
+          subscribeRetryCountRef.current.set(runId, attempts + 1);
+          queueMicrotask(() => sendSubscribe(runId));
+          return;
+        }
+      }
       if (frame.type === "error" && frame.code === "CANCEL_UNAVAILABLE") {
         // RV2-W9: only set the banner when the error correlates to
         // the cancel frame we just issued. The server stamps
@@ -131,7 +165,7 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
       }
       ingestServerFrame(frame);
     },
-    [ingestServerFrame],
+    [ingestServerFrame, sendSubscribe],
   );
 
   const { send, connectionState } = useWebSocket({
@@ -140,6 +174,7 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
     onFrame,
     onStateChange: setConnectionState,
   });
+  sendRef.current = send;
 
   // Subscribe to the target runId whenever it changes AND we're connected.
   // The seq cursor is read at send time so we never subscribe with a stale 0.
@@ -149,8 +184,8 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
     if (!targetRunId) return;
 
     const subscribed = subscribedRef.current;
-    send(buildSubscribeFrame(targetRunId));
-    subscribed.add(targetRunId);
+    const retryCounts = subscribeRetryCountRef.current;
+    sendSubscribe(targetRunId);
 
     return () => {
       // Only send unsubscribe when the socket is OPEN — otherwise the
@@ -167,8 +202,9 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
         });
       }
       subscribed.delete(targetRunId);
+      retryCounts.delete(targetRunId);
     };
-  }, [connectionState, targetRunId, send]);
+  }, [connectionState, targetRunId, send, sendSubscribe]);
 
   // Reconnect-resume: when connectionState flips back to "open", any
   // run that was subscribed via the exposed `subscribeRun(runId)` API
@@ -181,9 +217,9 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
     const subscribed = subscribedRef.current;
     for (const runId of subscribed) {
       if (runId === targetRunId) continue; // already handled by the effect above.
-      send(buildSubscribeFrame(runId));
+      sendSubscribe(runId);
     }
-  }, [connectionState, targetRunId, send]);
+  }, [connectionState, targetRunId, sendSubscribe]);
 
   // Clear the subscribed set on unmount so a future remount starts fresh.
   useEffect(() => {
@@ -246,10 +282,9 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
 
   const subscribeRun = useCallback(
     (runId: string) => {
-      send(buildSubscribeFrame(runId));
-      subscribedRef.current.add(runId);
+      sendSubscribe(runId);
     },
-    [send],
+    [sendSubscribe],
   );
 
   const unsubscribeRun = useCallback(
@@ -261,6 +296,7 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
         run_id: runId,
       });
       subscribedRef.current.delete(runId);
+      subscribeRetryCountRef.current.delete(runId);
     },
     [send],
   );

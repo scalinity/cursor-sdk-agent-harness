@@ -49,6 +49,7 @@ export {
   sdkRunStatusSchema,
   settingSourceSchema,
   usageSourceSchema,
+  themeSettingSchema,
 } from "./models.js";
 export type {
   AgentMode,
@@ -62,6 +63,7 @@ export type {
   SdkRunStatus,
   SettingSource,
   UsageSource,
+  ThemeSetting,
 } from "./models.js";
 
 // Pricing helpers
@@ -379,10 +381,12 @@ export {
   terminalExitFrameSchema,
   terminalErrorFrameSchema,
   terminalServerFrameSchema,
+  terminalViewportSchema,
 } from "./terminal-protocol.js";
 export type {
   TerminalClientFrame,
   TerminalServerFrame,
+  TerminalViewport,
 } from "./terminal-protocol.js";
 
 // Context intelligence (Phase 20): @-mentions, rules, codebase search

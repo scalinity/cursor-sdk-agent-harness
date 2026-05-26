@@ -11,6 +11,7 @@
  *      compile to var(--token-name) so a single source of truth wins.
  */
 @import "./tokens.css";
+@import "./tokens-light.css";
 @import "tailwindcss";
 @import "./app-shell.css";
 

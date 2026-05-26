@@ -39,6 +39,7 @@ interface Harness {
 
 async function buildTerminalHarness(opts: {
   spawnPty?: SpawnPty;
+  resolveCwd?: () => string | Promise<string>;
   shell?: string;
   shellArgs?: string[];
 }): Promise<Harness> {
@@ -54,7 +55,7 @@ async function buildTerminalHarness(opts: {
   await apiKeyStore.setApiKey("sk-test-term-12345678");
 
   const session = new TerminalSession({
-    resolveCwd: () => realCwd,
+    resolveCwd: opts.resolveCwd ?? (() => realCwd),
     logger: NOOP_LOGGER,
     ...(opts.spawnPty ? { spawnPty: opts.spawnPty } : {}),
     ...(opts.shell ? { shell: opts.shell } : {}),
@@ -191,6 +192,16 @@ function collect(socket: WebSocket): Collector {
 
 const tick = (ms = 60): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+async function waitForValue<T>(read: () => T | undefined, timeoutMs = 1_000): Promise<T> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const value = read();
+    if (value !== undefined) return value;
+    await tick(10);
+  }
+  throw new Error("timed out waiting for test value");
+}
+
 describe("Embedded terminal — /ws/terminal", () => {
   let h: Harness;
 
@@ -251,6 +262,130 @@ describe("Embedded terminal — /ws/terminal", () => {
     fake.emitExit(0);
     const exit = await frames.waitFor((f) => f.type === "exit");
     expect(exit.code).toBe(0);
+  });
+
+  it("uses the requested initial viewport before spawning the PTY", async () => {
+    const fake = makeFakePty();
+    let spawnedSize: { cols: number; rows: number } | undefined;
+    const spawnPty: SpawnPty = (opts) => {
+      spawnedSize = { cols: opts.cols, rows: opts.rows };
+      return fake.pty;
+    };
+    h = await buildTerminalHarness({ spawnPty });
+    const token = await h.csrfToken();
+    const socket = await h.app.injectWS(
+      `/ws/terminal?csrf=${encodeURIComponent(token)}&cols=132&rows=37`,
+      { headers: { origin: ORIGIN } },
+    );
+    const frames = collect(socket);
+
+    const ready = await frames.waitFor((f) => f.type === "ready");
+    expect(ready.cols).toBe(132);
+    expect(ready.rows).toBe(37);
+    expect(spawnedSize).toEqual({ cols: 132, rows: 37 });
+  });
+
+  it("accepts the shared terminal viewport lower bound", async () => {
+    const fake = makeFakePty();
+    let spawnedSize: { cols: number; rows: number } | undefined;
+    h = await buildTerminalHarness({
+      spawnPty: (opts) => {
+        spawnedSize = { cols: opts.cols, rows: opts.rows };
+        return fake.pty;
+      },
+    });
+    const token = await h.csrfToken();
+    const socket = await h.app.injectWS(
+      `/ws/terminal?csrf=${encodeURIComponent(token)}&cols=1&rows=1`,
+      { headers: { origin: ORIGIN } },
+    );
+    const frames = collect(socket);
+
+    const ready = await frames.waitFor((f) => f.type === "ready");
+    expect(ready.cols).toBe(1);
+    expect(ready.rows).toBe(1);
+    expect(spawnedSize).toEqual({ cols: 1, rows: 1 });
+  });
+
+  it("queues client input sent before terminal attach completes", async () => {
+    const fake = makeFakePty();
+    let releaseCwd: ((cwd: string) => void) | undefined;
+    let resolveCalls = 0;
+    h = await buildTerminalHarness({
+      resolveCwd: () => {
+        resolveCalls += 1;
+        if (resolveCalls === 1) {
+          return new Promise<string>((resolve) => { releaseCwd = resolve; });
+        }
+        return h.cwd;
+      },
+      spawnPty: () => fake.pty,
+    });
+    const token = await h.csrfToken();
+    const socket = await h.app.injectWS(`/ws/terminal?csrf=${encodeURIComponent(token)}`, {
+      headers: { origin: ORIGIN },
+    });
+    const frames = collect(socket);
+    socket.send(JSON.stringify({ type: "input", data: "typed-too-early\n" }));
+    const release = await waitForValue(() => releaseCwd);
+    release(h.cwd);
+    await frames.waitFor((f) => f.type === "ready");
+    await tick();
+
+    expect(fake.writes).toContain("typed-too-early\n");
+  });
+
+  it("kills a PTY returned after the session is disposed during spawn", async () => {
+    const fake = makeFakePty();
+    const sessionRef: { current?: TerminalSession } = {};
+    const session = new TerminalSession({
+      resolveCwd: () => "/workspace/a",
+      logger: NOOP_LOGGER,
+      spawnPty: () => {
+        sessionRef.current?.dispose();
+        return fake.pty;
+      },
+    });
+    sessionRef.current = session;
+    const received: Array<Record<string, unknown>> = [];
+    await session.attach({ send: (f: Record<string, unknown>) => received.push(f) } as never);
+
+    expect(fake.killed()).toBe(true);
+    expect(received.some((f) => f.type === "error")).toBe(true);
+  });
+
+  it("respawns if the workspace changes while the first shell is starting", async () => {
+    let cwd = "/workspace/a";
+    let firstCwdResolve: ((cwd: string) => void) | undefined;
+    let resolveCalls = 0;
+    const spawns: Array<{ cwd: string; fake: ReturnType<typeof makeFakePty> }> = [];
+    const session = new TerminalSession({
+      resolveCwd: () => {
+        resolveCalls += 1;
+        if (resolveCalls === 1) {
+          return new Promise<string>((resolve) => { firstCwdResolve = resolve; });
+        }
+        return cwd;
+      },
+      logger: NOOP_LOGGER,
+      spawnPty: (o) => {
+        const fake = makeFakePty();
+        spawns.push({ cwd: o.cwd, fake });
+        return fake.pty;
+      },
+    });
+
+    const received: Array<Record<string, unknown>> = [];
+    const attach = session.attach({ send: (f: Record<string, unknown>) => received.push(f) } as never);
+    const release = await waitForValue(() => firstCwdResolve);
+    cwd = "/workspace/b";
+    release("/workspace/a");
+    await attach;
+
+    expect(spawns.map((s) => s.cwd)).toEqual(["/workspace/a", "/workspace/b"]);
+    expect(spawns[0]?.fake.killed()).toBe(true);
+    expect(received.find((f) => f.type === "ready")?.cwd).toBe("/workspace/b");
+    session.dispose();
   });
 
   it("routes client input to the PTY and applies resize", async () => {
@@ -369,8 +504,12 @@ describe("Embedded terminal — /ws/terminal", () => {
     await f2.waitFor((f) => f.type === "ready");
 
     fake.emitData("shared-output\r\n");
-    const d1 = await f1.waitFor((f) => f.type === "data" && String(f.data).includes("shared-output"));
-    const d2 = await f2.waitFor((f) => f.type === "data" && String(f.data).includes("shared-output"));
+    const d1 = await f1.waitFor(
+      (f) => f.type === "data" && String(f.data).includes("shared-output"),
+    );
+    const d2 = await f2.waitFor(
+      (f) => f.type === "data" && String(f.data).includes("shared-output"),
+    );
     expect(d1.data).toContain("shared-output");
     expect(d2.data).toContain("shared-output");
   });
@@ -411,9 +550,9 @@ describe("Embedded terminal — /ws/terminal", () => {
     expect(spawns[1]?.cwd).toBe("/workspace/b");
     expect(r2.find((f) => f.type === "ready")?.cwd).toBe("/workspace/b");
     // Clean screen: workspace A's output is not replayed to the new client.
-    expect(
-      r2.some((f) => f.type === "data" && String(f.data).includes("output-from-a")),
-    ).toBe(false);
+    expect(r2.some((f) => f.type === "data" && String(f.data).includes("output-from-a"))).toBe(
+      false,
+    );
 
     session.dispose();
   });

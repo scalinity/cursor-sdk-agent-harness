@@ -137,10 +137,13 @@ export function useMcpServers(): UseMcpServersResult {
 
   const reveal = useCallback(
     async (id: string) =>
-      httpRequest(`/api/mcp-servers/${encodeURIComponent(id)}/reveal`, {
+      mutatingRequest(`/api/mcp-servers/${encodeURIComponent(id)}/reveal`, {
+        method: "POST",
+        getCsrfToken: () => useUiStore.getState().csrfToken,
+        refreshCsrfToken,
         responseSchema: mcpServerRevealResponseSchema,
       }),
-    [],
+    [refreshCsrfToken],
   );
 
   // REVIEW-S7: explicit mount-only hydration via useMountEffect wrapper.

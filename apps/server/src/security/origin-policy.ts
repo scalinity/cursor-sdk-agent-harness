@@ -47,7 +47,7 @@ const originPluginImpl: FastifyPluginAsync<OriginPolicyOptions> = async (
       if (origin === undefined) {
         // Missing Origin is only acceptable for safe methods from loopback
         // (covers curl). Mutating methods MUST present Origin.
-        if (MUTATING_METHODS.has(req.method) && !isLoopbackIp(req.ip)) {
+        if (!isLoopbackIp(req.ip) || MUTATING_METHODS.has(req.method)) {
           reply.code(403).send({ code: "ORIGIN_MISSING" });
         }
         return;

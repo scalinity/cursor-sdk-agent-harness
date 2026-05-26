@@ -8,7 +8,7 @@ import type {
 import fp from "fastify-plugin";
 import type { WebSocket } from "ws";
 import type { RawData } from "ws";
-import { rawDataToString } from "./raw-data.js";
+import { rawDataByteLength, rawDataToString } from "./raw-data.js";
 import {
   clientFrameSchema,
   frameIdSchema,
@@ -74,6 +74,7 @@ const REPLAY_PAGE_SIZE = 200;
  * resyncs from SQLite (spec §13 Backpressure decision).
  */
 const MAX_LIVE_BACKLOG = 1_000;
+const MAX_CLIENT_FRAME_BYTES = 1_048_576;
 
 /**
  * Per-connection client frame dedupe window. Spec §4 ("Deduplicate
@@ -358,6 +359,16 @@ function handleClientFrame(
   opts: WsPluginOptions,
 ): void {
   if (state.closed) return;
+  if (rawDataByteLength(data) > MAX_CLIENT_FRAME_BYTES) {
+    sendFrame(state, errorFrame("VALIDATION_ERROR", "Frame exceeds websocket size limit"));
+    try {
+      state.socket.close(1009, "client frame too large");
+    } catch {
+      // close best-effort; teardown follows through the close handler
+    }
+    teardownConnection(state);
+    return;
+  }
   let raw: unknown;
   try {
     raw = JSON.parse(rawDataToString(data));
@@ -405,7 +416,25 @@ function handleClientFrame(
       }
       return;
     case "subscribe_run":
-      void handleSubscribeRun(state, frame, opts);
+      void handleSubscribeRun(state, frame, opts).catch((err: unknown) => {
+        state.log.error(
+          { err, runId: frame.run_id },
+          "ws: subscribe replay failed before completion",
+        );
+        const sub = state.subscriptions.get(frame.run_id);
+        if (sub) {
+          sub.aborted = true;
+          sub.unsubscribe();
+          state.subscriptions.delete(frame.run_id);
+        }
+        sendFrame(
+          state,
+          errorFrame("INTERNAL_ERROR", "Subscription replay failed; resync from SQLite", {
+            ack_for: frame.id,
+            retryable: true,
+          }),
+        );
+      });
       return;
     case "unsubscribe_run":
       handleUnsubscribeRun(state, frame);
@@ -518,7 +547,25 @@ async function handleSubscribeRun(
   subscription.unsubscribe = unsubscribe;
   state.subscriptions.set(frame.run_id, subscription);
 
-  await runReplay(state, frame.run_id, frame.after_seq, opts);
+  try {
+    await runReplay(state, frame.run_id, frame.after_seq, opts);
+  } catch (err) {
+    subscription.aborted = true;
+    unsubscribe();
+    state.subscriptions.delete(frame.run_id);
+    state.log.error(
+      { err, runId: frame.run_id, afterSeq: frame.after_seq },
+      "ws: replay query failed during subscribe",
+    );
+    sendFrame(
+      state,
+      errorFrame("INTERNAL_ERROR", "Subscription replay failed; resync from SQLite", {
+        ack_for: frame.id,
+        retryable: true,
+      }),
+    );
+    return;
+  }
 
   // If the listener tripped the backlog guard mid-replay, the error
   // frame has already gone out — don't follow it with a contradictory

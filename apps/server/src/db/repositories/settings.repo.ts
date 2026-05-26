@@ -9,6 +9,12 @@ interface SettingDbRow {
   updated_at: string;
 }
 
+export interface SettingWrite {
+  key: string;
+  value: unknown;
+  description?: string;
+}
+
 function rowToDomain(row: SettingDbRow): SettingRow {
   return {
     key: row.key,
@@ -65,6 +71,30 @@ export class SettingsRepo {
            updated_at = excluded.updated_at`,
       )
       .run(key, JSON.stringify(value ?? null), description ?? null, isoNow());
+  }
+
+  setMany(items: ReadonlyArray<SettingWrite>): void {
+    if (items.length === 0) return;
+    const stmt = this.raw.prepare(
+      `INSERT INTO settings (key, value_json, description, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET
+         value_json = excluded.value_json,
+         description = COALESCE(excluded.description, settings.description),
+         updated_at = excluded.updated_at`,
+    );
+    const writeAll = this.raw.transaction((entries: ReadonlyArray<SettingWrite>) => {
+      const updatedAt = isoNow();
+      for (const item of entries) {
+        stmt.run(
+          item.key,
+          JSON.stringify(item.value ?? null),
+          item.description ?? null,
+          updatedAt,
+        );
+      }
+    });
+    writeAll(items);
   }
 
   delete(key: string): void {

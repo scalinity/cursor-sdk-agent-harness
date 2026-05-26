@@ -37,6 +37,12 @@ const terminalDimensionSchema = z
   .min(MIN_TERMINAL_DIMENSION)
   .max(MAX_TERMINAL_DIMENSION);
 
+export const terminalViewportSchema = z.object({
+  cols: terminalDimensionSchema,
+  rows: terminalDimensionSchema,
+});
+export type TerminalViewport = z.infer<typeof terminalViewportSchema>;
+
 // -- Client → Server frames -------------------------------------------------
 
 export const terminalInputFrameSchema = z.object({

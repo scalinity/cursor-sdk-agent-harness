@@ -1,11 +1,24 @@
-import { useCodebaseSearch } from "../hooks/useCodebaseSearch.js";
+import type { ComponentType } from "react";
+import { useCodebaseSearch, type SearchType } from "../hooks/useCodebaseSearch.js";
 import { cn } from "../lib/cn.js";
+import { FileIcon, SearchIcon, SparkIcon, type IconProps } from "./shell/ToolbarIcons.js";
 
 const PLACEHOLDERS: Record<string, string> = {
   grep: "Search text in codebase…",
   files: "Search files by name…",
   semantic: "Search by meaning (semantic)…",
 };
+
+const SEARCH_TYPES: ReadonlyArray<{
+  type: SearchType;
+  label: string;
+  title: string;
+  Icon: ComponentType<IconProps>;
+}> = [
+  { type: "grep", label: "Text", title: "Text search", Icon: SearchIcon },
+  { type: "files", label: "Files", title: "File name search", Icon: FileIcon },
+  { type: "semantic", label: "Semantic", title: "Semantic search", Icon: SparkIcon },
+];
 
 export function SearchPanel() {
   const {
@@ -30,37 +43,27 @@ export function SearchPanel() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <div className="search-panel__toggle">
-          <button
-            type="button"
-            className={cn(
-              "search-panel__toggle-btn",
-              searchType === "grep" && "search-panel__toggle-btn--active",
-            )}
-            onClick={() => setSearchType("grep")}
-          >
-            Text
-          </button>
-          <button
-            type="button"
-            className={cn(
-              "search-panel__toggle-btn",
-              searchType === "files" && "search-panel__toggle-btn--active",
-            )}
-            onClick={() => setSearchType("files")}
-          >
-            Files
-          </button>
-          <button
-            type="button"
-            className={cn(
-              "search-panel__toggle-btn",
-              searchType === "semantic" && "search-panel__toggle-btn--active",
-            )}
-            onClick={() => setSearchType("semantic")}
-          >
-            Semantic
-          </button>
+        <div className="search-panel__toggle" role="radiogroup" aria-label="Search mode">
+          {SEARCH_TYPES.map(({ type, label, title, Icon }) => {
+            const active = searchType === type;
+            return (
+              <button
+                key={type}
+                type="button"
+                className={cn(
+                  "search-panel__toggle-btn",
+                  active && "search-panel__toggle-btn--active",
+                )}
+                onClick={() => setSearchType(type)}
+                aria-label={label}
+                role="radio"
+                aria-checked={active}
+                title={title}
+              >
+                <Icon className="size-4" />
+              </button>
+            );
+          })}
         </div>
       </div>
 

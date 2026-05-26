@@ -3555,9 +3555,9 @@ Click browser elements to target them as agent context. `BrowserController.pickE
 
 Run agents in isolated git worktrees. `WorktreeManager` creates/removes worktrees, tracks association on run records. Diff/merge UI reuses `SessionDiffPanel`.
 
-### 17.22 CLI / Headless Mode (Phase 24)
+### 17.22 Interactive CLI (Phase 24)
 
-`apps/cli/` package — thin HTTP/WS client against the Fastify server. Commands: `run`, `agents list/create`, `search`, `history`. Streaming terminal output with markdown rendering. JSON mode for scripting. Requires server running independently (`pnpm start:server`).
+`apps/cli/` package — an interactive terminal-native chat interface against the Fastify server, built with `ink` (React for CLIs). Primary mode is a persistent REPL: the user types prompts, sees streaming markdown responses, watches tool calls execute with spinners, and can @-mention files/symbols for context. Slash commands (`/mode`, `/agent`, `/model`, `/clear`) control session state. A bottom status bar shows agent, model, mode, cost, and WS health. Approval prompts render inline with single-keypress accept/deny. One-shot subcommands (`run`, `agents list/create`, `search`, `history`) and `--json` mode are available for scripting and CI. Requires server running independently (`pnpm start:server`). When stdin is not a TTY (piped), the CLI falls back to one-shot `run` behavior automatically.
 
 ### 17.23 Light Theme (Phase 24)
 

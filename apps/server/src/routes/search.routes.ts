@@ -9,6 +9,7 @@ import type { WorkspaceAllowlistRepo } from "../db/repositories/workspace-allowl
 import { grepSearch, fileSearch } from "../services/search.service.js";
 import type { SearchService } from "../search/search-service.js";
 import { getActiveWorkspaceRoot } from "../config/active-workspace.js";
+import { realpath } from "node:fs/promises";
 
 export interface SearchRoutesDeps {
   settingsRepo: SettingsRepo;
@@ -21,14 +22,21 @@ export interface SearchRoutesDeps {
  * either an allowlist row id or an already-allowed filesystem path; otherwise
  * the active workspace is used.
  */
-function resolveWorkspaceRoot(
+async function resolveWorkspaceRoot(
   deps: SearchRoutesDeps,
   explicit: string | undefined,
-): string | null {
+): Promise<string | null> {
   if (explicit) {
     const row = deps.allowlistRepo.getById(explicit);
     if (row) return row.path;
-    if (deps.allowlistRepo.findMatching(explicit)) return explicit;
+    let canonical: string;
+    try {
+      canonical = await realpath(explicit);
+    } catch {
+      return null;
+    }
+    if (deps.allowlistRepo.findMatching(canonical)) return canonical;
+    return null;
   }
   return getActiveWorkspaceRoot(deps);
 }
@@ -80,7 +88,7 @@ export async function registerSearchRoutes(
     if (!parsed.success) {
       return reply.code(422).send({ code: "VALIDATION_ERROR", details: parsed.error.issues });
     }
-    const root = resolveWorkspaceRoot(deps, parsed.data.workspaceId);
+    const root = await resolveWorkspaceRoot(deps, parsed.data.workspaceId);
     if (!root) {
       return reply.code(400).send({ code: "NO_WORKSPACE", message: "No active workspace" });
     }

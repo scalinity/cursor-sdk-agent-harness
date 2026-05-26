@@ -280,8 +280,10 @@ describe("WebSocket — Phase 07 streaming + reconnect", () => {
       return r.type === "ack" && r.replay_complete === true;
     });
 
-    // We expect 50 canonical events (1 status + 48 assistant + 1 status).
-    expect(collected.length).toBe(50);
+    // We expect 51 canonical events: 1 status + 48 assistant + 1 terminal
+    // status + 1 run.final_result.
+    expect(collected.length).toBe(51);
+    expect(collected.at(-1)?.kind).toBe("run.final_result");
     const seqs = collected.map((c) => c.seq);
     for (let i = 1; i < seqs.length; i++) {
       const prev = seqs[i - 1];

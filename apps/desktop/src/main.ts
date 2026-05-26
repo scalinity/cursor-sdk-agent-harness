@@ -59,13 +59,14 @@ async function startEmbeddedServer(): Promise<void> {
   // is the only supported bridge — `require()` of ESM throws ERR_REQUIRE_ESM.
   const mod = (await import("@harness/server/dist/programmatic.js")) as {
     startServer: (
-      opts?: { envOverrides?: NodeJS.ProcessEnv },
+      opts?: { envOverrides?: NodeJS.ProcessEnv; listenPort?: number },
     ) => Promise<{ close: () => Promise<void>; url: string }>;
     registerBrowserBackend: (backend: unknown) => void;
     startBrowserMcpServer: () => Promise<{ baseUrl: string; urlForAgent: (id: string) => string; close: () => Promise<void> }>;
   };
   const started = await mod.startServer({
     envOverrides: { HARNESS_DESKTOP: "1" },
+    listenPort: 0,
   });
   serverClose = started.close;
   serverOrigin = started.url;

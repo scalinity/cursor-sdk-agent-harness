@@ -122,7 +122,7 @@ describe("persist-and-broadcast pipeline", () => {
     expect((rows[1]?.payload as { text_delta: string }).text_delta).toBe(", world");
   });
 
-  it("emits ZERO frames when the underlying insert fails (persist-before-broadcast)", async () => {
+  it("throws and emits ZERO frames when the underlying insert fails (persist-before-broadcast)", async () => {
     const pipeline = createPersistAndBroadcast({ events, bus, logger: silentLogger });
     const seen: EventRow[] = [];
     bus.subscribe("bogus-run", (e) => seen.push(e));
@@ -141,7 +141,7 @@ describe("persist-and-broadcast pipeline", () => {
         agentId,
         agentMode: "local",
       });
-    }).not.toThrow();
+    }).toThrow("run not found");
 
     await new Promise((r) => setImmediate(r));
     expect(seen).toHaveLength(0);

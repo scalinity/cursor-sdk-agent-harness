@@ -196,8 +196,9 @@ export function createPersistAndBroadcast(
       // Persist each draft. EventsRepo.appendCanonicalEvent owns the
       // transaction that allocates the seq AND inserts the row, so each
       // iteration here either fully commits or rolls back. If any draft
-      // fails, subsequent drafts in the same batch are skipped — the
-      // broadcast loop only sees committed rows.
+      // fails, the caller must treat the stream as failed; otherwise the
+      // durable event log would permanently miss an SDK event while the run
+      // continues toward a false successful finish.
       const persisted: EventRow[] = [];
       for (const draft of drafts) {
         const commitStart = performance.now();
@@ -230,11 +231,7 @@ export function createPersistAndBroadcast(
             },
             "persist-and-broadcast: event insert failed; skipping broadcast for this draft batch",
           );
-          // Stop the batch — we'd otherwise produce a sequence gap on the
-          // wire if a mid-batch event landed but an earlier one did not.
-          // Caller decides whether to retry (today: no retry; the SDK won't
-          // re-emit a missed event).
-          return;
+          throw err;
         }
       }
 

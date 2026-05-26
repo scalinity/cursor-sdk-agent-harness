@@ -373,13 +373,13 @@ export async function registerMcpServersRoutes(
     },
   );
 
-  app.get<{ Params: { id: string } }>(
+  app.post<{ Params: { id: string } }>(
     "/api/mcp-servers/:id/reveal",
     async (req, reply) => {
       // Editor-only escape hatch: returns the unredacted config so the
       // editor dialog can populate token-bearing fields when the user
-      // clicks "Reveal". CSRF + Origin already protect the route; the
-      // surface is intentionally read-only and per-server.
+      // clicks "Reveal". POST keeps this secret-bearing read behind the
+      // app-wide CSRF + Origin mutation guard.
       const row = deps.mcpServers.getById(req.params.id);
       if (!row) return reply.code(404).send({ code: "NOT_FOUND" });
 

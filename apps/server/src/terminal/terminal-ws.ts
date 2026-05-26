@@ -2,11 +2,15 @@ import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from "fastif
 import fp from "fastify-plugin";
 import type { RawData, WebSocket } from "ws";
 import {
+  MAX_TERMINAL_INPUT_CHARS,
   terminalClientFrameSchema,
+  terminalViewportSchema,
+  type TerminalClientFrame,
   type TerminalServerFrame,
+  type TerminalViewport,
 } from "@harness/shared";
 import type { CsrfTokenizer } from "../security/csrf.js";
-import { rawDataToString } from "../ws/raw-data.js";
+import { rawDataByteLength, rawDataToString } from "../ws/raw-data.js";
 import { validateWsUpgrade } from "../ws/upgrade-guard.js";
 import type { TerminalSession } from "./terminal-session.js";
 
@@ -16,6 +20,8 @@ export interface TerminalWsPluginOptions {
   allowedOrigins?: ReadonlyArray<string>;
   session: TerminalSession;
 }
+
+const MAX_TERMINAL_CLIENT_FRAME_BYTES = MAX_TERMINAL_INPUT_CHARS * 4 + 1024;
 
 /**
  * `/ws/terminal` — the embedded terminal's bidirectional byte channel.
@@ -38,6 +44,8 @@ const terminalWsPluginImpl: FastifyPluginAsync<TerminalWsPluginOptions> = async 
       return;
     }
 
+    const initialViewport = parseInitialViewport(req.url);
+
     const send = (frame: TerminalServerFrame): void => {
       if (socket.readyState !== socket.OPEN) return;
       try {
@@ -49,8 +57,31 @@ const terminalWsPluginImpl: FastifyPluginAsync<TerminalWsPluginOptions> = async 
 
     let detach: (() => void) | null = null;
     let closed = false;
+    let attached = false;
+    const pendingInput: string[] = [];
+
+    const handleFrame = (frame: TerminalClientFrame): void => {
+      switch (frame.type) {
+        case "input":
+          if (!attached) {
+            pendingInput.push(frame.data);
+            return;
+          }
+          opts.session.write(frame.data);
+          return;
+        case "resize":
+          opts.session.resize(frame.cols, frame.rows);
+          return;
+        default: {
+          const _exhaustive: never = frame;
+          void _exhaustive;
+          return;
+        }
+      }
+    };
+
     void opts.session
-      .attach({ send })
+      .attach({ send }, initialViewport)
       .then((d) => {
         // The socket may have closed during the async spawn; detach at once.
         if (closed) {
@@ -58,13 +89,21 @@ const terminalWsPluginImpl: FastifyPluginAsync<TerminalWsPluginOptions> = async 
           return;
         }
         detach = d;
+        attached = true;
+        for (const input of pendingInput.splice(0)) opts.session.write(input);
       })
       .catch((err: unknown) => {
+        pendingInput.length = 0;
         reqLog.error({ err }, "ws/terminal: attach failed");
         send({ type: "error", message: "Failed to attach terminal session" });
       });
 
     socket.on("message", (data: RawData) => {
+      if (rawDataByteLength(data) > MAX_TERMINAL_CLIENT_FRAME_BYTES) {
+        send({ type: "error", message: "Frame exceeds terminal websocket size limit" });
+        socket.close(1009, "terminal frame too large");
+        return;
+      }
       let raw: unknown;
       try {
         raw = JSON.parse(rawDataToString(data));
@@ -77,20 +116,7 @@ const terminalWsPluginImpl: FastifyPluginAsync<TerminalWsPluginOptions> = async 
         send({ type: "error", message: "Frame failed schema validation" });
         return;
       }
-      const frame = parsed.data;
-      switch (frame.type) {
-        case "input":
-          opts.session.write(frame.data);
-          return;
-        case "resize":
-          opts.session.resize(frame.cols, frame.rows);
-          return;
-        default: {
-          const _exhaustive: never = frame;
-          void _exhaustive;
-          return;
-        }
-      }
+      handleFrame(parsed.data);
     });
 
     socket.on("close", () => {
@@ -105,6 +131,21 @@ const terminalWsPluginImpl: FastifyPluginAsync<TerminalWsPluginOptions> = async 
     });
   });
 };
+
+function parseInitialViewport(url: string): TerminalViewport | undefined {
+  const params = new URL(url, "http://localhost").searchParams;
+  const parsed = terminalViewportSchema.safeParse({
+    cols: parseTerminalDimension(params.get("cols")),
+    rows: parseTerminalDimension(params.get("rows")),
+  });
+  return parsed.success ? parsed.data : undefined;
+}
+
+function parseTerminalDimension(raw: string | null): number | undefined {
+  if (!raw) return undefined;
+  const value = Number(raw);
+  return Number.isInteger(value) ? value : undefined;
+}
 
 export const terminalWsPlugin = fp(terminalWsPluginImpl, {
   name: "harness-terminal-ws",

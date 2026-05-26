@@ -110,6 +110,28 @@ describe("GET /api/search/semantic", () => {
     }
   });
 
+  it("rejects explicit workspace paths that resolve outside the allowlist", async () => {
+    const allowed = await makeWorkspace({
+      "inside.ts": "export const visibleInsideWorkspace = true;\n",
+    });
+    const outside = await makeWorkspace({
+      "secret.ts": "export const doNotIndexOutsideWorkspace = true;\n",
+    });
+    cleanup.push(() => fs.rm(allowed, { recursive: true, force: true }));
+    cleanup.push(() => fs.rm(outside, { recursive: true, force: true }));
+    const link = path.join(allowed, "outside-link");
+    await fs.symlink(outside, link, "dir");
+    const { app } = await setup([allowed], 0);
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/search/semantic?q=${encodeURIComponent("outside workspace")}&workspaceId=${encodeURIComponent(link)}`,
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("NO_WORKSPACE");
+  });
+
   it("422s on a missing query and 400s with no active workspace", async () => {
     const { app } = await setup([], -1);
     expect((await app.inject({ method: "GET", url: "/api/search/semantic" })).statusCode).toBe(422);

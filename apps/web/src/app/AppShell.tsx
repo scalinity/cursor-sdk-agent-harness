@@ -7,7 +7,6 @@ import { useNavigate } from "react-router-dom";
 import { useCsrfToken } from "../hooks/useCsrfToken.js";
 import { useAgents } from "../hooks/useAgents.js";
 import { useRunHistory } from "../hooks/useRunHistory.js";
-import { useSettings } from "../hooks/useSettings.js";
 import { useAgentStream } from "../hooks/useAgentStream.js";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
 import { useToastSweeper } from "../hooks/useToastSweeper.js";
@@ -35,7 +34,6 @@ import { describeModel } from "../lib/model-label.js";
 
 export function AppShell() {
   const csrf = useCsrfToken();
-  useSettings();
   useToastSweeper();
   const {
     agents,
