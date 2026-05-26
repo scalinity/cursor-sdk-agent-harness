@@ -27,7 +27,7 @@ import {
   type RunSummary,
   type UpdateAgentRequest,
 } from "@harness/shared";
-import { DEFAULT_MODEL_ID } from "../config.js";
+import { DEFAULT_MODEL_ID, DEFAULT_WEB_ORIGIN } from "../config.js";
 import type { CliAgentSummary, CliHttpPort, CliMode } from "../types.js";
 
 export class CliHttpError<TBody = unknown> extends Error {
@@ -51,16 +51,19 @@ const workspaceListSchema = z.object({
 
 export interface HarnessHttpClientOptions {
   serverUrl: string;
+  origin?: string;
   fetchImpl?: typeof fetch;
 }
 
 export class HarnessHttpClient implements CliHttpPort {
   private csrfToken: string | null = null;
   private readonly fetchImpl: typeof fetch;
+  private readonly origin: string;
   readonly serverUrl: string;
 
   constructor(options: HarnessHttpClientOptions) {
     this.serverUrl = options.serverUrl.replace(/\/$/, "");
+    this.origin = (options.origin ?? DEFAULT_WEB_ORIGIN).replace(/\/$/, "");
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
@@ -199,7 +202,10 @@ export class HarnessHttpClient implements CliHttpPort {
       "X-Request-Id": randomUUID(),
     };
     if (options.body !== undefined) headers["Content-Type"] = "application/json";
-    if (MUTATING_METHODS.has(method)) headers["X-CSRF-Token"] = await this.ensureCsrfToken();
+    if (MUTATING_METHODS.has(method)) {
+      headers["Origin"] = this.origin;
+      headers["X-CSRF-Token"] = await this.ensureCsrfToken();
+    }
 
     let response: Response;
     try {

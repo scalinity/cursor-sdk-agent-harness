@@ -20,7 +20,7 @@ interface GlobalOptions {
 }
 
 function createHttp(options: GlobalOptions): HarnessHttpClient {
-  return new HarnessHttpClient({ serverUrl: resolveServerUrl(options.server) });
+  return new HarnessHttpClient({ serverUrl: resolveServerUrl(options.server), origin: resolveWebOrigin(options.origin) });
 }
 
 async function createDeps(options: GlobalOptions, stream = false): Promise<CommandDeps> {
@@ -42,20 +42,18 @@ async function runChat(options: GlobalOptions & { agent?: string; mode?: CliMode
   const http = createHttp(options);
   await http.ensureCsrfToken();
   const prefs = await readPreferences();
-  const agentInput: { agentId?: string; model?: string; mode?: CliMode; workspace?: string } = {};
-  const agentId = options.agent ?? prefs.lastAgentId;
+  const workspace = options.workspace ?? process.cwd();
+  const agentInput: { agentId?: string; model?: string; mode?: CliMode; workspace: string } = { workspace };
   const model = options.model ?? prefs.preferredModel;
   const mode = options.mode ?? prefs.preferredMode;
-  if (agentId !== undefined) agentInput.agentId = agentId;
+  if (options.agent !== undefined) agentInput.agentId = options.agent;
   if (model !== undefined) agentInput.model = model;
   if (mode !== undefined) agentInput.mode = mode;
-  if (options.workspace !== undefined) agentInput.workspace = options.workspace;
   const agent = await http.getOrCreateAgent(agentInput);
   const token = await http.ensureCsrfToken();
   const stream = new HarnessWsClient({ serverUrl: http.serverUrl, csrfToken: token, origin: resolveWebOrigin(options.origin) });
   const historyEntries = await readPromptHistory();
   await writePreferences({
-    lastAgentId: agent.id,
     preferredMode: options.mode ?? prefs.preferredMode ?? agent.executionMode,
     preferredModel: options.model ?? prefs.preferredModel ?? agent.modelId,
   });
@@ -63,7 +61,7 @@ async function runChat(options: GlobalOptions & { agent?: string; mode?: CliMode
     agent,
     mode: options.mode ?? prefs.preferredMode ?? agent.executionMode ?? "agent",
     modelId: options.model ?? prefs.preferredModel ?? agent.modelId ?? DEFAULT_MODEL_ID,
-    workspace: options.workspace ?? process.cwd(),
+    workspace,
     historyEntries,
     http,
     stream,

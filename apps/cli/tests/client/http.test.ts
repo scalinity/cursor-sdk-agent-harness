@@ -44,6 +44,7 @@ describe("HarnessHttpClient contracts", () => {
 
     expect(agent.id).toBe("agent-new");
     const createCall = fetchImpl.mock.calls.find(([input, init]) => new URL(String(input)).pathname === "/api/agents" && init?.method === "POST");
+    expect(createCall?.[1]?.headers).toMatchObject({ Origin: "http://127.0.0.1:5173", "X-CSRF-Token": "csrf-token" });
     expect(createCall?.[1]?.body).toBeTypeOf("string");
     expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
       name: "project CLI",

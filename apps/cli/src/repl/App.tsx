@@ -42,6 +42,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
   const mentionRequestSeqRef = useRef(0);
   const mentionItems = flattenMentionResults(mentionResults);
   const busy = activeRunId !== null || isStartingRun;
+  const connectionStatus = activeRunId !== null ? "connected" : isStartingRun ? "connecting" : "ready";
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
@@ -126,7 +127,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
 
   return (
     <Box flexDirection="column">
-      <Text bold>Cursor Harness CLI — {sanitizeTerminalText(activeAgent.name)} ({mode} mode)</Text>
+      <Text bold>Cursor Harness CLI ({mode} mode)</Text>
       <Text dimColor>workspace: {sanitizeTerminalText(workspace)}</Text>
       <StreamView items={buffer.items} />
       <MentionPopup results={mentionResults} selectedIndex={mentionIndex} open={mentionOpen} />
@@ -171,7 +172,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
       />
       {busy ? <Text dimColor>(waiting for current run to finish...)</Text> : null}
       {queuedPrompts.length > 0 ? <Text dimColor>queued: {queuedPrompts.length}</Text> : null}
-      <StatusBar agentName={activeAgent.name} modelId={modelId} mode={mode} sessionCostMicros={sessionCostMicros} connection={activeRunId ? "connected" : "disconnected"} />
+      <StatusBar workspace={workspace} modelId={modelId} mode={mode} sessionCostMicros={sessionCostMicros} connection={connectionStatus} />
     </Box>
   );
 }
@@ -200,7 +201,7 @@ async function handleSlashCommand(ctx: SlashCommandContext): Promise<void> {
     case "mode":
       if (slash.args[0] === "ask" || slash.args[0] === "agent") {
         ctx.setMode(slash.args[0]);
-        await writePreferences({ lastAgentId: ctx.activeAgent.id, preferredMode: slash.args[0], preferredModel: ctx.modelId });
+        await writePreferences({ preferredMode: slash.args[0], preferredModel: ctx.modelId });
         appendMessage(`Mode switched to ${slash.args[0]}.`);
       } else {
         appendError("Usage: /mode ask | /mode agent");
@@ -268,8 +269,8 @@ async function switchAgent(
   ctx.setActiveAgent(next);
   ctx.setModelId(next.modelId);
   ctx.setMode(next.executionMode);
-  await writePreferences({ lastAgentId: next.id, preferredMode: next.executionMode, preferredModel: next.modelId });
-  appendMessage(`Agent switched to ${next.name}.`);
+  await writePreferences({ preferredMode: next.executionMode, preferredModel: next.modelId });
+  appendMessage("Session switched.");
 }
 
 async function switchModel(
@@ -285,7 +286,7 @@ async function switchModel(
   const next = await ctx.http.getOrCreateAgent({ model, mode: ctx.mode, workspace: ctx.workspace });
   ctx.setActiveAgent(next);
   ctx.setModelId(next.modelId);
-  await writePreferences({ lastAgentId: next.id, preferredMode: ctx.mode, preferredModel: next.modelId });
+  await writePreferences({ preferredMode: ctx.mode, preferredModel: next.modelId });
   appendMessage(`Model switched to ${next.modelId}.`);
 }
 
