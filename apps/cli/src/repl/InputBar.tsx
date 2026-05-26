@@ -1,9 +1,10 @@
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
-import TextInput from "ink-text-input";
 import type { ContextChip } from "@harness/shared";
 import type { MentionSelectionItem } from "../types.js";
+import { bg, border, fg, hardWrapText, type TuiTheme } from "./theme.js";
 import { mentionItemToChip } from "./MentionPopup.js";
+import type { SlashPaletteItem } from "./SlashPalette.js";
 
 export interface MentionTrigger {
   start: number;
@@ -74,12 +75,20 @@ export interface InputBarProps {
   history: PromptHistory;
   mentionItems?: MentionSelectionItem[];
   selectedMentionIndex?: number;
+  slashItems?: readonly SlashPaletteItem[];
+  selectedSlashIndex?: number;
+  width?: number;
+  placeholder?: string;
+  theme: TuiTheme;
   onMentionNavigate?: (delta: number) => void;
   onMentionDismiss?: () => void;
   onMentionSelect?: (chips: ContextChip[]) => void;
+  onSlashNavigate?: (delta: number) => void;
+  onSlashSelect?: (item: SlashPaletteItem) => void;
   onSubmit: (text: string) => void;
   onChange?: (text: string, mention: MentionTrigger | null) => void;
   onClear?: () => void;
+  onEscape?: () => void;
 }
 
 export function InputBar({
@@ -88,15 +97,29 @@ export function InputBar({
   history,
   mentionItems = [],
   selectedMentionIndex = 0,
+  slashItems = [],
+  selectedSlashIndex = 0,
+  width = 80,
+  placeholder = "ask, edit, search, or type /",
+  theme,
   onMentionNavigate,
   onMentionDismiss,
   onMentionSelect,
+  onSlashNavigate,
+  onSlashSelect,
   onSubmit,
   onChange,
   onClear,
+  onEscape,
 }: InputBarProps) {
   const [value, setValue] = useState("");
+  const setDraft = (next: string) => {
+    setValue(next);
+    onChange?.(next, findMentionTrigger(next, next.length));
+  };
+
   useInput((input, key) => {
+    const isReturn = key.return || input === "\r" || input === "\n";
     if (mentionItems.length > 0) {
       if (key.upArrow) {
         onMentionNavigate?.(-1);
@@ -106,13 +129,12 @@ export function InputBar({
         onMentionNavigate?.(1);
         return;
       }
-      if (key.tab || key.return) {
+      if (key.tab || isReturn) {
         const item = mentionItems[selectedMentionIndex];
         if (item) {
           const result = applyMentionSelection({ text: value, cursor: value.length, chips, item });
-          setValue(result.text);
+          setDraft(result.text);
           onMentionSelect?.(result.chips);
-          onChange?.(result.text, findMentionTrigger(result.text, result.text.length));
         }
         return;
       }
@@ -121,32 +143,81 @@ export function InputBar({
         return;
       }
     }
-    if (key.upArrow && value.length === 0) setValue(history.previous(value));
-    if (key.downArrow && value.length === 0) setValue(history.next(value));
-    if (key.ctrl && input === "c" && value.length > 0) {
-      setValue("");
-      onClear?.();
+
+    if (slashItems.length > 0) {
+      if (key.upArrow) {
+        onSlashNavigate?.(-1);
+        return;
+      }
+      if (key.downArrow) {
+        onSlashNavigate?.(1);
+        return;
+      }
+      if (key.tab) {
+        const item = slashItems[selectedSlashIndex];
+        if (item) {
+          const next = `/${item.command}${item.args ? " " : ""}`;
+          setDraft(next);
+          onSlashSelect?.(item);
+        }
+        return;
+      }
+      if (key.escape) {
+        onEscape?.();
+        return;
+      }
+    } else if (key.escape) {
+      onEscape?.();
+      return;
     }
+
+    if (key.ctrl && input === "c" && value.length > 0) {
+      setDraft("");
+      onClear?.();
+      return;
+    }
+    if (key.upArrow && value.length === 0) {
+      setDraft(history.previous(value));
+      return;
+    }
+    if (key.downArrow && value.length === 0) {
+      setDraft(history.next(value));
+      return;
+    }
+    if (key.backspace) {
+      if (value.length > 0) setDraft(Array.from(value).slice(0, -1).join(""));
+      return;
+    }
+    if (isReturn) {
+      if (key.shift) {
+        setDraft(`${value}\n`);
+        return;
+      }
+      const trimmed = value.trim();
+      if (!trimmed || disabled) return;
+      setDraft("");
+      onSubmit(trimmed);
+      return;
+    }
+    if (key.ctrl || key.meta || key.delete || key.leftArrow || key.rightArrow || key.pageDown || key.pageUp || key.tab) return;
+    if (input.length > 0) setDraft(value + input.replace(/\r\n?/g, "\n"));
   });
+
+  const visibleLines = value.length > 0 ? value.split("\n").flatMap((line) => hardWrapText(line, Math.max(12, width - 8))) : [""];
+  const lastLineIndex = visibleLines.length - 1;
+
   return (
-    <Box>
-      {chips.map((chip) => (
-        <Text key={chip.id} color="cyan">[@{chip.mention.displayLabel}] </Text>
+    <Box flexDirection="column" borderStyle="round" {...border(theme.borderFocus)} paddingX={1} {...bg(theme.panel)}>
+      {visibleLines.map((line, index) => (
+        <Box key={`${index}:${line}`}>
+          {index === 0 ? chips.map((chip) => (
+            <Text key={chip.id} {...fg(theme.accent)}>[@{chip.mention.displayLabel}] </Text>
+          )) : null}
+          <Text {...fg(theme.accent)}>{index === 0 ? "❯ " : "  "}</Text>
+          {value.length === 0 && index === 0 ? <Text {...fg(theme.muted)}>{placeholder}</Text> : <Text {...fg(theme.text)}>{line}</Text>}
+          {index === lastLineIndex ? <Text {...fg(theme.accent)}>█</Text> : null}
+        </Box>
       ))}
-      <Text color="cyan">❯ </Text>
-      <TextInput
-        value={value}
-        onChange={(next) => {
-          setValue(next);
-          onChange?.(next, findMentionTrigger(next, next.length));
-        }}
-        onSubmit={(submitted) => {
-          const trimmed = submitted.trim();
-          if (!trimmed || disabled) return;
-          setValue("");
-          onSubmit(trimmed);
-        }}
-      />
     </Box>
   );
 }

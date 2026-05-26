@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import type { ContextChip, ContextMentionKind, ContextSearchResult } from "@harness/shared";
 import type { MentionSelectionItem } from "../types.js";
+import { bg, border, createTuiTheme, fg, type TuiTheme } from "./theme.js";
 
 export function flattenMentionResults(results: ContextSearchResult | null): MentionSelectionItem[] {
   if (!results) return [];
@@ -36,26 +37,28 @@ export interface MentionPopupProps {
   results: ContextSearchResult | null;
   selectedIndex: number;
   open?: boolean;
+  theme?: TuiTheme;
 }
 
-export function MentionPopup({ results, selectedIndex, open = results !== null }: MentionPopupProps) {
+export function MentionPopup({ results, selectedIndex, open = results !== null, theme = createTuiTheme() }: MentionPopupProps) {
   const items = flattenMentionResults(results).slice(0, 8);
   if (!open) return null;
   if (items.length === 0) {
     return (
-      <Box flexDirection="column" borderStyle="round" paddingX={1}>
-        <Text dimColor>type to search</Text>
+      <Box flexDirection="column" borderStyle="round" {...border(theme.borderFocus)} paddingX={1} {...bg(theme.panel)}>
+        <Text {...fg(theme.muted)}>type to search files, folders, and symbols</Text>
       </Box>
     );
   }
   return (
-    <Box flexDirection="column" borderStyle="round" paddingX={1}>
+    <Box flexDirection="column" borderStyle="round" {...border(theme.borderFocus)} paddingX={1} {...bg(theme.panel)}>
+      <Text {...fg(theme.muted)}>CONTEXT PICKER</Text>
       {items.map((item, index) => {
-        const textProps = index === selectedIndex ? { color: "cyan" as const } : {};
+        const selected = index === selectedIndex;
         return (
-          <Text key={`${item.kind}:${item.value}`} {...textProps}>
-            {index === selectedIndex ? "› " : "  "}
-            {iconForKind(item.kind)} {item.label} <Text dimColor>{item.detail}</Text>
+          <Text key={`${item.kind}:${item.value}`} {...fg(selected ? theme.accent : theme.text)} bold={selected}>
+            {selected ? "◆ " : "◇ "}
+            {iconForKind(item.kind)} {item.label} <Text {...fg(theme.muted)}>{item.detail}</Text>
           </Text>
         );
       })}

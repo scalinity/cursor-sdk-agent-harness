@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { stdin as input, stdout as output, stderr } from "node:process";
 import { Command } from "commander";
-import { render } from "ink";
 import React from "react";
 import { createAgent, listAgents } from "./commands/agents.js";
 import { showHistory } from "./commands/history.js";
@@ -12,6 +11,7 @@ import { HarnessWsClient } from "./client/ws.js";
 import { DEFAULT_MODEL_ID, readPreferences, readPromptHistory, resolveServerUrl, resolveWebOrigin, writePreferences } from "./config.js";
 import { formatCliError } from "./errors.js";
 import { App } from "./repl/App.js";
+import { renderFullscreenApp } from "./repl/tui-lifecycle.js";
 import type { CliMode, CommandDeps } from "./types.js";
 
 interface GlobalOptions {
@@ -57,7 +57,7 @@ async function runChat(options: GlobalOptions & { agent?: string; mode?: CliMode
     preferredMode: options.mode ?? prefs.preferredMode ?? agent.executionMode,
     preferredModel: options.model ?? prefs.preferredModel ?? agent.modelId,
   });
-  render(React.createElement(App, {
+  await renderFullscreenApp(React.createElement(App, {
     agent,
     mode: options.mode ?? prefs.preferredMode ?? agent.executionMode ?? "agent",
     modelId: options.model ?? prefs.preferredModel ?? agent.modelId ?? DEFAULT_MODEL_ID,

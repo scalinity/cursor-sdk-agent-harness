@@ -3,13 +3,18 @@ import { Box, Text, useApp, useInput } from "ink";
 import type { AgentSummary, ContextChip, ContextSearchResult, ServerFrame } from "@harness/shared";
 import { isTerminalFrame } from "../client/ws.js";
 import { appendPromptHistory, writePreferences } from "../config.js";
-import { sanitizeTerminalText } from "../output/sanitize.js";
 import { renderTable, shortId } from "../output/table.js";
 import type { CliAgentSummary, CliHttpPort, CliMode, CliStreamPort } from "../types.js";
-import { InputBar, parseSlashCommand, PromptHistory } from "./InputBar.js";
+import { HeaderBar } from "./HeaderBar.js";
+import { InputBar, parseSlashCommand, PromptHistory, type MentionTrigger } from "./InputBar.js";
+import { computeTuiLayout, countInputLines } from "./layout.js";
 import { MentionPopup, flattenMentionResults, moveMentionSelection } from "./MentionPopup.js";
+import { filterSlashCommands, SlashPalette } from "./SlashPalette.js";
 import { createStreamBuffer, ingestStreamFrame, StreamView, type StreamBuffer } from "./StreamView.js";
 import { StatusBar } from "./StatusBar.js";
+import { createTuiTheme, bg, border, fg, MIN_COLUMNS, MIN_ROWS } from "./theme.js";
+import { useSpinnerFrame } from "./useSpinnerFrame.js";
+import { useTerminalSize } from "./useTerminalSize.js";
 
 export interface ReplAppProps {
   agent: CliAgentSummary;
@@ -23,6 +28,8 @@ export interface ReplAppProps {
 
 export function App({ agent, mode: initialMode, modelId: initialModelId, workspace, historyEntries, http, stream }: ReplAppProps) {
   const { exit } = useApp();
+  const theme = createTuiTheme();
+  const size = useTerminalSize();
   const [activeAgent, setActiveAgent] = useState<CliAgentSummary>(agent);
   const [mode, setMode] = useState<CliMode>(initialMode);
   const [modelId, setModelId] = useState(initialModelId);
@@ -31,6 +38,10 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
   const [mentionResults, setMentionResults] = useState<ContextSearchResult | null>(null);
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionIndex, setMentionIndex] = useState(0);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [slashDismissed, setSlashDismissed] = useState(false);
+  const [inputDraft, setInputDraft] = useState("");
+  const [scrollOffset, setScrollOffset] = useState(0);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [queuedPrompts, setQueuedPrompts] = useState<string[]>([]);
@@ -41,16 +52,37 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
   const mentionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mentionRequestSeqRef = useRef(0);
   const mentionItems = flattenMentionResults(mentionResults);
+  const slashItems = !mentionOpen && inputDraft.startsWith("/") && !slashDismissed ? filterSlashCommands(inputDraft) : [];
+  const slashOpen = slashItems.length > 0;
+  const overlayLineCount = mentionOpen ? Math.min(9, Math.max(2, mentionItems.length + 1)) : slashOpen ? Math.min(7, slashItems.length + 1) : 0;
+  const layout = computeTuiLayout(size, countInputLines(inputDraft), overlayLineCount);
   const busy = activeRunId !== null || isStartingRun;
+  const spinner = useSpinnerFrame(busy);
   const connectionStatus = activeRunId !== null ? "connected" : isStartingRun ? "connecting" : "ready";
+  const activeLabel = busy ? `${spinner} ${isStartingRun ? "starting run" : "agent working"}` : undefined;
 
   useInput((input, key) => {
+    if (key.ctrl && input === "l") {
+      setBuffer(createStreamBuffer());
+      setScrollOffset(0);
+      return;
+    }
+    if (key.pageUp) {
+      setScrollOffset((current) => current + Math.max(3, Math.floor(layout.scrollHeight * 0.8)));
+      return;
+    }
+    if (key.pageDown) {
+      setScrollOffset((current) => Math.max(0, current - Math.max(3, Math.floor(layout.scrollHeight * 0.8))));
+      return;
+    }
     if (key.ctrl && input === "c") {
       if (activeRunId) {
         stream.cancelRun?.(activeRunId);
+        setBuffer((current) => ({ items: [...current.items, { type: "assistant", text: "\n[cancel requested]\n" }] }));
         return;
       }
-      exit();
+      if (inputDraft.length > 0) return;
+      cleanupAndExit(activeRunId, stream, exit);
     }
     if (key.ctrl && input === "d") cleanupAndExit(activeRunId, stream, exit);
     if (pendingApproval && ["y", "n", "a"].includes(input)) {
@@ -60,6 +92,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
   });
 
   const submitPrompt = (text: string) => {
+    setSlashDismissed(false);
     const slash = parseSlashCommand(text);
     if (slash) {
       void handleSlashCommand({
@@ -92,6 +125,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
 
   const startPrompt = (text: string) => {
     setIsStartingRun(true);
+    setScrollOffset(0);
     appendPromptHistory(text).catch((error: unknown) => {
       setBuffer((current) => ({
         items: [...current.items, { type: "error", message: `Prompt history was not saved: ${error instanceof Error ? error.message : String(error)}` }],
@@ -103,6 +137,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
       setActiveRunId(run.runId);
       return stream.subscribeToRun(run.runId, (frame: ServerFrame) => {
         setBuffer((current) => ingestStreamFrame(current, frame));
+        setScrollOffset(0);
         if (frame.type === "sdk.request") setPendingApproval({ runId: run.runId, requestId: frame.event.payload.request_id });
         if (isTerminalFrame(frame)) {
           setActiveRunId(null);
@@ -125,54 +160,109 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
     });
   };
 
+  const handleInputChange = (text: string, mention: MentionTrigger | null) => {
+    setInputDraft(text);
+    setSlashDismissed(false);
+    if (!text.startsWith("/")) setSlashIndex(0);
+    if (!mention) {
+      clearMentionTimer(mentionTimerRef);
+      setMentionResults(null);
+      setMentionOpen(false);
+      return;
+    }
+    setMentionOpen(true);
+    if (mention.query.length === 0) {
+      clearMentionTimer(mentionTimerRef);
+      setMentionResults({ files: [], symbols: [] });
+      return;
+    }
+    const seq = mentionRequestSeqRef.current + 1;
+    mentionRequestSeqRef.current = seq;
+    clearMentionTimer(mentionTimerRef);
+    mentionTimerRef.current = setTimeout(() => {
+      void http.contextSearch(mention.query).then((result) => {
+        if (mentionRequestSeqRef.current !== seq) return;
+        setMentionResults(result);
+        setMentionIndex(Math.min(mentionIndex, Math.max(0, flattenMentionResults(result).length - 1)));
+      }).catch(() => {
+        if (mentionRequestSeqRef.current === seq) setMentionResults(null);
+      });
+    }, 150);
+  };
+
+  if (!layout.canRender) {
+    return <TooSmallTerminal columns={layout.columns} rows={layout.rows} theme={theme} />;
+  }
+
   return (
-    <Box flexDirection="column">
-      <Text bold>Cursor Harness CLI ({mode} mode)</Text>
-      <Text dimColor>workspace: {sanitizeTerminalText(workspace)}</Text>
-      <StreamView items={buffer.items} />
-      <MentionPopup results={mentionResults} selectedIndex={mentionIndex} open={mentionOpen} />
+    <Box flexDirection="column" width={layout.columns} height={layout.rows} {...bg(theme.background)}>
+      <HeaderBar
+        width={layout.columns}
+        workspace={workspace}
+        mode={mode}
+        modelId={modelId}
+        connection={connectionStatus}
+        activeRunId={activeRunId}
+        queuedPrompts={queuedPrompts.length}
+        spinner={spinner}
+        theme={theme}
+      />
+      <Box flexDirection="column" height={layout.scrollHeight} borderStyle="round" {...border(theme.border)} paddingX={1} {...bg(theme.panel)}>
+        <StreamView items={buffer.items} height={Math.max(1, layout.scrollHeight - 2)} width={Math.max(12, layout.columns - 4)} scrollOffset={scrollOffset} activeLabel={activeLabel} theme={theme} />
+      </Box>
+      {mentionOpen ? <MentionPopup results={mentionResults} selectedIndex={mentionIndex} open={mentionOpen} theme={theme} /> : null}
+      {!mentionOpen && slashOpen ? <SlashPalette items={slashItems} selectedIndex={slashIndex} theme={theme} /> : null}
       <InputBar
         chips={chips}
         history={history}
         mentionItems={mentionItems}
         selectedMentionIndex={mentionIndex}
+        slashItems={slashOpen ? slashItems : []}
+        selectedSlashIndex={slashIndex}
+        width={layout.columns}
+        theme={theme}
         onMentionNavigate={(delta) => setMentionIndex((current) => moveMentionSelection(current, delta, mentionItems.length))}
-        onMentionDismiss={() => setMentionResults(null)}
+        onMentionDismiss={() => {
+          setMentionResults(null);
+          setMentionOpen(false);
+        }}
         onMentionSelect={(nextChips) => {
           setChips(nextChips);
           setMentionResults(null);
+          setMentionOpen(false);
         }}
+        onSlashNavigate={(delta) => setSlashIndex((current) => moveMentionSelection(current, delta, slashItems.length))}
+        onSlashSelect={() => setSlashDismissed(true)}
         onSubmit={submitPrompt}
-        onChange={(_text, mention) => {
-          if (!mention) {
-            clearMentionTimer(mentionTimerRef);
-            setMentionResults(null);
-            setMentionOpen(false);
-            return;
-          }
-          setMentionOpen(true);
-          if (mention.query.length === 0) {
-            clearMentionTimer(mentionTimerRef);
-            setMentionResults({ files: [], symbols: [] });
-            return;
-          }
-          const seq = mentionRequestSeqRef.current + 1;
-          mentionRequestSeqRef.current = seq;
-          clearMentionTimer(mentionTimerRef);
-          mentionTimerRef.current = setTimeout(() => {
-            void http.contextSearch(mention.query).then((result) => {
-              if (mentionRequestSeqRef.current !== seq) return;
-              setMentionResults(result);
-              setMentionIndex(Math.min(mentionIndex, Math.max(0, flattenMentionResults(result).length - 1)));
-            }).catch(() => {
-              if (mentionRequestSeqRef.current === seq) setMentionResults(null);
-            });
-          }, 150);
+        onChange={handleInputChange}
+        onClear={() => setInputDraft("")}
+        onEscape={() => {
+          setSlashDismissed(true);
+          setMentionResults(null);
+          setMentionOpen(false);
         }}
       />
-      {busy ? <Text dimColor>(waiting for current run to finish...)</Text> : null}
-      {queuedPrompts.length > 0 ? <Text dimColor>queued: {queuedPrompts.length}</Text> : null}
-      <StatusBar workspace={workspace} modelId={modelId} mode={mode} sessionCostMicros={sessionCostMicros} connection={connectionStatus} />
+      <StatusBar
+        workspace={workspace}
+        modelId={modelId}
+        mode={mode}
+        sessionCostMicros={sessionCostMicros}
+        connection={connectionStatus}
+        queuedPrompts={queuedPrompts.length}
+        activeRunId={activeRunId}
+        width={layout.columns}
+        theme={theme}
+      />
+    </Box>
+  );
+}
+
+function TooSmallTerminal({ columns, rows, theme }: { columns: number; rows: number; theme: ReturnType<typeof createTuiTheme> }) {
+  return (
+    <Box flexDirection="column" paddingX={1} {...bg(theme.background)}>
+      <Text {...fg(theme.accentWarm)} bold>▌ Cursor Harness</Text>
+      <Text {...fg(theme.warning)}>terminal too small: {columns}x{rows}</Text>
+      <Text {...fg(theme.muted)}>minimum supported size is {MIN_COLUMNS}x{MIN_ROWS}</Text>
     </Box>
   );
 }

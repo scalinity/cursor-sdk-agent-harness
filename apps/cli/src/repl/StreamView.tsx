@@ -7,6 +7,7 @@ import { formatMicros } from "../output/table.js";
 import { renderDiff } from "../render/diff.js";
 import { renderMarkdown } from "../render/markdown.js";
 import { formatToolCallLine } from "./ToolCallLine.js";
+import { createTuiTheme, fg, hardWrapText, type TuiTheme } from "./theme.js";
 
 const MAX_BUFFER_ITEMS = 5000;
 const MAX_TEXT_LINES = 5000;
@@ -112,10 +113,40 @@ export function renderStreamItems(items: readonly StreamItem[]): string {
   return items.map(renderStreamItem).join("\n");
 }
 
-export function StreamView({ items }: { items: readonly StreamItem[] }) {
+export function renderViewportLines(text: string, width: number, height: number, scrollOffset: number): string[] {
+  const wrapped = hardWrapText(text, Math.max(10, width));
+  const viewportHeight = Math.max(1, height);
+  const maxOffset = Math.max(0, wrapped.length - viewportHeight);
+  const offset = Math.min(Math.max(0, scrollOffset), maxOffset);
+  const start = Math.max(0, wrapped.length - viewportHeight - offset);
+  return wrapped.slice(start, start + viewportHeight);
+}
+
+export interface StreamViewProps {
+  items: readonly StreamItem[];
+  height?: number;
+  width?: number;
+  scrollOffset?: number;
+  activeLabel?: string | undefined;
+  theme?: TuiTheme;
+}
+
+export function StreamView({ items, height, width = process.stdout.columns ?? 80, scrollOffset = 0, activeLabel, theme = createTuiTheme() }: StreamViewProps) {
+  const rendered = renderStreamItems(items);
+  if (height === undefined) {
+    return (
+      <Box flexDirection="column">
+        <Text>{rendered}</Text>
+      </Box>
+    );
+  }
+  const bodyHeight = activeLabel ? Math.max(1, height - 1) : height;
+  const lines = rendered.length > 0 ? renderViewportLines(rendered, Math.max(12, width), bodyHeight, scrollOffset) : [];
+  // Assuming normal terminal selection of the visible viewport is the supported copy path because Ink does not expose a text-selection API. Flag this if wrong.
   return (
-    <Box flexDirection="column">
-      <Text>{renderStreamItems(items)}</Text>
+    <Box flexDirection="column" height={height}>
+      {lines.length === 0 ? <Text {...fg(theme.muted)}>No messages yet. Start with a prompt, @file, or /command.</Text> : lines.map((line, index) => <Text key={`${index}:${line}`}>{line}</Text>)}
+      {activeLabel ? <Text {...fg(theme.accent)}>{activeLabel}</Text> : null}
     </Box>
   );
 }
