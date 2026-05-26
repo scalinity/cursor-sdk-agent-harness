@@ -3,6 +3,7 @@ import {
   PromptHistory,
   applyMentionSelection,
   findMentionTrigger,
+  isBackspaceInput,
   parseSlashCommand,
 } from "../../src/repl/InputBar.js";
 
@@ -33,6 +34,14 @@ describe("InputBar helpers", () => {
     expect(parseSlashCommand("/mode ask")).toEqual({ command: "mode", args: ["ask"] });
     expect(parseSlashCommand("/clear")).toEqual({ command: "clear", args: [] });
     expect(parseSlashCommand("/wat nope")).toEqual({ command: "unknown", args: ["wat", "nope"] });
+  });
+
+  it("recognizes backspace from Ink keys and raw terminal codes", () => {
+    expect(isBackspaceInput("", { backspace: true })).toBe(true);
+    expect(isBackspaceInput("", { delete: true })).toBe(true);
+    expect(isBackspaceInput("\u007f", {})).toBe(true);
+    expect(isBackspaceInput("\b", {})).toBe(true);
+    expect(isBackspaceInput("x", {})).toBe(false);
   });
 
   it("cycles prompt history only when input is empty", () => {

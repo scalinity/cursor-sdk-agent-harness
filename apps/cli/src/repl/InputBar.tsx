@@ -49,6 +49,10 @@ export function parseSlashCommand(input: string): { command: SlashCommandName; a
   return { command: "unknown", args: parts };
 }
 
+export function isBackspaceInput(input: string, key: { backspace?: boolean; delete?: boolean }): boolean {
+  return key.backspace === true || key.delete === true || input === "\u007f" || input === "\b";
+}
+
 export class PromptHistory {
   private index: number;
   constructor(private readonly entries: readonly string[]) {
@@ -185,7 +189,7 @@ export function InputBar({
       setDraft(history.next(value));
       return;
     }
-    if (key.backspace) {
+    if (isBackspaceInput(input, key)) {
       if (value.length > 0) setDraft(Array.from(value).slice(0, -1).join(""));
       return;
     }
