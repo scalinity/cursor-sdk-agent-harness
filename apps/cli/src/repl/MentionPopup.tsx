@@ -4,6 +4,8 @@ import type { ContextChip, ContextMentionKind, ContextSearchResult } from "@harn
 import type { MentionSelectionItem } from "../types.js";
 import { bg, border, createTuiTheme, fg, type TuiTheme } from "./theme.js";
 
+export const MAX_MENTION_ITEMS = 8;
+
 export function flattenMentionResults(results: ContextSearchResult | null): MentionSelectionItem[] {
   if (!results) return [];
   const files = results.files.map((file): MentionSelectionItem => ({
@@ -41,7 +43,7 @@ export interface MentionPopupProps {
 }
 
 export function MentionPopup({ results, selectedIndex, open = results !== null, theme = createTuiTheme() }: MentionPopupProps) {
-  const items = flattenMentionResults(results).slice(0, 8);
+  const items = flattenMentionResults(results).slice(0, MAX_MENTION_ITEMS);
   if (!open) return null;
   if (items.length === 0) {
     return (

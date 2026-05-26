@@ -8,18 +8,26 @@ export interface SlashPaletteItem {
   description: string;
 }
 
-export const SLASH_COMMANDS: readonly SlashPaletteItem[] = [
+export const SLASH_COMMANDS = [
   { command: "mode", args: "ask | agent", description: "switch execution mode" },
   { command: "model", args: "<id>", description: "switch model for this directory session" },
   { command: "history", description: "show recent runs inline" },
   { command: "clear", description: "clear scrollback" },
   { command: "exit", description: "quit harness" },
   { command: "agent", args: "<id>", description: "advanced: attach a specific backing agent" },
-];
+] as const satisfies readonly SlashPaletteItem[];
+
+export type KnownSlashCommandName = (typeof SLASH_COMMANDS)[number]["command"];
+
+export function isKnownSlashCommand(command: string): command is KnownSlashCommandName {
+  return SLASH_COMMANDS.some((item) => item.command === command);
+}
 
 export function filterSlashCommands(input: string): SlashPaletteItem[] {
   if (!input.startsWith("/")) return [];
-  const query = input.slice(1).trimStart().split(/\s+/, 1)[0]?.toLowerCase() ?? "";
+  const body = input.slice(1);
+  if (/\s/.test(body)) return [];
+  const query = body.toLowerCase();
   if (!query) return [...SLASH_COMMANDS];
   return SLASH_COMMANDS.filter((item) => item.command.startsWith(query));
 }

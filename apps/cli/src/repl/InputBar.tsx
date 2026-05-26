@@ -4,7 +4,7 @@ import type { ContextChip } from "@harness/shared";
 import type { MentionSelectionItem } from "../types.js";
 import { bg, border, fg, hardWrapText, type TuiTheme } from "./theme.js";
 import { mentionItemToChip } from "./MentionPopup.js";
-import type { SlashPaletteItem } from "./SlashPalette.js";
+import { isKnownSlashCommand, type KnownSlashCommandName, type SlashPaletteItem } from "./SlashPalette.js";
 
 export interface MentionTrigger {
   start: number;
@@ -39,14 +39,13 @@ export function applyMentionSelection(input: ApplyMentionInput): { text: string;
   };
 }
 
-export type SlashCommandName = "mode" | "agent" | "model" | "clear" | "history" | "exit" | "unknown";
+export type SlashCommandName = KnownSlashCommandName | "unknown";
 
 export function parseSlashCommand(input: string): { command: SlashCommandName; args: string[] } | null {
   if (!input.startsWith("/")) return null;
   const parts = input.slice(1).trim().split(/\s+/).filter(Boolean);
   const head = parts[0] ?? "";
-  const known = new Set(["mode", "agent", "model", "clear", "history", "exit"]);
-  if (known.has(head)) return { command: head as SlashCommandName, args: parts.slice(1) };
+  if (isKnownSlashCommand(head)) return { command: head, args: parts.slice(1) };
   return { command: "unknown", args: parts };
 }
 
@@ -78,6 +77,7 @@ export interface InputBarProps {
   slashItems?: readonly SlashPaletteItem[];
   selectedSlashIndex?: number;
   width?: number;
+  maxVisibleLines?: number;
   placeholder?: string;
   theme: TuiTheme;
   onMentionNavigate?: (delta: number) => void;
@@ -100,6 +100,7 @@ export function InputBar({
   slashItems = [],
   selectedSlashIndex = 0,
   width = 80,
+  maxVisibleLines = 4,
   placeholder = "ask, edit, search, or type /",
   theme,
   onMentionNavigate,
@@ -203,17 +204,20 @@ export function InputBar({
     if (input.length > 0) setDraft(value + input.replace(/\r\n?/g, "\n"));
   });
 
-  const visibleLines = value.length > 0 ? value.split("\n").flatMap((line) => hardWrapText(line, Math.max(12, width - 8))) : [""];
+  const allVisibleLines = value.length > 0 ? value.split("\n").flatMap((line) => hardWrapText(line, Math.max(12, width - 8))) : [""];
+  const hiddenLineCount = Math.max(0, allVisibleLines.length - maxVisibleLines);
+  const visibleLines = allVisibleLines.slice(hiddenLineCount);
   const lastLineIndex = visibleLines.length - 1;
 
   return (
     <Box flexDirection="column" borderStyle="round" {...border(theme.borderFocus)} paddingX={1} {...bg(theme.panel)}>
       {visibleLines.map((line, index) => (
-        <Box key={`${index}:${line}`}>
+        <Box key={`${hiddenLineCount + index}:${line}`}>
           {index === 0 ? chips.map((chip) => (
             <Text key={chip.id} {...fg(theme.accent)}>[@{chip.mention.displayLabel}] </Text>
           )) : null}
           <Text {...fg(theme.accent)}>{index === 0 ? "❯ " : "  "}</Text>
+          {hiddenLineCount > 0 && index === 0 ? <Text {...fg(theme.muted)}>… </Text> : null}
           {value.length === 0 && index === 0 ? <Text {...fg(theme.muted)}>{placeholder}</Text> : <Text {...fg(theme.text)}>{line}</Text>}
           {index === lastLineIndex ? <Text {...fg(theme.accent)}>█</Text> : null}
         </Box>

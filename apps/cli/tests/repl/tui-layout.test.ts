@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { computeTuiLayout } from "../../src/repl/layout.js";
+import { computeTuiLayout, countInputLines, MAX_INPUT_VISIBLE_LINES } from "../../src/repl/layout.js";
 import { filterSlashCommands } from "../../src/repl/SlashPalette.js";
-import { renderViewportLines } from "../../src/repl/StreamView.js";
+import { clampStreamScrollOffset, renderViewportLines } from "../../src/repl/StreamView.js";
 import { bg, border, createTuiTheme, fg } from "../../src/repl/theme.js";
 
 describe("fullscreen TUI helpers", () => {
@@ -12,13 +12,21 @@ describe("fullscreen TUI helpers", () => {
 
   it("filters slash commands by typed prefix", () => {
     expect(filterSlashCommands("/mo").map((item) => item.command)).toEqual(["mode", "model"]);
+    expect(filterSlashCommands("/mode ask")).toEqual([]);
     expect(filterSlashCommands("hello")).toEqual([]);
+  });
+
+  it("reserves bounded input height from wrapped visual rows", () => {
+    const lineCount = countInputLines("x".repeat(500), 60);
+    expect(lineCount).toBeGreaterThan(MAX_INPUT_VISIBLE_LINES);
+    expect(computeTuiLayout({ columns: 60, rows: 24 }, lineCount, 0).inputHeight).toBe(MAX_INPUT_VISIBLE_LINES + 2);
   });
 
   it("wraps and scrolls viewport text deterministically", () => {
     const lines = renderViewportLines("alpha beta gamma delta\nlast", 10, 2, 0);
     expect(lines).toEqual(["delta", "last"]);
     expect(renderViewportLines("one\ntwo\nthree", 20, 2, 1)).toEqual(["one", "two"]);
+    expect(clampStreamScrollOffset([{ type: "assistant", text: "one\ntwo\nthree" }], 20, 2, 99)).toBe(1);
   });
 
   it("omits Ink color props in NO_COLOR mode", () => {

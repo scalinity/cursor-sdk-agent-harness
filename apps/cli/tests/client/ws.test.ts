@@ -23,6 +23,25 @@ const finalFrame = {
   },
 } satisfies ServerFrame;
 
+const statusFinishedFrame = {
+  id: "frame-status",
+  type: "sdk.status",
+  sent_at: "2026-05-25T18:00:00.500Z",
+  event: {
+    event_id: "00000000-0000-4000-8000-000000000010",
+    schema_version: 1,
+    seq: 1,
+    agent_id: "agent-1",
+    run_id: "run-1",
+    occurred_at: "2026-05-25T18:00:00.500Z",
+    received_at: "2026-05-25T18:00:00.500Z",
+    sdk_type: "status",
+    kind: "status.changed",
+    status: "FINISHED",
+    payload: { status: "FINISHED" },
+  },
+} satisfies ServerFrame;
+
 async function createWsServer() {
   const server = new WebSocketServer({ port: 0 });
   await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -53,6 +72,23 @@ describe("HarnessWsClient contracts", () => {
     await close();
 
     expect(origin).toBe("http://cli.test");
+  });
+
+  it("keeps the subscription open for sdk.status until the durable final frame arrives", async () => {
+    const { server, serverUrl, close } = await createWsServer();
+    const received: string[] = [];
+    server.once("connection", (socket) => {
+      socket.once("message", () => {
+        socket.send(JSON.stringify(statusFinishedFrame));
+        setTimeout(() => socket.send(JSON.stringify(finalFrame)), 5);
+      });
+    });
+
+    const client = new HarnessWsClient({ serverUrl, csrfToken: "csrf-token" });
+    await client.subscribeToRun("run-1", (frame) => received.push(frame.type));
+    await close();
+
+    expect(received).toEqual(["sdk.status", "run.final_result"]);
   });
 
   it("rejects when the socket closes before a terminal frame", async () => {

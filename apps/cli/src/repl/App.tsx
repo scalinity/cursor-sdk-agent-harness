@@ -7,14 +7,15 @@ import { renderTable, shortId } from "../output/table.js";
 import type { CliAgentSummary, CliHttpPort, CliMode, CliStreamPort } from "../types.js";
 import { HeaderBar } from "./HeaderBar.js";
 import { InputBar, parseSlashCommand, PromptHistory, type MentionTrigger } from "./InputBar.js";
-import { computeTuiLayout, countInputLines } from "./layout.js";
-import { MentionPopup, flattenMentionResults, moveMentionSelection } from "./MentionPopup.js";
+import { computeTuiLayout, countInputLines, MAX_INPUT_VISIBLE_LINES } from "./layout.js";
+import { MentionPopup, flattenMentionResults, MAX_MENTION_ITEMS, moveMentionSelection } from "./MentionPopup.js";
 import { filterSlashCommands, SlashPalette } from "./SlashPalette.js";
-import { createStreamBuffer, ingestStreamFrame, StreamView, type StreamBuffer } from "./StreamView.js";
+import { clampStreamScrollOffset, createStreamBuffer, ingestStreamFrame, StreamView, type StreamBuffer } from "./StreamView.js";
 import { StatusBar } from "./StatusBar.js";
 import { createTuiTheme, bg, border, fg, MIN_COLUMNS, MIN_ROWS } from "./theme.js";
 import { useSpinnerFrame } from "./useSpinnerFrame.js";
 import { useTerminalSize } from "./useTerminalSize.js";
+import { useReplCleanup, type ReplCleanupController } from "./useReplCleanup.js";
 
 export interface ReplAppProps {
   agent: CliAgentSummary;
@@ -24,6 +25,15 @@ export interface ReplAppProps {
   historyEntries: string[];
   http: CliHttpPort;
   stream: CliStreamPort;
+}
+
+type StreamConnectionStatus = "ready" | "connecting" | "connected" | "reconnecting" | "disconnected";
+
+interface PromptRequest {
+  text: string;
+  agentId: string;
+  mode: CliMode;
+  mentions: Array<ContextChip["mention"]>;
 }
 
 export function App({ agent, mode: initialMode, modelId: initialModelId, workspace, historyEntries, http, stream }: ReplAppProps) {
@@ -44,22 +54,43 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
   const [scrollOffset, setScrollOffset] = useState(0);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [isStartingRun, setIsStartingRun] = useState(false);
-  const [queuedPrompts, setQueuedPrompts] = useState<string[]>([]);
+  const [queuedPrompts, setQueuedPrompts] = useState<PromptRequest[]>([]);
+  const [streamStatus, setStreamStatus] = useState<StreamConnectionStatus>("ready");
   const [sessionCostMicros, setSessionCostMicros] = useState(0);
   const [pendingApproval, setPendingApproval] = useState<{ runId: string; requestId: string } | null>(null);
   const [history] = useState(() => new PromptHistory(historyEntries));
-  const queueRef = useRef<string[]>([]);
+  const queueRef = useRef<PromptRequest[]>([]);
   const mentionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mentionRequestSeqRef = useRef(0);
-  const mentionItems = flattenMentionResults(mentionResults);
+  const allMentionItems = flattenMentionResults(mentionResults);
+  const mentionItems = mentionOpen ? allMentionItems.slice(0, MAX_MENTION_ITEMS) : [];
   const slashItems = !mentionOpen && inputDraft.startsWith("/") && !slashDismissed ? filterSlashCommands(inputDraft) : [];
   const slashOpen = slashItems.length > 0;
   const overlayLineCount = mentionOpen ? Math.min(9, Math.max(2, mentionItems.length + 1)) : slashOpen ? Math.min(7, slashItems.length + 1) : 0;
-  const layout = computeTuiLayout(size, countInputLines(inputDraft), overlayLineCount);
+  const layout = computeTuiLayout(size, countInputLines(inputDraft, size.columns), overlayLineCount);
+  const streamHeight = Math.max(1, layout.scrollHeight - 2);
+  const streamWidth = Math.max(12, layout.columns - 4);
   const busy = activeRunId !== null || isStartingRun;
   const spinner = useSpinnerFrame(busy);
-  const connectionStatus = activeRunId !== null ? "connected" : isStartingRun ? "connecting" : "ready";
   const activeLabel = busy ? `${spinner} ${isStartingRun ? "starting run" : "agent working"}` : undefined;
+  const cleanupController = useReplCleanup({ stream, activeRunId, isStartingRun });
+
+  const appendAssistant = (text: string) => setBuffer((current) => ({ items: [...current.items, { type: "assistant", text }] }));
+  const appendError = (message: string) => setBuffer((current) => ({ items: [...current.items, { type: "error", message }] }));
+  const promptSnapshot = (text: string): PromptRequest => ({
+    text,
+    agentId: activeAgent.id,
+    mode,
+    mentions: chips.map((chip) => chip.mention),
+  });
+  const clampOffset = (offset: number) => clampStreamScrollOffset(buffer.items, streamWidth, streamHeight, offset, activeLabel);
+  const clearMentionState = () => {
+    mentionRequestSeqRef.current += 1;
+    clearMentionTimer(mentionTimerRef);
+    setMentionResults(null);
+    setMentionOpen(false);
+    setMentionIndex(0);
+  };
 
   useInput((input, key) => {
     if (key.ctrl && input === "l") {
@@ -68,23 +99,30 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
       return;
     }
     if (key.pageUp) {
-      setScrollOffset((current) => current + Math.max(3, Math.floor(layout.scrollHeight * 0.8)));
+      const page = Math.max(3, Math.floor(streamHeight * 0.8));
+      setScrollOffset((current) => clampOffset(current + page));
       return;
     }
     if (key.pageDown) {
-      setScrollOffset((current) => Math.max(0, current - Math.max(3, Math.floor(layout.scrollHeight * 0.8))));
+      const page = Math.max(3, Math.floor(streamHeight * 0.8));
+      setScrollOffset((current) => Math.max(0, clampOffset(current) - page));
       return;
     }
     if (key.ctrl && input === "c") {
       if (activeRunId) {
-        stream.cancelRun?.(activeRunId);
-        setBuffer((current) => ({ items: [...current.items, { type: "assistant", text: "\n[cancel requested]\n" }] }));
+        const sent = stream.cancelRun?.(activeRunId) ?? false;
+        appendAssistant(sent ? "\n[cancel requested]\n" : "\n[cancel unavailable: stream is not connected]\n");
+        return;
+      }
+      if (isStartingRun) {
+        cleanupController.cancelPendingStartRef.current = true;
+        appendAssistant("\n[cancel requested once the run starts]\n");
         return;
       }
       if (inputDraft.length > 0) return;
-      cleanupAndExit(activeRunId, stream, exit);
+      cleanupAndExit(cleanupController, exit);
     }
-    if (key.ctrl && input === "d") cleanupAndExit(activeRunId, stream, exit);
+    if (key.ctrl && input === "d") cleanupAndExit(cleanupController, exit);
     if (pendingApproval && ["y", "n", "a"].includes(input)) {
       stream.sendApproval?.(pendingApproval.runId, pendingApproval.requestId, input === "n" ? "deny" : "approve", input === "a" ? "always" : undefined);
       setPendingApproval(null);
@@ -102,46 +140,48 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         mode,
         modelId,
         workspace,
-        stream,
-        activeRunId,
+        cleanup: cleanupController,
         exit,
         setActiveAgent,
         setMode,
         setModelId,
         setBuffer,
       }).catch((error: unknown) => {
-        setBuffer((current) => ({ items: [...current.items, { type: "error", message: error instanceof Error ? error.message : String(error) }] }));
+        appendError(error instanceof Error ? error.message : String(error));
       });
       return;
     }
+    const request = promptSnapshot(text);
     if (busy) {
-      queueRef.current = [...queueRef.current, text];
+      queueRef.current = [...queueRef.current, request];
       setQueuedPrompts(queueRef.current);
-      setBuffer((current) => ({ items: [...current.items, { type: "assistant", text: `(queued) ❯ ${text}` }] }));
+      appendAssistant(`(queued) ❯ ${text}`);
       return;
     }
-    startPrompt(text);
+    startPrompt(request);
   };
 
-  const startPrompt = (text: string) => {
+  const startPrompt = (request: PromptRequest) => {
+    if (cleanupController.disposedRef.current) return;
     setIsStartingRun(true);
+    setStreamStatus("connecting");
     setScrollOffset(0);
-    appendPromptHistory(text).catch((error: unknown) => {
-      setBuffer((current) => ({
-        items: [...current.items, { type: "error", message: `Prompt history was not saved: ${error instanceof Error ? error.message : String(error)}` }],
-      }));
+    appendPromptHistory(request.text).catch((error: unknown) => {
+      appendError(`Prompt history was not saved: ${error instanceof Error ? error.message : String(error)}`);
     });
-    setBuffer((current) => ({ items: [...current.items, { type: "assistant", text: `\n❯ ${text}\n` }] }));
-    void http.createRun({ agentId: activeAgent.id, prompt: text, executionMode: mode, mentions: chips.map((chip) => chip.mention) }).then((run) => {
+    appendAssistant(`\n❯ ${request.text}\n`);
+    void http.createRun({ agentId: request.agentId, prompt: request.text, executionMode: request.mode, mentions: request.mentions }).then((run) => {
+      if (cleanupController.disposedRef.current) return;
       setIsStartingRun(false);
       setActiveRunId(run.runId);
-      return stream.subscribeToRun(run.runId, (frame: ServerFrame) => {
+      setStreamStatus("connected");
+      const subscription = stream.subscribeToRun(run.runId, (frame: ServerFrame) => {
         setBuffer((current) => ingestStreamFrame(current, frame));
-        setScrollOffset(0);
         if (frame.type === "sdk.request") setPendingApproval({ runId: run.runId, requestId: frame.event.payload.request_id });
         if (isTerminalFrame(frame)) {
           setActiveRunId(null);
           setPendingApproval(null);
+          setStreamStatus("ready");
           if (frame.type === "run.final_result") {
             setSessionCostMicros((current) => current + (frame.event.payload.usage.cost_usd_micros ?? 0));
           }
@@ -153,27 +193,35 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
           }
         }
       });
+      if (cleanupController.cancelPendingStartRef.current) {
+        const sent = stream.cancelRun?.(run.runId) ?? false;
+        cleanupController.cancelPendingStartRef.current = false;
+        appendAssistant(sent ? "\n[cancel requested]\n" : "\n[cancel unavailable: stream is not connected]\n");
+      }
+      return subscription;
     }).catch((error: unknown) => {
+      if (cleanupController.disposedRef.current) return;
       setIsStartingRun(false);
       setActiveRunId(null);
-      setBuffer((current) => ({ items: [...current.items, { type: "error", message: error instanceof Error ? error.message : String(error) }] }));
+      setStreamStatus("disconnected");
+      appendError(error instanceof Error ? error.message : String(error));
     });
   };
 
   const handleInputChange = (text: string, mention: MentionTrigger | null) => {
     setInputDraft(text);
     setSlashDismissed(false);
-    if (!text.startsWith("/")) setSlashIndex(0);
+    setSlashIndex((current) => clampSelectionIndex(current, filterSlashCommands(text).length));
     if (!mention) {
-      clearMentionTimer(mentionTimerRef);
-      setMentionResults(null);
-      setMentionOpen(false);
+      clearMentionState();
       return;
     }
     setMentionOpen(true);
     if (mention.query.length === 0) {
+      mentionRequestSeqRef.current += 1;
       clearMentionTimer(mentionTimerRef);
       setMentionResults({ files: [], symbols: [] });
+      setMentionIndex(0);
       return;
     }
     const seq = mentionRequestSeqRef.current + 1;
@@ -182,10 +230,13 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
     mentionTimerRef.current = setTimeout(() => {
       void http.contextSearch(mention.query).then((result) => {
         if (mentionRequestSeqRef.current !== seq) return;
+        const visibleCount = Math.min(MAX_MENTION_ITEMS, flattenMentionResults(result).length);
         setMentionResults(result);
-        setMentionIndex(Math.min(mentionIndex, Math.max(0, flattenMentionResults(result).length - 1)));
-      }).catch(() => {
-        if (mentionRequestSeqRef.current === seq) setMentionResults(null);
+        setMentionIndex((current) => clampSelectionIndex(current, visibleCount));
+      }).catch((error: unknown) => {
+        if (mentionRequestSeqRef.current !== seq) return;
+        setMentionResults(null);
+        appendError(`Context search failed for @${mention.query}: ${error instanceof Error ? error.message : String(error)}`);
       });
     }, 150);
   };
@@ -201,14 +252,14 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         workspace={workspace}
         mode={mode}
         modelId={modelId}
-        connection={connectionStatus}
+        connection={streamStatus}
         activeRunId={activeRunId}
         queuedPrompts={queuedPrompts.length}
         spinner={spinner}
         theme={theme}
       />
       <Box flexDirection="column" height={layout.scrollHeight} borderStyle="round" {...border(theme.border)} paddingX={1} {...bg(theme.panel)}>
-        <StreamView items={buffer.items} height={Math.max(1, layout.scrollHeight - 2)} width={Math.max(12, layout.columns - 4)} scrollOffset={scrollOffset} activeLabel={activeLabel} theme={theme} />
+        <StreamView items={buffer.items} height={streamHeight} width={streamWidth} scrollOffset={scrollOffset} activeLabel={activeLabel} theme={theme} />
       </Box>
       {mentionOpen ? <MentionPopup results={mentionResults} selectedIndex={mentionIndex} open={mentionOpen} theme={theme} /> : null}
       {!mentionOpen && slashOpen ? <SlashPalette items={slashItems} selectedIndex={slashIndex} theme={theme} /> : null}
@@ -220,16 +271,13 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         slashItems={slashOpen ? slashItems : []}
         selectedSlashIndex={slashIndex}
         width={layout.columns}
+        maxVisibleLines={Math.max(1, Math.min(MAX_INPUT_VISIBLE_LINES, layout.inputHeight - 2))}
         theme={theme}
         onMentionNavigate={(delta) => setMentionIndex((current) => moveMentionSelection(current, delta, mentionItems.length))}
-        onMentionDismiss={() => {
-          setMentionResults(null);
-          setMentionOpen(false);
-        }}
+        onMentionDismiss={clearMentionState}
         onMentionSelect={(nextChips) => {
           setChips(nextChips);
-          setMentionResults(null);
-          setMentionOpen(false);
+          clearMentionState();
         }}
         onSlashNavigate={(delta) => setSlashIndex((current) => moveMentionSelection(current, delta, slashItems.length))}
         onSlashSelect={() => setSlashDismissed(true)}
@@ -238,8 +286,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         onClear={() => setInputDraft("")}
         onEscape={() => {
           setSlashDismissed(true);
-          setMentionResults(null);
-          setMentionOpen(false);
+          clearMentionState();
         }}
       />
       <StatusBar
@@ -247,7 +294,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         modelId={modelId}
         mode={mode}
         sessionCostMicros={sessionCostMicros}
-        connection={connectionStatus}
+        connection={streamStatus}
         queuedPrompts={queuedPrompts.length}
         activeRunId={activeRunId}
         width={layout.columns}
@@ -274,8 +321,7 @@ interface SlashCommandContext {
   mode: CliMode;
   modelId: string;
   workspace: string;
-  stream: CliStreamPort;
-  activeRunId: string | null;
+  cleanup: ReplCleanupController;
   exit: () => void;
   setActiveAgent: React.Dispatch<React.SetStateAction<CliAgentSummary>>;
   setMode: React.Dispatch<React.SetStateAction<CliMode>>;
@@ -301,7 +347,7 @@ async function handleSlashCommand(ctx: SlashCommandContext): Promise<void> {
       ctx.setBuffer(createStreamBuffer());
       return;
     case "exit":
-      cleanupAndExit(ctx.activeRunId, ctx.stream, ctx.exit);
+      cleanupAndExit(ctx.cleanup, ctx.exit);
       return;
     case "history":
       await showInlineHistory(ctx.http, ctx.activeAgent.id, appendMessage);
@@ -323,10 +369,14 @@ function clearMentionTimer(ref: React.MutableRefObject<ReturnType<typeof setTime
   ref.current = null;
 }
 
-function cleanupAndExit(activeRunId: string | null, stream: CliStreamPort, exit: () => void): void {
-  if (activeRunId) stream.cancelRun?.(activeRunId);
-  stream.close?.();
+function cleanupAndExit(cleanup: ReplCleanupController, exit: () => void): void {
+  cleanup.cleanupNow();
   exit();
+}
+
+function clampSelectionIndex(current: number, total: number): number {
+  if (total <= 0) return 0;
+  return Math.min(Math.max(0, current), total - 1);
 }
 
 async function showInlineHistory(

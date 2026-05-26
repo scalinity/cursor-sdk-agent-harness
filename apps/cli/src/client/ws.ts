@@ -111,14 +111,15 @@ export class HarnessWsClient implements CliStreamPort {
     });
   }
 
-  cancelRun(runId: string): void {
-    this.send({
+  cancelRun(runId: string): boolean {
+    const frame: ClientFrame = {
       id: frameId("cancel"),
       type: "cancel_run",
       sent_at: new Date().toISOString(),
       run_id: runId,
       reason: "user_cancelled",
-    });
+    };
+    return this.send(frame);
   }
 
   sendApproval(runId: string, requestId: string, decision: "approve" | "deny", reason?: string): void {
@@ -140,10 +141,21 @@ export class HarnessWsClient implements CliStreamPort {
     if (socket && socket.readyState === WebSocket.OPEN) socket.close(1000, "done");
   }
 
-  private send(frame: ClientFrame): void {
+  private send(frame: ClientFrame): boolean {
     const socket = this.socket;
-    if (!socket || socket.readyState !== WebSocket.OPEN) return;
-    socket.send(JSON.stringify(frame));
+    if (!socket) return false;
+    const serialized = JSON.stringify(frame);
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(serialized);
+      return true;
+    }
+    if (socket.readyState === WebSocket.CONNECTING) {
+      socket.once("open", () => {
+        if (this.socket === socket && socket.readyState === WebSocket.OPEN) socket.send(serialized);
+      });
+      return true;
+    }
+    return false;
   }
 }
 
@@ -160,6 +172,5 @@ function frameId(prefix: string): string {
 }
 
 export function isTerminalFrame(frame: ServerFrame): boolean {
-  if (frame.type === "run.final_result" || frame.type === "run.interrupted") return true;
-  return frame.type === "sdk.status" && ["FINISHED", "ERROR", "CANCELLED", "EXPIRED"].includes(frame.event.payload.status);
+  return frame.type === "run.final_result" || frame.type === "run.interrupted";
 }

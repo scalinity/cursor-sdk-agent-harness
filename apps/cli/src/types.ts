@@ -47,7 +47,7 @@ export interface CliHttpPort {
 
 export interface CliStreamPort {
   subscribeToRun(runId: string, onFrame: (frame: ServerFrame) => void): Promise<void>;
-  cancelRun?(runId: string): void;
+  cancelRun?(runId: string): boolean;
   sendApproval?(runId: string, requestId: string, decision: "approve" | "deny", reason?: string): void;
   close?(): void;
 }

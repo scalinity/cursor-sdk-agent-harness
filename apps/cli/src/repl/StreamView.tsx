@@ -1,4 +1,4 @@
-import React from "react";
+import React, { memo, useMemo } from "react";
 import { Box, Text } from "ink";
 import chalk from "chalk";
 import type { ServerFrame } from "@harness/shared";
@@ -122,6 +122,14 @@ export function renderViewportLines(text: string, width: number, height: number,
   return wrapped.slice(start, start + viewportHeight);
 }
 
+export function clampStreamScrollOffset(items: readonly StreamItem[], width: number, height: number, scrollOffset: number, activeLabel?: string | undefined): number {
+  const rendered = renderStreamItems(items);
+  const bodyHeight = activeLabel ? Math.max(1, height - 1) : height;
+  const wrappedLineCount = rendered.length > 0 ? hardWrapText(rendered, Math.max(12, width)).length : 0;
+  const maxOffset = Math.max(0, wrappedLineCount - Math.max(1, bodyHeight));
+  return Math.min(Math.max(0, scrollOffset), maxOffset);
+}
+
 export interface StreamViewProps {
   items: readonly StreamItem[];
   height?: number;
@@ -131,8 +139,8 @@ export interface StreamViewProps {
   theme?: TuiTheme;
 }
 
-export function StreamView({ items, height, width = process.stdout.columns ?? 80, scrollOffset = 0, activeLabel, theme = createTuiTheme() }: StreamViewProps) {
-  const rendered = renderStreamItems(items);
+export const StreamView = memo(function StreamView({ items, height, width = process.stdout.columns ?? 80, scrollOffset = 0, activeLabel, theme = createTuiTheme() }: StreamViewProps) {
+  const rendered = useMemo(() => renderStreamItems(items), [items]);
   if (height === undefined) {
     return (
       <Box flexDirection="column">
@@ -141,7 +149,7 @@ export function StreamView({ items, height, width = process.stdout.columns ?? 80
     );
   }
   const bodyHeight = activeLabel ? Math.max(1, height - 1) : height;
-  const lines = rendered.length > 0 ? renderViewportLines(rendered, Math.max(12, width), bodyHeight, scrollOffset) : [];
+  const lines = useMemo(() => rendered.length > 0 ? renderViewportLines(rendered, Math.max(12, width), bodyHeight, scrollOffset) : [], [bodyHeight, rendered, scrollOffset, width]);
   // Assuming normal terminal selection of the visible viewport is the supported copy path because Ink does not expose a text-selection API. Flag this if wrong.
   return (
     <Box flexDirection="column" height={height}>
@@ -149,7 +157,7 @@ export function StreamView({ items, height, width = process.stdout.columns ?? 80
       {activeLabel ? <Text {...fg(theme.accent)}>{activeLabel}</Text> : null}
     </Box>
   );
-}
+});
 
 function renderStreamItem(item: StreamItem): string {
   switch (item.type) {

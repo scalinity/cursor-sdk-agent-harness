@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   flattenMentionResults,
+  MAX_MENTION_ITEMS,
   mentionItemToChip,
   moveMentionSelection,
 } from "../../src/repl/MentionPopup.js";
@@ -27,6 +28,11 @@ describe("MentionPopup helpers", () => {
   it("wraps keyboard selection", () => {
     expect(moveMentionSelection(0, -1, 3)).toBe(2);
     expect(moveMentionSelection(2, 1, 3)).toBe(0);
+  });
+
+  it("exports the visible mention limit used by the REPL", () => {
+    expect(MAX_MENTION_ITEMS).toBe(8);
+    expect(moveMentionSelection(7, 1, MAX_MENTION_ITEMS)).toBe(0);
   });
 
   it("converts selected items into context chips", () => {

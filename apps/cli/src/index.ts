@@ -39,6 +39,9 @@ async function createDeps(options: GlobalOptions, stream = false): Promise<Comma
 }
 
 async function runChat(options: GlobalOptions & { agent?: string; mode?: CliMode; model?: string; workspace?: string }): Promise<void> {
+  if (input.isTTY !== true || output.isTTY !== true) {
+    throw new Error("Interactive chat requires a TTY. Pipe prompts to `harness run` or run `harness` with no args on a terminal.");
+  }
   const http = createHttp(options);
   await http.ensureCsrfToken();
   const prefs = await readPreferences();
@@ -65,7 +68,7 @@ async function runChat(options: GlobalOptions & { agent?: string; mode?: CliMode
     historyEntries,
     http,
     stream,
-  }));
+  }), { onExit: () => stream.close() });
 }
 
 async function readStdin(): Promise<string> {
@@ -133,7 +136,7 @@ program.command("history").option("--agent <id>", "Filter by agent").option("--l
 });
 
 if (process.argv.length <= 2) {
-  if (input.isTTY === false) {
+  if (input.isTTY !== true) {
     const prompt = await readStdin();
     await runCommand(async () => {
       const deps = await createDeps(program.opts<GlobalOptions>(), true);

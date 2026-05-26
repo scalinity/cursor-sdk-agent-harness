@@ -1,4 +1,6 @@
-import { MIN_COLUMNS, MIN_ROWS } from "./theme.js";
+import { hardWrapText, MIN_COLUMNS, MIN_ROWS } from "./theme.js";
+
+export const MAX_INPUT_VISIBLE_LINES = 4;
 
 export interface TerminalSize {
   columns: number;
@@ -26,7 +28,7 @@ export function normalizeTerminalSize(columns: number | undefined, rows: number 
 export function computeTuiLayout(size: TerminalSize, inputLineCount: number, overlayLineCount: number): TuiLayout {
   const headerHeight = 2;
   const footerHeight = 1;
-  const inputHeight = Math.min(6, Math.max(3, inputLineCount + 2));
+  const inputHeight = Math.min(MAX_INPUT_VISIBLE_LINES + 2, Math.max(3, inputLineCount + 2));
   const overlayHeight = Math.min(9, Math.max(0, overlayLineCount));
   const canRender = size.columns >= MIN_COLUMNS && size.rows >= MIN_ROWS;
   const scrollHeight = Math.max(1, size.rows - headerHeight - footerHeight - inputHeight - overlayHeight);
@@ -42,6 +44,7 @@ export function computeTuiLayout(size: TerminalSize, inputLineCount: number, ove
   };
 }
 
-export function countInputLines(input: string): number {
-  return Math.max(1, input.split("\n").length);
+export function countInputLines(input: string, width = 80): number {
+  if (input.length === 0) return 1;
+  return hardWrapText(input, Math.max(12, width - 8)).length;
 }
