@@ -1,7 +1,7 @@
 import type { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
 import { describe, expect, it } from "vitest";
-import { buildWsUrl, CliStreamError, HarnessWsClient } from "../../src/client/ws.js";
+import { buildWsUrl, CliStreamError, HarnessWsClient, isRunStatusTerminalFrame, isTerminalFrame } from "../../src/client/ws.js";
 import type { ServerFrame } from "@harness/shared";
 
 const finalFrame = {
@@ -89,6 +89,29 @@ describe("HarnessWsClient contracts", () => {
     await close();
 
     expect(received).toEqual(["sdk.status", "run.final_result"]);
+  });
+
+  it("distinguishes durable terminal frames from logical terminal status frames", () => {
+    expect(isTerminalFrame(statusFinishedFrame)).toBe(false);
+    expect(isRunStatusTerminalFrame(statusFinishedFrame)).toBe(true);
+    expect(isTerminalFrame(finalFrame)).toBe(true);
+    expect(isRunStatusTerminalFrame(finalFrame)).toBe(false);
+  });
+
+  it("resolves after a terminal sdk.status when no durable final frame arrives", async () => {
+    const { server, serverUrl, close } = await createWsServer();
+    const received: string[] = [];
+    server.once("connection", (socket) => {
+      socket.once("message", () => {
+        socket.send(JSON.stringify(statusFinishedFrame));
+      });
+    });
+
+    const client = new HarnessWsClient({ serverUrl, csrfToken: "csrf-token", terminalStatusGraceMs: 5 });
+    await client.subscribeToRun("run-1", (frame) => received.push(frame.type));
+    await close();
+
+    expect(received).toEqual(["sdk.status"]);
   });
 
   it("rejects when the socket closes before a terminal frame", async () => {

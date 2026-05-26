@@ -7,6 +7,7 @@ export interface HarnessWsClientOptions {
   serverUrl: string;
   csrfToken: string;
   origin?: string;
+  terminalStatusGraceMs?: number;
 }
 
 export class CliStreamError extends Error {
@@ -23,10 +24,12 @@ export class HarnessWsClient implements CliStreamPort {
   private socket: WebSocket | null = null;
   private readonly url: string;
   private readonly origin: string;
+  private readonly terminalStatusGraceMs: number;
 
   constructor(options: HarnessWsClientOptions) {
     this.url = buildWsUrl(options.serverUrl, options.csrfToken);
     this.origin = options.origin ?? "http://127.0.0.1:5173";
+    this.terminalStatusGraceMs = options.terminalStatusGraceMs ?? 750;
   }
 
   async connect(onFrame: (frame: ServerFrame) => void): Promise<void> {
@@ -67,11 +70,26 @@ export class HarnessWsClient implements CliStreamPort {
 
   async subscribeToRun(runId: string, onFrame: (frame: ServerFrame) => void): Promise<void> {
     let terminalFrameSeen = false;
+    let terminalStatusSeen = false;
+    let terminalStatusFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearTerminalStatusFallback = () => {
+      if (terminalStatusFallbackTimer) clearTimeout(terminalStatusFallbackTimer);
+      terminalStatusFallbackTimer = null;
+    };
     await this.connect((frame) => {
       onFrame(frame);
       if (isTerminalFrame(frame)) {
         terminalFrameSeen = true;
+        clearTerminalStatusFallback();
         this.close();
+        return;
+      }
+      if (isRunStatusTerminalFrame(frame) && !terminalStatusSeen) {
+        terminalStatusSeen = true;
+        terminalStatusFallbackTimer = setTimeout(() => {
+          terminalFrameSeen = true;
+          this.close();
+        }, this.terminalStatusGraceMs);
       }
     });
     this.send({
@@ -89,13 +107,14 @@ export class HarnessWsClient implements CliStreamPort {
         return;
       }
       const cleanup = () => {
+        clearTerminalStatusFallback();
         socket.off("close", onClose);
         socket.off("error", onError);
       };
       const onClose = (code: number, reason: Buffer) => {
         cleanup();
         this.socket = null;
-        if (terminalFrameSeen) {
+        if (terminalFrameSeen || terminalStatusSeen) {
           resolve();
           return;
         }
@@ -104,6 +123,11 @@ export class HarnessWsClient implements CliStreamPort {
       };
       const onError = (error: Error) => {
         cleanup();
+        if (terminalFrameSeen || terminalStatusSeen) {
+          this.socket = null;
+          resolve();
+          return;
+        }
         reject(new CliStreamError(error.message));
       };
       socket.once("close", onClose);
@@ -173,4 +197,10 @@ function frameId(prefix: string): string {
 
 export function isTerminalFrame(frame: ServerFrame): boolean {
   return frame.type === "run.final_result" || frame.type === "run.interrupted";
+}
+
+const TERMINAL_RUN_STATUSES = new Set<string>(["FINISHED", "ERROR", "CANCELLED", "EXPIRED"]);
+
+export function isRunStatusTerminalFrame(frame: ServerFrame): boolean {
+  return frame.type === "sdk.status" && TERMINAL_RUN_STATUSES.has(frame.event.payload.status);
 }

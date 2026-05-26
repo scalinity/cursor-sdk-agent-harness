@@ -1,7 +1,7 @@
 import React, { useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import type { AgentSummary, ContextChip, ContextSearchResult, ServerFrame } from "@harness/shared";
-import { isTerminalFrame } from "../client/ws.js";
+import { isRunStatusTerminalFrame, isTerminalFrame } from "../client/ws.js";
 import { appendPromptHistory, writePreferences } from "../config.js";
 import { renderTable, shortId } from "../output/table.js";
 import type { CliAgentSummary, CliHttpPort, CliMode, CliStreamPort } from "../types.js";
@@ -36,6 +36,10 @@ interface PromptRequest {
   mentions: Array<ContextChip["mention"]>;
 }
 
+export function formatUserPromptBlock(text: string): string {
+  return `\n❯ ${text}\n\n`;
+}
+
 export function App({ agent, mode: initialMode, modelId: initialModelId, workspace, historyEntries, http, stream }: ReplAppProps) {
   const { exit } = useApp();
   const theme = createTuiTheme();
@@ -53,6 +57,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
   const [inputDraft, setInputDraft] = useState("");
   const [scrollOffset, setScrollOffset] = useState(0);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [agentTurnActive, setAgentTurnActive] = useState(false);
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [queuedPrompts, setQueuedPrompts] = useState<PromptRequest[]>([]);
   const [streamStatus, setStreamStatus] = useState<StreamConnectionStatus>("ready");
@@ -71,8 +76,10 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
   const streamHeight = Math.max(1, layout.scrollHeight - 2);
   const streamWidth = Math.max(12, layout.columns - 4);
   const busy = activeRunId !== null || isStartingRun;
-  const spinner = useSpinnerFrame(busy);
-  const activeLabel = busy ? `${spinner} ${isStartingRun ? "starting run" : "agent working"}` : undefined;
+  const turnActive = isStartingRun || agentTurnActive;
+  const spinner = useSpinnerFrame(turnActive);
+  const activeLabel = turnActive ? `${spinner} ${isStartingRun ? "starting run" : "agent working"}` : undefined;
+  const visibleActiveRunId = agentTurnActive ? activeRunId : null;
   const cleanupController = useReplCleanup({ stream, activeRunId, isStartingRun });
 
   const appendAssistant = (text: string) => setBuffer((current) => ({ items: [...current.items, { type: "assistant", text }] }));
@@ -169,40 +176,62 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
     appendPromptHistory(request.text).catch((error: unknown) => {
       appendError(`Prompt history was not saved: ${error instanceof Error ? error.message : String(error)}`);
     });
-    appendAssistant(`\n❯ ${request.text}\n`);
+    appendAssistant(formatUserPromptBlock(request.text));
     void http.createRun({ agentId: request.agentId, prompt: request.text, executionMode: request.mode, mentions: request.mentions }).then((run) => {
       if (cleanupController.disposedRef.current) return;
+      let runFinished = false;
+      const finishRun = () => {
+        if (runFinished) return;
+        runFinished = true;
+        setActiveRunId(null);
+        setAgentTurnActive(false);
+        setPendingApproval(null);
+        setStreamStatus("ready");
+        const next = queueRef.current[0];
+        if (next !== undefined) {
+          queueRef.current = queueRef.current.slice(1);
+          setQueuedPrompts(queueRef.current);
+          setTimeout(() => startPrompt(next), 0);
+        }
+      };
       setIsStartingRun(false);
       setActiveRunId(run.runId);
+      setAgentTurnActive(true);
       setStreamStatus("connected");
       const subscription = stream.subscribeToRun(run.runId, (frame: ServerFrame) => {
         setBuffer((current) => ingestStreamFrame(current, frame));
         if (frame.type === "sdk.request") setPendingApproval({ runId: run.runId, requestId: frame.event.payload.request_id });
-        if (isTerminalFrame(frame)) {
-          setActiveRunId(null);
+        if (isRunStatusTerminalFrame(frame)) {
+          setAgentTurnActive(false);
           setPendingApproval(null);
           setStreamStatus("ready");
+        }
+        if (isTerminalFrame(frame)) {
           if (frame.type === "run.final_result") {
             setSessionCostMicros((current) => current + (frame.event.payload.usage.cost_usd_micros ?? 0));
           }
-          const next = queueRef.current[0];
-          if (next !== undefined) {
-            queueRef.current = queueRef.current.slice(1);
-            setQueuedPrompts(queueRef.current);
-            setTimeout(() => startPrompt(next), 0);
-          }
+          finishRun();
         }
+      });
+      void subscription.then(() => finishRun()).catch((error: unknown) => {
+        if (cleanupController.disposedRef.current) return;
+        setIsStartingRun(false);
+        setActiveRunId(null);
+        setAgentTurnActive(false);
+        setPendingApproval(null);
+        setStreamStatus("disconnected");
+        appendError(error instanceof Error ? error.message : String(error));
       });
       if (cleanupController.cancelPendingStartRef.current) {
         const sent = stream.cancelRun?.(run.runId) ?? false;
         cleanupController.cancelPendingStartRef.current = false;
         appendAssistant(sent ? "\n[cancel requested]\n" : "\n[cancel unavailable: stream is not connected]\n");
       }
-      return subscription;
     }).catch((error: unknown) => {
       if (cleanupController.disposedRef.current) return;
       setIsStartingRun(false);
       setActiveRunId(null);
+      setAgentTurnActive(false);
       setStreamStatus("disconnected");
       appendError(error instanceof Error ? error.message : String(error));
     });
@@ -253,7 +282,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         mode={mode}
         modelId={modelId}
         connection={streamStatus}
-        activeRunId={activeRunId}
+        activeRunId={visibleActiveRunId}
         queuedPrompts={queuedPrompts.length}
         spinner={spinner}
         theme={theme}
@@ -296,7 +325,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         sessionCostMicros={sessionCostMicros}
         connection={streamStatus}
         queuedPrompts={queuedPrompts.length}
-        activeRunId={activeRunId}
+        activeRunId={visibleActiveRunId}
         width={layout.columns}
         theme={theme}
       />
