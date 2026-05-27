@@ -4165,35 +4165,3 @@ Finished the terminal-native CLI polish pass after the gray-slab screenshot. The
 ### Next phase
 
 Continue with the next Tier 3 visual identity subsection when its prompt or subsection scope is provided.
-
----
-
-## CLI Review Address Pass — 2026-05-27
-
-### Summary
-
-Addressed the review findings from the CLI visual/session pass. The default chat parser remains Commander-owned so global option values are not misread as subcommands, `chat --resume` no longer injects default mode/workspace overrides, saved-agent fallback now only happens for missing agents, and filesystem-only skill commands no longer boot the backend. The REPL keeps side effects in named hooks, preserves queued skill display text, catches async skill-resolution failures, caps image-drop reads before touching disk, uses the active workspace in the header, and reuses a single stream viewport computation for scroll metrics/rendering. Saved CLI sessions now validate known stream item shapes, bound/redact persisted transcript text, clamp scroll offsets, and clean up temp files on failed writes.
-
-### Files modified
-
-- `apps/cli/src/index.ts` — chat option normalization, missing-agent fallback narrowing, and local skill command deps.
-- `apps/cli/src/repl/App.tsx`, `StatusBar.tsx`, `StreamView.tsx`, `glyphs.ts`, `stream-scroll.ts`, and `useSpinnerFrame.ts` — hook extraction, queued display preservation, shared viewport metrics, task/subagent rendering, and status/usage presentation.
-- `apps/cli/src/session.ts` — saved-session validation, transcript redaction/bounding, and atomic-write cleanup.
-- `apps/cli/tests/commands/run.test.ts`, `apps/cli/tests/repl/*`, and `apps/cli/tests/session.test.ts` — regression coverage for session validation/redaction, stream scroll exact-fit behavior, task/subagent rendering, and REPL status/usage paths.
-- `docs/IMPLEMENTATION_STATUS.md` — recorded this address pass and verification evidence.
-
-### Verification
-
-- `pnpm -F @harness/cli exec vitest run tests/cli-program.test.ts tests/session.test.ts tests/lib/skills.test.ts tests/lib/attachments.test.ts tests/repl/HeaderBar.test.tsx tests/repl/stream-scroll.test.ts tests/repl/App.test.tsx tests/repl/StreamView.test.tsx` — pass, 70 tests.
-- `pnpm -F @harness/cli typecheck` — pass.
-- `pnpm -F @harness/cli test` — pass, 27 files / 154 tests.
-- `pnpm exec eslint apps/cli` — pass.
-- `pnpm typecheck` — pass.
-- `pnpm lint` — pass.
-- `pnpm test` — pass: shared 39, eslint-plugin 6, web 147, server 468 passing / 1 skipped, CLI 154, desktop 0 test files, scripts 11.
-- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass; rebuilt web/server/desktop, packaged macOS app, and rebuilt native Electron bindings.
-- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` — installed timestamp May 27 04:08:27 2026.
-
-### Next phase
-
-Commit and push `main`.
