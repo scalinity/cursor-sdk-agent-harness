@@ -41,7 +41,7 @@ describe("skills library", () => {
     });
 
     expect(markdown).toContain("name: review-pr");
-    expect(markdown).toContain('description: Review pull requests for regressions.');
+    expect(markdown).toContain('description: "Review pull requests for regressions."');
     expect(markdown).toContain("paths:");
     expect(markdown).toContain('  - "**/*.ts"');
     expect(markdown).toContain("disable-model-invocation: true");

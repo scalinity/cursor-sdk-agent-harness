@@ -9,6 +9,7 @@ import {
   MAX_IMAGE_ATTACHMENTS,
   mergeImageAttachments,
   readImageFromPath,
+  selectImageDropPaths,
   type ImageAttachment,
 } from "../lib/attachments.js";
 import { createSkill, listSkills, resolveSkillBySlashCommand, readSkillBody, buildSkillInvocationPrompt } from "../lib/skills.js";
@@ -19,8 +20,8 @@ import { InputBar, parseSlashCommand, PromptHistory, type MentionTrigger } from 
 import { computeTuiLayout, countInputLines, MAX_INPUT_VISIBLE_LINES } from "./layout.js";
 import { MentionPopup, flattenMentionResults, MAX_MENTION_ITEMS, moveMentionSelection } from "./MentionPopup.js";
 import { filterSlashCommands, SlashPalette } from "./SlashPalette.js";
-import { createStreamBuffer, ingestStreamFrame, StreamView, type StreamBuffer, type StreamItem } from "./StreamView.js";
-import { applyStreamScrollDelta, computeStreamViewportLayout, resolveStreamScrollDelta } from "./stream-scroll.js";
+import { computeStreamViewportState, createStreamBuffer, ingestStreamFrame, StreamView, type StreamBuffer, type StreamItem } from "./StreamView.js";
+import { applyStreamScrollDelta, resolveStreamScrollDelta } from "./stream-scroll.js";
 import { StatusBar, type SessionCostState, type SessionTokenState } from "./StatusBar.js";
 import { formatActiveToolLine } from "./ToolCallLine.js";
 import { createTuiTheme, bg, border, fg, truncateMiddle, MIN_COLUMNS, MIN_ROWS } from "./theme.js";
@@ -33,7 +34,9 @@ import {
 } from "./useSpinnerFrame.js";
 import { useTerminalSize } from "./useTerminalSize.js";
 import { useReplCleanup, type ReplCleanupController } from "./useReplCleanup.js";
-import { createSessionSnapshot, type CliSessionSnapshot } from "../session.js";
+import { useResumeNotice } from "./useResumeNotice.js";
+import { useSessionSnapshotRegistration, type ReplSessionSnapshotState } from "./useSessionSnapshotRegistration.js";
+import type { CliSessionSnapshot } from "../session.js";
 
 export interface ReplResumeState {
   buffer: StreamBuffer;
@@ -62,6 +65,11 @@ interface PromptRequest {
   mode: CliMode;
   mentions: Array<ContextChip["mention"]>;
   images: ImageAttachment[];
+}
+
+interface QueuedPrompt {
+  request: PromptRequest;
+  userDisplay?: string;
 }
 
 export function formatTurnClock(date: Date = new Date()): string {
@@ -100,13 +108,13 @@ export function App({
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [agentTurnActive, setAgentTurnActive] = useState(false);
   const [isStartingRun, setIsStartingRun] = useState(false);
-  const [queuedPrompts, setQueuedPrompts] = useState<PromptRequest[]>([]);
+  const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const [streamStatus, setStreamStatus] = useState<StreamConnectionStatus>("ready");
   const [sessionCost, setSessionCost] = useState<SessionCostState>(() => resume?.sessionCost ?? createEmptySessionCost());
   const [sessionTokens, setSessionTokens] = useState<SessionTokenState>(() => resume?.sessionTokens ?? createEmptySessionTokens());
   const [pendingApproval, setPendingApproval] = useState<{ runId: string; requestId: string } | null>(null);
   const [history] = useState(() => new PromptHistory(historyEntries));
-  const queueRef = useRef<PromptRequest[]>([]);
+  const queueRef = useRef<QueuedPrompt[]>([]);
   const toolStartRef = useRef<{ callId: string; startMs: number } | null>(null);
   const mentionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mentionRequestSeqRef = useRef(0);
@@ -152,7 +160,7 @@ export function App({
       ]
     : undefined;
   const cleanupController = useReplCleanup({ stream, activeRunId, isStartingRun });
-  const sessionStateRef = useRef({
+  const sessionStateRef = useRef<ReplSessionSnapshotState>({
     workspace,
     agent,
     mode: initialMode,
@@ -172,31 +180,10 @@ export function App({
     buffer,
     scrollOffset,
   };
-
-  useEffect(() => {
-    onRegisterSessionSnapshot?.(() => createSessionSnapshot(sessionStateRef.current));
-  }, [onRegisterSessionSnapshot]);
-
-  const resumedRef = useRef(resume !== undefined);
-  useEffect(() => {
-    if (!resumedRef.current) return;
-    setBuffer((current) => ({
-      items: [...current.items, { type: "system", text: "Resumed previous chat session." }],
-    }));
-  }, []);
-
-  const appendUser = (text: string) => setBuffer((current) => ({ items: [...current.items, { type: "user", text, at: formatTurnClock() }] }));
-  const appendSystem = (text: string) => setBuffer((current) => ({ items: [...current.items, { type: "system", text }] }));
-  const appendError = (message: string) => setBuffer((current) => ({ items: [...current.items, { type: "error", message }] }));
-  const promptSnapshot = (text: string): PromptRequest => ({
-    text,
-    agentId: activeAgent.id,
-    mode,
-    mentions: chips.map((chip) => chip.mention),
-    images: imageAttachments,
-  });
+  useSessionSnapshotRegistration(onRegisterSessionSnapshot, sessionStateRef);
+  useResumeNotice(resume !== undefined, setBuffer);
   const streamViewport = useMemo(
-    () => computeStreamViewportLayout(buffer.items, streamWidth, streamHeight, scrollOffset, activeLabel),
+    () => computeStreamViewportState(buffer.items, streamWidth, streamHeight, scrollOffset, activeLabel),
     [activeLabel, buffer.items, scrollOffset, streamHeight, streamWidth],
   );
   const { maxOffset, bodyHeight, effectiveOffset, streamScrollActive } = streamViewport;
@@ -206,6 +193,17 @@ export function App({
       setScrollOffset(effectiveOffset);
     }
   }, [effectiveOffset, scrollOffset]);
+
+  const appendUser = (text: string) => setBuffer((current) => ({ items: [...current.items, { type: "user", text, at: formatTurnClock() }] }));
+  const appendSystem = (text: string) => setBuffer((current) => ({ items: [...current.items, { type: "system", text }] }));
+  const appendError = (message: string) => setBuffer((current) => ({ items: [...current.items, { type: "error", message }] }));
+  const promptSnapshot = (text: string, overrides?: { mentions?: Array<ContextChip["mention"]>; images?: ImageAttachment[] }): PromptRequest => ({
+    text,
+    agentId: activeAgent.id,
+    mode,
+    mentions: overrides?.mentions ?? chips.map((chip) => chip.mention),
+    images: overrides?.images ?? imageAttachments,
+  });
 
   const clearComposerAttachments = () => {
     setChips([]);
@@ -262,7 +260,8 @@ export function App({
     const promptText = request.text.trim();
     if (promptText.length === 0 && request.images.length === 0) return;
     if (busy) {
-      queueRef.current = [...queueRef.current, request];
+      const queued: QueuedPrompt = userDisplay === undefined ? { request } : { request, userDisplay };
+      queueRef.current = [...queueRef.current, queued];
       setQueuedPrompts(queueRef.current);
       clearComposerAttachments();
       appendSystem(`queued: ${userDisplay ?? request.text}`);
@@ -283,7 +282,7 @@ export function App({
           const args = slash.args.slice(1);
           const prompt = buildSkillInvocationPrompt(skill, body, args);
           const display = `/${skill.name}${args.length > 0 ? ` ${args.join(" ")}` : ""}`;
-          dispatchPrompt(promptSnapshot(prompt), display);
+          dispatchPrompt(promptSnapshot(prompt, { mentions: [], images: [] }), display);
           return;
         }
       }
@@ -312,11 +311,21 @@ export function App({
       const promptText = text.trim();
       if (promptText.length === 0 && imageAttachments.length === 0) return;
       dispatchPrompt(promptSnapshot(promptText.length > 0 ? promptText : "(see attached image)"));
-    })();
+    })().catch((error: unknown) => {
+      appendError(error instanceof Error ? error.message : String(error));
+    });
   };
 
   const handleImageDrop = (paths: string[]) => {
-    void Promise.allSettled(paths.map((filePath) => readImageFromPath(filePath))).then((results) => {
+    const selected = selectImageDropPaths(paths, imageAttachments.length);
+    if (selected.selected.length === 0) {
+      if (selected.skippedCount > 0) appendSystem(`At most ${MAX_IMAGE_ATTACHMENTS} images per message.`);
+      return;
+    }
+    if (selected.skippedCount > 0) {
+      appendSystem(`At most ${MAX_IMAGE_ATTACHMENTS} images per message.`);
+    }
+    void Promise.allSettled(selected.selected.map((filePath) => readImageFromPath(filePath))).then((results) => {
       const loaded: ImageAttachment[] = [];
       const failures: string[] = [];
       for (const result of results) {
@@ -374,7 +383,7 @@ export function App({
         if (next !== undefined) {
           queueRef.current = queueRef.current.slice(1);
           setQueuedPrompts(queueRef.current);
-          setTimeout(() => startPrompt(next), 0);
+          setTimeout(() => startPrompt(next.request, next.userDisplay), 0);
         }
       };
       setIsStartingRun(false);
@@ -473,7 +482,7 @@ export function App({
         theme={theme}
       />
       <Box flexDirection="column" height={layout.scrollHeight} borderStyle="round" {...border(effectiveOffset > 0 ? theme.brand : theme.border)} paddingX={1} {...bg(theme.panel)}>
-        <StreamView items={buffer.items} height={streamHeight} width={streamWidth} scrollOffset={effectiveOffset} activeLabel={activeLabel} activeLabelSegments={activeLabelSegments} theme={theme} />
+        <StreamView items={buffer.items} height={streamHeight} width={streamWidth} scrollOffset={effectiveOffset} activeLabel={activeLabel} activeLabelSegments={activeLabelSegments} viewportState={streamViewport} theme={theme} />
       </Box>
       {mentionOpen ? <MentionPopup results={mentionResults} selectedIndex={mentionIndex} open={mentionOpen} theme={theme} /> : null}
       {!mentionOpen && slashOpen ? <SlashPalette items={slashItems} selectedIndex={slashIndex} theme={theme} /> : null}

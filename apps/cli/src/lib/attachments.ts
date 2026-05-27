@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { constants, existsSync } from "node:fs";
+import { lstat, open } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 import path from "node:path";
@@ -24,6 +24,8 @@ const MIME_BY_EXT: Record<string, "image/png" | "image/jpeg" | "image/webp" | "i
   ".webp": "image/webp",
   ".gif": "image/gif",
 };
+
+type LocalImageMimeType = (typeof MIME_BY_EXT)[keyof typeof MIME_BY_EXT];
 
 export interface ImageAttachment {
   id: string;
@@ -194,9 +196,12 @@ export function expandHome(filePath: string): string {
 
 async function statExistingFile(resolved: string) {
   try {
-    const fileStat = await stat(resolved);
+    const fileStat = await lstat(resolved);
+    if (fileStat.isSymbolicLink()) {
+      throw new Error(`Image path must not be a symlink (${formatPathForMessage(resolved)})`);
+    }
     if (!fileStat.isFile()) {
-      throw new Error(`Not a file: ${resolved}`);
+      throw new Error(`Not a file: ${formatPathForMessage(resolved)}`);
     }
     return fileStat;
   } catch (error) {
@@ -205,9 +210,12 @@ async function statExistingFile(resolved: string) {
     }
     const nfd = resolved.normalize("NFD");
     if (nfd === resolved) throw error;
-    const fileStat = await stat(nfd);
+    const fileStat = await lstat(nfd);
+    if (fileStat.isSymbolicLink()) {
+      throw new Error(`Image path must not be a symlink (${formatPathForMessage(nfd)})`);
+    }
     if (!fileStat.isFile()) {
-      throw new Error(`Not a file: ${nfd}`);
+      throw new Error(`Not a file: ${formatPathForMessage(nfd)}`);
     }
     return fileStat;
   }
@@ -215,15 +223,36 @@ async function statExistingFile(resolved: string) {
 
 async function readExistingFile(resolved: string): Promise<{ bytes: Buffer; resolvedPath: string }> {
   try {
-    return { bytes: await readFile(resolved), resolvedPath: resolved };
+    return { bytes: await readFileNoFollow(resolved), resolvedPath: resolved };
   } catch (error) {
     if (process.platform !== "darwin" || (error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
     const nfd = resolved.normalize("NFD");
     if (nfd === resolved) throw error;
-    return { bytes: await readFile(nfd), resolvedPath: nfd };
+    return { bytes: await readFileNoFollow(nfd), resolvedPath: nfd };
   }
+}
+
+async function readFileNoFollow(resolved: string): Promise<Buffer> {
+  const handle = await open(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    return await handle.readFile();
+  } finally {
+    await handle.close();
+  }
+}
+
+function hasImageSignature(bytes: Buffer, mimeType: LocalImageMimeType): boolean {
+  if (mimeType === "image/png") return bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  if (mimeType === "image/jpeg") return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (mimeType === "image/gif") return bytes.subarray(0, 6).toString("ascii") === "GIF87a" || bytes.subarray(0, 6).toString("ascii") === "GIF89a";
+  if (mimeType === "image/webp") return bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
+  return false;
+}
+
+function formatPathForMessage(filePath: string): string {
+  return path.basename(filePath) || "image";
 }
 
 export async function readImageFromPath(filePath: string): Promise<ImageAttachment> {
@@ -236,19 +265,22 @@ export async function readImageFromPath(filePath: string): Promise<ImageAttachme
 
   const fileStat = await statExistingFile(resolved);
   if (fileStat.size === 0) {
-    throw new Error(`Image is empty (${resolved})`);
+    throw new Error(`Image is empty (${formatPathForMessage(resolved)})`);
   }
   if (fileStat.size > MAX_RAW_IMAGE_BYTES) {
-    throw new Error(`Image too large (${resolved})`);
+    throw new Error(`Image too large (${formatPathForMessage(resolved)})`);
   }
 
   const { bytes, resolvedPath } = await readExistingFile(resolved);
   if (bytes.length === 0) {
-    throw new Error(`Image is empty (${resolvedPath})`);
+    throw new Error(`Image is empty (${formatPathForMessage(resolvedPath)})`);
+  }
+  if (!hasImageSignature(bytes, mimeType)) {
+    throw new Error(`Image content does not match ${mimeType} (${formatPathForMessage(resolvedPath)})`);
   }
   const data = bytes.toString("base64");
   if (data.length === 0 || data.length > MAX_IMAGE_DATA_BYTES) {
-    throw new Error(`Image too large (${resolvedPath})`);
+    throw new Error(`Image too large (${formatPathForMessage(resolvedPath)})`);
   }
 
   return {

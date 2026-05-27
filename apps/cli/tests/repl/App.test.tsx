@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { deriveChromeState, formatThinkingGradientSegments, formatThinkingIndicatorText, formatTurnClock, thinkingGradientPeakIndex } from "../../src/repl/App.js";
+import {
+  deriveChromeState,
+  formatThinkingGradientSegments,
+  formatThinkingIndicatorText,
+  formatTurnClock,
+  thinkingGradientPeakIndex,
+} from "../../src/repl/App.js";
+import { THINKING_DOT_FRAME_HOLD } from "../../src/repl/useSpinnerFrame.js";
 
 describe("App turn formatting", () => {
   it("formats the turn clock as HH:MM in local time", () => {
@@ -8,17 +15,12 @@ describe("App turn formatting", () => {
   });
 
   it("animates the thinking indicator text with stable width and slower dots", () => {
-    expect([0, 1, 2, 3, 4, 7, 8, 11, 12].map(formatThinkingIndicatorText)).toEqual([
-      "Thinking   ",
-      "Thinking   ",
-      "Thinking   ",
-      "Thinking   ",
-      "Thinking.  ",
-      "Thinking.  ",
-      "Thinking.. ",
-      "Thinking.. ",
-      "Thinking...",
-    ]);
+    expect(formatThinkingIndicatorText(0)).toBe("Thinking   ");
+    expect(formatThinkingIndicatorText(THINKING_DOT_FRAME_HOLD - 1)).toBe("Thinking   ");
+    expect(formatThinkingIndicatorText(THINKING_DOT_FRAME_HOLD)).toBe("Thinking.  ");
+    expect(formatThinkingIndicatorText(THINKING_DOT_FRAME_HOLD * 2 - 1)).toBe("Thinking.  ");
+    expect(formatThinkingIndicatorText(THINKING_DOT_FRAME_HOLD * 2)).toBe("Thinking.. ");
+    expect(formatThinkingIndicatorText(THINKING_DOT_FRAME_HOLD * 3)).toBe("Thinking...");
   });
 
   it("moves the thinking gradient peak back and forth across the word", () => {

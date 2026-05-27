@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -88,6 +88,23 @@ describe("CLI attachments", () => {
     const emptyPath = path.join(dir, "empty.png");
     await writeFile(emptyPath, Buffer.alloc(0));
     await expect(readImageFromPath(emptyPath)).rejects.toThrow(/empty/i);
+  });
+
+  it.skipIf(process.platform === "win32")("rejects symlinked image paths", async () => {
+    const target = await writeTempPng("target.png");
+    const linkPath = path.join(path.dirname(target), "link.png");
+    await symlink(target, linkPath);
+
+    await expect(readImageFromPath(linkPath)).rejects.toThrow(/symlink/i);
+  });
+
+  it("rejects files whose bytes do not match the image extension", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "harness-cli-mismatch-"));
+    tempDirs.push(dir);
+    const filePath = path.join(dir, "not-really.png");
+    await writeFile(filePath, Buffer.from("not a png"));
+
+    await expect(readImageFromPath(filePath)).rejects.toThrow(/does not match image\/png/i);
   });
 
   it("expands home paths and formats chip labels", () => {

@@ -3,7 +3,7 @@ import spinners from "cli-spinners";
 
 const FRAMES = spinners.dots.frames;
 const THINKING_DOT_FRAMES = ["Thinking   ", "Thinking.  ", "Thinking.. ", "Thinking..."] as const;
-const THINKING_DOT_FRAME_HOLD = 4;
+export const THINKING_DOT_FRAME_HOLD = 8;
 
 export interface SpinnerFrameState {
   frame: string;
