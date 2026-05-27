@@ -24,11 +24,11 @@ describe("formatToolCallLine", () => {
 
 describe("formatActiveToolLine", () => {
   it("shows the spinner, summary, and elapsed seconds", () => {
-    expect(formatActiveToolLine("⠙", { verb: "shell", primaryArg: "npm install" }, 12_400)).toBe("⠙ shell npm install  12s");
+    expect(formatActiveToolLine("◐", { verb: "shell", primaryArg: "npm install" }, 12_400)).toBe("◐ shell npm install  12s");
   });
 
   it("sanitizes control sequences in its inputs", () => {
     const esc = String.fromCharCode(27);
-    expect(formatActiveToolLine("⠙", { verb: "shell", primaryArg: `npm ${esc}[31minstall` }, 5_000)).toBe("⠙ shell npm install  5s");
+    expect(formatActiveToolLine("◐", { verb: "shell", primaryArg: `npm ${esc}[31minstall` }, 5_000)).toBe("◐ shell npm install  5s");
   });
 });

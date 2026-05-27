@@ -22,7 +22,7 @@ export function BootScreen({ workspace, theme = createTuiTheme() }: BootScreenPr
   const where = workspace ? ` · ${path.basename(workspace) || workspace}` : "";
   return (
     <Box flexDirection="column" paddingX={2} paddingY={1} {...bg(theme.background)}>
-      <Text {...fg(theme.state?.ready)} bold>Cursor Harness</Text>
+      <Text {...fg(theme.brand)} bold>Cursor Harness</Text>
       <Box marginTop={1}>
         <Text {...fg(theme.state?.running)}>{spinner} </Text>
         <Text {...fg(theme.muted)}>Starting harness{where}…</Text>

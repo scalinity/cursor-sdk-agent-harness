@@ -45,10 +45,10 @@ export interface MentionPopupProps {
   theme?: TuiTheme;
 }
 
-export function MentionPopup({ results, selectedIndex, focused = true, open = results !== null, theme = createTuiTheme() }: MentionPopupProps) {
+export function MentionPopup({ results, selectedIndex, open = results !== null, theme = createTuiTheme() }: MentionPopupProps) {
   const items = flattenMentionResults(results).slice(0, MAX_MENTION_ITEMS);
   if (!open) return null;
-  const borderColor = focused ? theme.state?.ready : theme.border;
+  const borderColor = theme.border;
   if (items.length === 0) {
     return (
       <Box flexDirection="column" borderStyle="round" {...border(borderColor)} paddingX={1} {...bg(theme.panel)}>
@@ -64,8 +64,8 @@ export function MentionPopup({ results, selectedIndex, focused = true, open = re
         const label = sanitizeTerminalText(item.label);
         const detail = sanitizeTerminalText(item.detail);
         return (
-          <Text key={`${item.kind}:${item.value}`} {...fg(selected ? theme.state?.ready : theme.text)} bold={selected}>
-            {selected ? `${glyph.done} ` : "  "}
+          <Text key={`${item.kind}:${item.value}`} {...fg(theme.text)} bold={selected}>
+            <Text {...fg(selected ? theme.state?.ready : theme.muted)}>{selected ? `${glyph.readyDot} ` : "  "}</Text>
             {iconForKind(item.kind)} {label} <Text {...fg(theme.muted)}>{detail}</Text>
           </Text>
         );

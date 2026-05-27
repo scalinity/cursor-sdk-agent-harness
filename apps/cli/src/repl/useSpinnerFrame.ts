@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { glyph } from "./glyphs.js";
 const THINKING_DOT_FRAMES = ["Thinking   ", "Thinking.  ", "Thinking.. ", "Thinking..."] as const;
-const BRAILLE_LOADING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"] as const;
 export const THINKING_DOT_FRAME_HOLD = 8;
+const THINKING_CYCLE_LENGTH = THINKING_DOT_FRAME_HOLD * THINKING_DOT_FRAMES.length;
 
 export interface SpinnerFrameState {
   frame: string;
@@ -58,13 +58,13 @@ export function useSpinnerFrameState(active: boolean): SpinnerFrameState {
       return;
     }
     const timer = setInterval(() => {
-      setIndex((current) => (current + 1) % THINKING_DOT_FRAME_HOLD);
+      setIndex((current) => (current + 1) % THINKING_CYCLE_LENGTH);
     }, 90);
     return () => clearInterval(timer);
   }, [active]);
 
-  const frame = BRAILLE_LOADING_FRAMES[positiveModulo(index, BRAILLE_LOADING_FRAMES.length)] ?? glyph.thinking;
-  return { frame: active ? frame : "", index };
+  const frame = active ? glyph.thinking : "";
+  return { frame, index };
 }
 
 export function useSpinnerFrame(active: boolean): string {

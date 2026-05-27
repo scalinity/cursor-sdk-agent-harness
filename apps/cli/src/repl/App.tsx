@@ -158,8 +158,8 @@ export function App({
         ...(spinnerSegment ? [spinnerSegment] : []),
         ...formatThinkingGradientSegments(thinkingText, thinkingGradientPeak, {
           dim: theme.muted,
-          mid: theme.state?.ready,
-          bright: theme.state?.success,
+          mid: theme.state?.running,
+          bright: theme.state?.running,
         }),
       ]
     : undefined;
@@ -549,7 +549,7 @@ export function App({
 function TooSmallTerminal({ columns, rows, theme }: { columns: number; rows: number; theme: ReturnType<typeof createTuiTheme> }) {
   return (
     <Box flexDirection="column" paddingX={1} {...bg(theme.background)}>
-      <Text {...fg(theme.state?.ready)}>Cursor Harness</Text>
+      <Text {...fg(theme.brand)}>Cursor Harness</Text>
       <Text {...fg(theme.state?.error)}>terminal too small: {columns}x{rows}</Text>
       <Text {...fg(theme.muted)}>minimum supported size is {MIN_COLUMNS}x{MIN_ROWS}</Text>
     </Box>

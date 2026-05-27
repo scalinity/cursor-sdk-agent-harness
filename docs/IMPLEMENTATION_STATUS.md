@@ -4318,3 +4318,49 @@ Ran `review-2` against the load-bearing app changes and addressed the actionable
 ### Next phase
 
 Commit and push `main` after staged-diff and secret-scan review.
+
+---
+
+## CLI Visual Identity Finish Pass — 2026-05-27
+
+### Summary
+
+Finished the remaining CLI visual identity refinements on the current dirty tree. The REPL and boot chrome now keep the warm brand accent on identity surfaces, reserve state colors for status/running/error signals, and use only the fixed Tier 3 glyph vocabulary in active indicators and overlay selections. The slash and mention overlays now keep neutral borders and use the active-state dot for selection instead of misusing done/running glyphs. `apps/cli/THEME.md` now lists the exact visual decisions for future consistency.
+
+### Files modified
+
+- `apps/cli/src/repl/HeaderBar.tsx` and `BootScreen.tsx` — move CLI title text from ready-state green to the brand accent.
+- `apps/cli/src/repl/App.tsx` — keep active thinking/running labels in `state.running` amber and keep the too-small title branded.
+- `apps/cli/src/repl/glyphs.ts` and `useSpinnerFrame.ts` — replace the out-of-vocabulary Braille spinner with the approved `glyph.thinking` marker while preserving dot/gradient timing.
+- `apps/cli/src/repl/MentionPopup.tsx` and `SlashPalette.tsx` — make overlay borders neutral and use `glyph.readyDot` as the selected-row state marker.
+- `apps/cli/tests/repl/ToolCallLine.test.ts` — update active tool-line expectations to the approved thinking glyph.
+- `apps/cli/THEME.md` — document the canonical palette, glyph, border, and terminal UI decisions.
+
+### Verification
+
+- `pnpm -F @harness/cli typecheck` — pass.
+- `pnpm -F @harness/cli test` — pass, 28 files / 164 tests.
+- `pnpm -F @harness/cli lint` — pass.
+- `pnpm -F @harness/cli build` — pass.
+- `./bin/harness --help` — pass; compiled CLI entrypoint renders command help.
+- `NO_COLOR=1 ./bin/harness --help` — pass; monochrome help remains legible.
+- `env -u NO_COLOR FORCE_COLOR=3 perl -e 'alarm 6; exec @ARGV' ./bin/harness chat --server http://127.0.0.1:9 --workspace /Users/danny/Documents/Codez/Apps/CursorHarness` — captured the chat startup path; boot chrome renders `Cursor Harness`, the approved `◐` startup marker, and the unreachable-server error without hanging the session.
+- `pnpm typecheck` — pass.
+- `pnpm lint` — pass.
+- `pnpm test` — pass: shared 40, eslint-plugin 6, web 173, server 489 passing / 1 skipped, CLI 164, desktop 0 test files, scripts 11.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass; rebuilt web/server/desktop, packaged the macOS app, and rebuilt native bindings.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` — pass, installed timestamp May 27 07:03 2026.
+- `mkdir -p "$HOME/bin" && ln -sfn "$PWD/bin/harness" "$HOME/bin/harness"` — pass; local `harness` command points at this checkout.
+
+### Visual decisions locked
+
+- Brand: vermillion `#E04E1F` only for identity surfaces: CLI title, turn headers, focused input frame, prompt indicator, and explicit brand labels.
+- State: `ready`/`success` `#95d475`, `running`/thinking `#f2c94c`, `error` `#ff7a8a`; state colors describe system state only.
+- Neutrals: text `#eef2f7`, muted text `#9aa3ad`, border `#66717f`, transparent chrome backgrounds.
+- Glyphs: `▸` running, `✓` done, `✗` failed, `⏸` paused/cancelled, `↺` retried, `◐` thinking, `●` active/ready dot.
+- Borders: scrollback and overlays use neutral border; input uses brand only while focused and neutral while a response is streaming.
+- Rhythm: one blank line between conceptual stream blocks, no blank lines inside tool sequences, and one blank before summary/meta output.
+
+### Follow-up
+
+The wider checkout still contains unrelated dirty counter/server/web/shared work from before this visual pass. Stage only the intended CLI visual identity files if committing this pass separately.

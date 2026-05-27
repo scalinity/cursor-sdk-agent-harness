@@ -40,7 +40,7 @@ export function HeaderBar({
   return (
     <Box flexDirection="column" width={width} paddingX={1} paddingTop={0} {...bg(theme.background)}>
       <Box width={Math.max(1, width - 2)} justifyContent="space-between">
-        <Text {...fg(theme.state?.ready)} bold>
+        <Text {...fg(theme.brand)} bold>
           {title}
         </Text>
         <Text {...fg(chromeStateColor(theme, chromeState))}>{modelLabel}</Text>
