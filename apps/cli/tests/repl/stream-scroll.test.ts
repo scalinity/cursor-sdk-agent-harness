@@ -19,6 +19,16 @@ describe("stream scroll helpers", () => {
     expect(layout.streamScrollActive).toBe(true);
   });
 
+  it("does not mark exact-fit transcripts as scrollable", () => {
+    const exact = [{ type: "system" as const, text: "one\ntwo" }];
+    const layout = computeStreamViewportLayout(exact, 20, 2, 0);
+
+    expect(layout.maxOffset).toBe(0);
+    expect(layout.effectiveOffset).toBe(0);
+    expect(layout.bodyHeight).toBe(2);
+    expect(layout.streamScrollActive).toBe(false);
+  });
+
   it("resolves arrow, page, and jump-to-latest scroll deltas", () => {
     const layout = { bodyHeight: 10, maxOffset: 20 };
     expect(resolveStreamScrollDelta({ upArrow: true }, layout, 3)).toBe(1);

@@ -1,5 +1,5 @@
 import type { StreamItem } from "./StreamView.js";
-import { maxStreamScrollOffset } from "./StreamView.js";
+import { computeStreamViewportState } from "./StreamView.js";
 
 export interface StreamViewportLayout {
   maxOffset: number;
@@ -26,16 +26,12 @@ export function computeStreamViewportLayout(
   scrollOffset: number,
   activeLabel?: string,
 ): StreamViewportLayout {
-  const maxOffset = maxStreamScrollOffset(items, width, height, activeLabel);
-  const effectiveOffset = Math.min(Math.max(0, scrollOffset), maxOffset);
-  const labelHeight = activeLabel ? 1 : 0;
-  const indicatorHeight = effectiveOffset > 0 ? 1 : 0;
-  const bodyHeight = Math.max(1, height - labelHeight - indicatorHeight);
+  const viewport = computeStreamViewportState(items, width, height, scrollOffset, activeLabel);
   return {
-    maxOffset,
-    bodyHeight,
-    effectiveOffset,
-    streamScrollActive: effectiveOffset > 0 || maxOffset > 0,
+    maxOffset: viewport.maxOffset,
+    bodyHeight: viewport.bodyHeight,
+    effectiveOffset: viewport.effectiveOffset,
+    streamScrollActive: viewport.streamScrollActive,
   };
 }
 

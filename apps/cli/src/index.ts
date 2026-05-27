@@ -10,6 +10,7 @@ import { runPrompt } from "./commands/run.js";
 import { createSkillCommand, listSkillsCommand, parseSkillPaths } from "./commands/skills.js";
 import { searchWorkspace } from "./commands/search.js";
 import { resolveCliBackend, type CliBackend } from "./backend.js";
+import { CliHttpError } from "./client/http.js";
 import { DEFAULT_MODEL_ID, readPreferences, readPromptHistory, resolveExplicitServerUrl, resolveServerUrl, writePreferences } from "./config.js";
 import { CliUsageError, formatCliError } from "./errors.js";
 import { App } from "./repl/App.js";
@@ -25,6 +26,20 @@ export interface GlobalOptions {
   resume?: boolean;
 }
 
+export interface ChatCommandOptions {
+  agent?: string;
+  mode?: unknown;
+  model?: string;
+  workspace?: string;
+}
+
+export type ChatLaunchOptions = GlobalOptions & {
+  agent?: string;
+  mode?: CliMode;
+  model?: string;
+  workspace?: string;
+};
+
 export function attachDefaultChatAction(
   command: Command,
   action: (options: GlobalOptions) => Promise<void>,
@@ -33,6 +48,22 @@ export function attachDefaultChatAction(
     ...options,
     resume: Boolean(options.resume),
   }));
+}
+
+export function normalizeChatCommandOptions(globalOptions: GlobalOptions, options: ChatCommandOptions): ChatLaunchOptions {
+  return {
+    ...globalOptions,
+    ...(options.agent !== undefined ? { agent: options.agent } : {}),
+    ...(options.mode !== undefined ? { mode: normalizeMode(options.mode) } : {}),
+    ...(options.model !== undefined ? { model: options.model } : {}),
+    ...(options.workspace !== undefined ? { workspace: options.workspace } : {}),
+    resume: Boolean(globalOptions.resume),
+  };
+}
+
+export function shouldCreateFreshAgentForSavedSession(error: unknown): boolean {
+  if (!(error instanceof CliHttpError)) return false;
+  return error.status === 404 || error.code === "NOT_FOUND" || error.code === "AGENT_NOT_FOUND";
 }
 
 async function resolveAgentForChat(
@@ -53,7 +84,8 @@ async function resolveAgentForChat(
     try {
       const detail = await http.getAgent(input.savedSession.agent.id);
       return agentSummaryFromDetail(detail);
-    } catch {
+    } catch (error: unknown) {
+      if (!shouldCreateFreshAgentForSavedSession(error)) throw error;
       // Fall back to a fresh agent in the saved workspace if the backing agent is gone.
     }
   }
@@ -74,6 +106,14 @@ function agentSummaryFromDetail(agent: { id: string; name: string; modelId: stri
   };
 }
 
+function localCommandDeps(): Pick<CommandDeps, "write" | "writeRaw" | "writeError"> {
+  return {
+    write: (line) => output.write(`${line}\n`),
+    writeRaw: (text) => output.write(text),
+    writeError: (line) => stderr.write(`${line}\n`),
+  };
+}
+
 /**
  * Resolves the backend (embedded in-process by default, or an external server
  * when `--server`/`HARNESS_SERVER_URL` is set), runs a one-shot command, and
@@ -86,10 +126,8 @@ async function withBackend(
 ): Promise<void> {
   const backend = await resolveCliBackend(options);
   const deps: CommandDeps = {
+    ...localCommandDeps(),
     http: backend.http,
-    write: (line) => output.write(`${line}\n`),
-    writeRaw: (text) => output.write(text),
-    writeError: (line) => stderr.write(`${line}\n`),
   };
   if (opts.stream) {
     const token = await backend.http.ensureCsrfToken();
@@ -238,15 +276,12 @@ attachDefaultChatAction(program, async (options) => runCommand(async () => {
 program
   .command("chat")
   .option("--agent <id>", "Start with a specific agent")
-  .option("--mode <mode>", "Initial mode: ask | agent", "agent")
+  .option("--mode <mode>", "Initial mode: ask | agent")
   .option("--model <id>", "Model override")
-  .option("--workspace <path>", "Workspace directory", process.cwd())
-  .action(async (options) => runCommand(async () => runChat({
-    ...program.opts<GlobalOptions>(),
-    ...options,
-    mode: normalizeMode(options.mode),
-    resume: Boolean(program.opts<GlobalOptions>().resume),
-  })));
+  .option("--workspace <path>", "Workspace directory")
+  .action(async (options) => runCommand(async () => runChat(
+    normalizeChatCommandOptions(program.opts<GlobalOptions>(), options),
+  )));
 
 program
   .command("run")
@@ -290,11 +325,13 @@ skills.command("list")
   .option("--global", "List only global skills from ~/.cursor/skills")
   .option("--json", "Output JSONL")
   .action(async (options) => {
-    await runCommand(async () => withBackend(program.opts<GlobalOptions>(), {}, (deps) => listSkillsCommand({
-      workspace: options.workspace,
-      global: Boolean(options.global),
-      json: Boolean(options.json),
-    }, deps)));
+    await runCommand(async () => {
+      await listSkillsCommand({
+        workspace: options.workspace,
+        global: Boolean(options.global),
+        json: Boolean(options.json),
+      }, localCommandDeps());
+    });
   });
 skills.command("create")
   .argument("<name>", "Skill folder name (lowercase letters, numbers, hyphens)")
@@ -309,18 +346,20 @@ skills.command("create")
   .option("--json", "Output JSONL")
   .action(async (name: string, options) => {
     const paths = parseSkillPaths(options.paths);
-    await runCommand(async () => withBackend(program.opts<GlobalOptions>(), {}, (deps) => createSkillCommand({
-      name,
-      description: options.description,
-      ...(options.content !== undefined ? { content: options.content } : {}),
-      ...(options.file !== undefined ? { file: options.file } : {}),
-      ...(paths !== undefined ? { paths } : {}),
-      ...(options.manual ? { manual: true } : {}),
-      ...(options.global ? { global: true } : {}),
-      workspace: options.workspace,
-      ...(options.force ? { force: true } : {}),
-      ...(options.json ? { json: true } : {}),
-    }, deps)));
+    await runCommand(async () => {
+      await createSkillCommand({
+        name,
+        description: options.description,
+        ...(options.content !== undefined ? { content: options.content } : {}),
+        ...(options.file !== undefined ? { file: options.file } : {}),
+        ...(paths !== undefined ? { paths } : {}),
+        ...(options.manual ? { manual: true } : {}),
+        ...(options.global ? { global: true } : {}),
+        workspace: options.workspace,
+        ...(options.force ? { force: true } : {}),
+        ...(options.json ? { json: true } : {}),
+      }, localCommandDeps());
+    });
   });
 
 program.command("search").argument("<query>").option("--workspace <path>", "Workspace to search").option("--max-results <n>", "Limit", "20").option("--files-only", "File search instead of grep").option("--json", "Output JSONL").action(async (query: string, options) => {

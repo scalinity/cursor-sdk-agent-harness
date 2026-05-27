@@ -43,7 +43,7 @@ describe("skills library", () => {
     expect(markdown).toContain("name: review-pr");
     expect(markdown).toContain('description: Review pull requests for regressions.');
     expect(markdown).toContain("paths:");
-    expect(markdown).toContain("  - **/*.ts");
+    expect(markdown).toContain('  - "**/*.ts"');
     expect(markdown).toContain("disable-model-invocation: true");
     expect(markdown).toContain("# Review Pr");
   });
@@ -63,6 +63,15 @@ describe("skills library", () => {
 
     const skills = await listSkills({ workspace });
     expect(skills.some((skill) => skill.name === "write-tests" && skill.scope === "project")).toBe(true);
+  });
+
+  it("refuses invalid skill names before creating a path", async () => {
+    const workspace = await makeWorkspace();
+    await expect(createSkill({
+      name: "../escape",
+      description: "Try to leave the skills root.",
+      workspace,
+    })).rejects.toThrow(/lowercase letters/i);
   });
 
   it("refuses to overwrite unless forced", async () => {

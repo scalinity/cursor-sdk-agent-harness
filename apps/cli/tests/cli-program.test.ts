@@ -1,6 +1,12 @@
 import { Command } from "commander";
 import { describe, expect, it } from "vitest";
-import { attachDefaultChatAction, type GlobalOptions } from "../src/index.js";
+import { CliHttpError } from "../src/client/http.js";
+import {
+  attachDefaultChatAction,
+  normalizeChatCommandOptions,
+  shouldCreateFreshAgentForSavedSession,
+  type GlobalOptions,
+} from "../src/index.js";
 
 function createRootProgram(onDefault: (options: GlobalOptions) => Promise<void> | void) {
   let output = "";
@@ -84,5 +90,30 @@ describe("CLI root command parsing", () => {
 
     expect(calls).toEqual([]);
     expect(chatCalls).toBe(1);
+  });
+
+  it("normalizes chat options without injecting defaults over resumed sessions", () => {
+    expect(normalizeChatCommandOptions({ resume: true }, {})).toEqual({ resume: true });
+    expect(normalizeChatCommandOptions(
+      { server: "http://127.0.0.1:4783", resume: true },
+      { mode: "ask", model: "composer-2-5", workspace: "/work/project", agent: "agent-1" },
+    )).toEqual({
+      server: "http://127.0.0.1:4783",
+      resume: true,
+      mode: "ask",
+      model: "composer-2-5",
+      workspace: "/work/project",
+      agent: "agent-1",
+    });
+  });
+
+  it("only falls back from a saved agent when the server reports it missing", () => {
+    expect(shouldCreateFreshAgentForSavedSession(
+      new CliHttpError("missing", 404, "AGENT_NOT_FOUND", null),
+    )).toBe(true);
+    expect(shouldCreateFreshAgentForSavedSession(
+      new CliHttpError("network", 0, "NETWORK_ERROR", null),
+    )).toBe(false);
+    expect(shouldCreateFreshAgentForSavedSession(new Error("boom"))).toBe(false);
   });
 });

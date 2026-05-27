@@ -121,6 +121,13 @@ message. Replaced the old `agent working` copy with an animated, fixed-width
 `Thinking...` text cycle while preserving the existing spinner and running-tool
 status line behavior.
 
+### Follow-up refinement
+
+Slowed the `Thinking...` dot cadence and added a terminal-friendly fade gradient
+that sweeps back and forth across the thinking text. The gradient uses muted,
+warm-brand, and brand colors per character when the active label fits without
+truncation; narrow terminals fall back to the plain active-label color.
+
 ### Changes delivered
 
 - `StreamView` now reserves spacer rows before the active label when the visible
@@ -143,6 +150,11 @@ status line behavior.
 - `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` passed.
 - Reinstalled `/Applications/Cursor SDK Agent Harness.app` from
   `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app`.
+- Follow-up verification for the slower dots and gradient refinement: `pnpm -F
+  @harness/cli exec vitest run tests/repl/App.test.tsx tests/repl/StreamView.test.tsx`,
+  `pnpm -F @harness/cli typecheck`, `pnpm lint`, `pnpm typecheck`, `pnpm test`,
+  `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop`, and reinstalling the
+  app bundle all passed.
 
 ---
 
@@ -222,6 +234,41 @@ The header now shows the path without the literal `cwd` label.
 - Package-wide `pnpm exec eslint apps/cli` is currently blocked by unrelated
   dirty `apps/cli/src/lib/attachments.ts`, `apps/cli/src/repl/App.tsx`, and
   `apps/cli/tests/session.test.ts` lint errors.
+
+---
+
+## CLI Terminal Surface Transparency — 2026-05-27
+
+### Summary
+
+Fixed the interactive CLI startup look shown in the terminal screenshot by making
+large TUI surfaces transparent instead of painting the terminal with full-width
+background blocks. The header, transcript panel, input box, popups, boot screen,
+and status bar now keep the user's terminal profile background while preserving
+brand, border, and state colors.
+
+### Changes delivered
+
+- Set the default `background`, `panel`, and `panelSoft` theme roles to empty
+  transparent sentinels so existing `bg(theme.*)` calls no-op for full-surface
+  regions.
+- Added regression coverage proving the default theme does not emit Ink
+  `backgroundColor` props for those surface roles.
+- Completed the in-progress thinking-indicator visual helper slice so the CLI
+  package suite remains green: slower dot phases, ping-pong gradient peak math,
+  gradient segments, and active-label segment rendering.
+
+### Verification
+
+- `pnpm -F @harness/cli test` passed (27 files / 130 tests).
+- `pnpm -F @harness/cli typecheck` passed.
+- `pnpm exec eslint apps/cli` passed.
+- `pnpm typecheck` passed.
+- `pnpm lint` passed.
+- `pnpm test` passed.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` passed.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from
+  `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app`.
 
 ---
 
@@ -3914,3 +3961,34 @@ Moved CLI token and cost visibility out of per-turn transcript summary lines and
 ### Next phase
 
 Continue with the Tier 3 brand-accent confirmation gate when ready. Default proposed accent remains vermillion `#E04E1F`.
+
+---
+
+## CLI Refactor Tier 3.1 — Visual Tokens — 2026-05-27
+
+### Summary
+
+Accepted the recorded default Tier 3 brand accent and applied it as vermillion `#E04E1F`. The CLI theme now uses explicit `brand` / `brandWarm` roles instead of the generic `accent` naming, and status semantics are separated into `stateReady`, `stateActive`, `stateWarning`, `stateDanger`, and `stateSuccess`. Render styles no longer duplicate fallback hex values; they derive missing colors from `createTuiTheme({})`, keeping `apps/cli/src/repl/theme.ts` as the single CLI color source. `RENDERING_AUDIT.md` now records the Tier 3.1 color-drift resolution.
+
+### Files modified
+
+- `apps/cli/src/repl/theme.ts` — introduces the vermillion brand token and explicit state/code color roles.
+- `apps/cli/src/render/styles.ts` — renames the render `accent` token to `brand` and removes duplicated fallback hex literals.
+- `apps/cli/src/repl/App.tsx`, `BootScreen.tsx`, `HeaderBar.tsx`, `InputBar.tsx`, `MentionPopup.tsx`, `SlashPalette.tsx`, and `StreamView.tsx` — migrate call-sites to brand/state tokens.
+- `apps/cli/tests/render/styles.test.ts` and `apps/cli/tests/repl/tui-layout.test.ts` — update tests to use the theme factory and renamed token.
+- `RENDERING_AUDIT.md` — records the resolved Tier 3.1 color drift.
+- `docs/IMPLEMENTATION_STATUS.md` — recorded this status entry.
+
+### Verification
+
+- `pnpm --filter @harness/cli typecheck` — pass.
+- `pnpm --filter @harness/cli test` — pass, 27 files / 125 tests.
+- `pnpm typecheck` — pass.
+- `pnpm lint` — pass.
+- `pnpm test` — pass: shared 39, eslint-plugin 6, web 147, server 468 passing / 1 skipped, CLI 125, desktop 0 test files, scripts 11.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass; rebuilt web/server/desktop and packaged macOS app.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` — installed timestamp May 27 03:05:02 2026.
+
+### Next phase
+
+Continue with the next Tier 3 visual identity subsection when its prompt or subsection scope is provided.

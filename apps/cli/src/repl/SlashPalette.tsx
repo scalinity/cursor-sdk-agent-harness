@@ -47,7 +47,7 @@ export function SlashPalette({ items, selectedIndex, theme }: SlashPaletteProps)
       {items.slice(0, 6).map((item, index) => {
         const selected = index === selectedIndex;
         return (
-          <Text key={item.command} {...fg(selected ? theme.accent : theme.text)} bold={selected}>
+          <Text key={item.command} {...fg(selected ? theme.brand : theme.text)} bold={selected}>
             {selected ? "◆" : "◇"} /{item.command}{item.args ? ` ${item.args}` : ""} <Text {...fg(theme.muted)}>· {item.description}</Text>
           </Text>
         );

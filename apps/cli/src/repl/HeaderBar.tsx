@@ -19,6 +19,7 @@ export interface HeaderBarProps {
 
 export function HeaderBar({
   width,
+  workspace,
   cwdBase,
   modelId,
   accountLabel,
@@ -28,7 +29,7 @@ export function HeaderBar({
 }: HeaderBarProps) {
   const leftWidth = Math.max(18, Math.floor(width * 0.56));
   const rightWidth = Math.max(12, width - leftWidth - 4);
-  const cwdLabel = formatHeaderCwdLabel(cwdBase, cwdBase, leftWidth);
+  const cwdLabel = formatHeaderCwdLabel(workspace, cwdBase, leftWidth);
   const title = width < 84 ? "HARNESS" : "Cursor Harness";
   const queuedLabel = queuedPrompts > 0 ? `${queuedPrompts} queued` : "";
   const modelLabel = truncateMiddle(
@@ -38,7 +39,7 @@ export function HeaderBar({
   return (
     <Box flexDirection="column" width={width} paddingX={1} paddingTop={0} {...bg(theme.background)}>
       <Box width={Math.max(1, width - 2)} justifyContent="space-between">
-        <Text {...fg(theme.accentWarm)} bold>
+        <Text {...fg(theme.brand)} bold>
           ▌ {title}
         </Text>
         <Text {...fg(chromeStateColor(theme, chromeState))}>{modelLabel}</Text>
@@ -76,8 +77,8 @@ function sanitizeChromeLine(value: string): string {
 }
 
 function chromeStateColor(theme: TuiTheme, state: ChromeState): string | undefined {
-  if (state === "ready") return theme.success;
-  if (state === "streaming") return theme.accent;
-  if (state === "tool-running") return theme.warning;
-  return theme.danger;
+  if (state === "ready") return theme.stateReady;
+  if (state === "streaming") return theme.stateActive;
+  if (state === "tool-running") return theme.stateWarning;
+  return theme.stateDanger;
 }

@@ -58,7 +58,7 @@ export function MentionPopup({ results, selectedIndex, open = results !== null, 
       {items.map((item, index) => {
         const selected = index === selectedIndex;
         return (
-          <Text key={`${item.kind}:${item.value}`} {...fg(selected ? theme.accent : theme.text)} bold={selected}>
+          <Text key={`${item.kind}:${item.value}`} {...fg(selected ? theme.brand : theme.text)} bold={selected}>
             {selected ? "◆ " : "◇ "}
             {iconForKind(item.kind)} {item.label} <Text {...fg(theme.muted)}>{item.detail}</Text>
           </Text>

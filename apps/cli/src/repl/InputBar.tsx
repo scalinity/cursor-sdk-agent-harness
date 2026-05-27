@@ -248,17 +248,17 @@ export function InputBar({
           {index === 0 ? (
             <>
               {chips.map((chip) => (
-                <Text key={chip.id} {...fg(theme.accent)}>[@{chip.mention.displayLabel}] </Text>
+                <Text key={chip.id} {...fg(theme.brand)}>[@{chip.mention.displayLabel}] </Text>
               ))}
               {imageAttachments.map((attachment) => (
-                <Text key={attachment.id} {...fg(theme.accentWarm)}>[img:{formatImageChipLabel(attachment.name)}] </Text>
+                <Text key={attachment.id} {...fg(theme.brandWarm)}>[img:{formatImageChipLabel(attachment.name)}] </Text>
               ))}
             </>
           ) : null}
-          <Text {...fg(theme.accent)}>{index === 0 ? "❯ " : "  "}</Text>
+          <Text {...fg(theme.brand)}>{index === 0 ? "❯ " : "  "}</Text>
           {hiddenLineCount > 0 && index === 0 ? <Text {...fg(theme.muted)}>… </Text> : null}
           {line.length > 0 ? <Text {...fg(theme.text)}>{line}</Text> : null}
-          {index === lastLineIndex ? <Text {...fg(theme.accent)}>█</Text> : null}
+          {index === lastLineIndex ? <Text {...fg(theme.brand)}>█</Text> : null}
         </Box>
       ))}
     </Box>

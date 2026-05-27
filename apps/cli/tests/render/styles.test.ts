@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createStyles } from "../../src/render/styles.js";
+import { createTuiTheme } from "../../src/repl/theme.js";
 
 describe("createStyles", () => {
   it("is identity for every token in NO_COLOR mode", () => {
@@ -16,16 +17,7 @@ describe("createStyles", () => {
     // Smoke-only: chalk auto-disables color in the non-TTY test env, so these
     // assert the colored branch returns the text intact, not that it adds ANSI.
     // The NO_COLOR identity branch above is the one meaningfully tested (.toBe).
-    const s = createStyles({
-      noColor: false,
-      text: "#eef2f7",
-      muted: "#9aa3ad",
-      accent: "#9bd7d8",
-      warning: "#f2c94c",
-      danger: "#ff7a8a",
-      success: "#95d475",
-      cyan: "#7dd7ff",
-    });
+    const s = createStyles(createTuiTheme({}));
     expect(s.error("boom")).toContain("boom");
     expect(s.tool("read x")).toContain("read x");
     expect(s.diffAdd("+added")).toContain("+added");

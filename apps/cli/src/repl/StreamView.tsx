@@ -133,22 +133,67 @@ export function renderViewportLines(text: string, width: number, height: number,
   const viewportHeight = Math.max(1, height);
   const maxOffset = Math.max(0, wrapped.length - viewportHeight);
   const offset = Math.min(Math.max(0, scrollOffset), maxOffset);
-  const start = Math.max(0, wrapped.length - viewportHeight - offset);
-  return wrapped.slice(start, start + viewportHeight);
+  return viewportLinesFromWrapped(wrapped, viewportHeight, offset);
+}
+
+export interface StreamViewportState {
+  rendered: string;
+  lines: string[];
+  bodyHeight: number;
+  maxOffset: number;
+  effectiveOffset: number;
+  showScrollIndicator: boolean;
+  streamScrollActive: boolean;
+}
+
+export function computeStreamViewportState(
+  items: readonly StreamItem[],
+  width: number,
+  height: number,
+  scrollOffset: number,
+  activeLabel?: string | undefined,
+): StreamViewportState {
+  const safeWidth = Math.max(12, width);
+  const rendered = renderStreamItems(items, safeWidth);
+  const wrapped = rendered.length > 0 ? hardWrapText(rendered, safeWidth) : [];
+  const labelHeight = activeLabel ? 1 : 0;
+  const bodyWithoutIndicator = Math.max(1, height - labelHeight);
+  const maxWithoutIndicator = Math.max(0, wrapped.length - bodyWithoutIndicator);
+  const requestedOffset = Math.max(0, scrollOffset);
+  let showScrollIndicator = requestedOffset > 0 && maxWithoutIndicator > 0 && rendered.length > 0;
+  let bodyHeight = Math.max(1, height - labelHeight - (showScrollIndicator ? 1 : 0));
+  let maxOffset = Math.max(0, wrapped.length - bodyHeight);
+  let effectiveOffset = Math.min(requestedOffset, maxOffset);
+  showScrollIndicator = effectiveOffset > 0 && maxOffset > 0 && rendered.length > 0;
+  bodyHeight = Math.max(1, height - labelHeight - (showScrollIndicator ? 1 : 0));
+  maxOffset = Math.max(0, wrapped.length - bodyHeight);
+  effectiveOffset = Math.min(requestedOffset, maxOffset);
+  const lines = rendered.length > 0 ? viewportLinesFromWrapped(wrapped, bodyHeight, effectiveOffset) : [];
+  return {
+    rendered,
+    lines,
+    bodyHeight,
+    maxOffset,
+    effectiveOffset,
+    showScrollIndicator,
+    streamScrollActive: maxOffset > 0,
+  };
 }
 
 export function maxStreamScrollOffset(items: readonly StreamItem[], width: number, height: number, activeLabel?: string | undefined): number {
-  return clampStreamScrollOffset(items, width, height, Number.MAX_SAFE_INTEGER, activeLabel);
+  return computeStreamViewportState(items, width, height, Number.MAX_SAFE_INTEGER, activeLabel).maxOffset;
 }
 
 export function clampStreamScrollOffset(items: readonly StreamItem[], width: number, height: number, scrollOffset: number, activeLabel?: string | undefined): number {
-  const rendered = renderStreamItems(items, Math.max(12, width));
-  const labelHeight = activeLabel ? 1 : 0;
-  const indicatorHeight = scrollOffset > 0 && rendered.length > 0 ? 1 : 0;
-  const bodyHeight = Math.max(1, height - labelHeight - indicatorHeight);
-  const wrappedLineCount = rendered.length > 0 ? hardWrapText(rendered, Math.max(12, width)).length : 0;
-  const maxOffset = Math.max(0, wrappedLineCount - Math.max(1, bodyHeight));
-  return Math.min(Math.max(0, scrollOffset), maxOffset);
+  return computeStreamViewportState(items, width, height, scrollOffset, activeLabel).effectiveOffset;
+}
+
+function viewportLinesFromWrapped(wrapped: readonly string[], height: number, scrollOffset: number): string[] {
+  const viewportHeight = Math.max(1, height);
+  const maxOffset = Math.max(0, wrapped.length - viewportHeight);
+  const offset = Math.min(Math.max(0, scrollOffset), maxOffset);
+  const start = Math.max(0, wrapped.length - viewportHeight - offset);
+  return wrapped.slice(start, start + viewportHeight);
 }
 
 export function formatScrollIndicator(scrollOffset: number, width: number): string {
@@ -172,18 +217,31 @@ export function computeActiveLabelSpacerHeight(visibleLineCount: number, bodyHei
   return Math.max(0, Math.max(1, bodyHeight) - Math.max(1, visibleLineCount));
 }
 
+export interface ActiveLabelSegment {
+  text: string;
+  color?: string;
+}
+
 export interface StreamViewProps {
   items: readonly StreamItem[];
   height?: number;
   width?: number;
   scrollOffset?: number;
   activeLabel?: string | undefined;
+  activeLabelSegments?: readonly ActiveLabelSegment[] | undefined;
+  viewportState?: StreamViewportState;
   theme?: TuiTheme;
 }
 
-export const StreamView = memo(function StreamView({ items, height, width = process.stdout.columns ?? 80, scrollOffset = 0, activeLabel, theme = createTuiTheme() }: StreamViewProps) {
+export const StreamView = memo(function StreamView({ items, height, width = process.stdout.columns ?? 80, scrollOffset = 0, activeLabel, activeLabelSegments, viewportState, theme = createTuiTheme() }: StreamViewProps) {
   const safeWidth = Math.max(12, width);
   const rendered = useMemo(() => renderStreamItems(items, safeWidth), [items, safeWidth]);
+  const viewport = useMemo(
+    () => height === undefined
+      ? undefined
+      : (viewportState ?? computeStreamViewportState(items, safeWidth, height, scrollOffset, activeLabel)),
+    [activeLabel, height, items, safeWidth, scrollOffset, viewportState],
+  );
   if (height === undefined) {
     return (
       <Box flexDirection="column">
@@ -191,28 +249,42 @@ export const StreamView = memo(function StreamView({ items, height, width = proc
       </Box>
     );
   }
-  const labelHeight = activeLabel ? 1 : 0;
-  const showScrollIndicator = scrollOffset > 0 && rendered.length > 0;
-  const indicatorHeight = showScrollIndicator ? 1 : 0;
-  const bodyHeight = Math.max(1, height - labelHeight - indicatorHeight);
-  const lines = useMemo(() => rendered.length > 0 ? renderViewportLines(rendered, safeWidth, bodyHeight, scrollOffset) : [], [bodyHeight, rendered, scrollOffset, safeWidth]);
+  const lines = viewport?.lines ?? [];
+  const bodyHeight = viewport?.bodyHeight ?? Math.max(1, height - (activeLabel ? 1 : 0));
+  const effectiveOffset = viewport?.effectiveOffset ?? 0;
+  const showScrollIndicator = viewport?.showScrollIndicator ?? false;
   const visibleLineCount = lines.length === 0 ? 1 : lines.length;
   const activeLabelSpacerHeight = activeLabel ? computeActiveLabelSpacerHeight(visibleLineCount, bodyHeight) : 0;
-  const indicatorText = formatScrollIndicator(scrollOffset, safeWidth);
+  const indicatorText = formatScrollIndicator(effectiveOffset, safeWidth);
   return (
     <Box flexDirection="column" height={height}>
       {lines.length === 0 ? <Text {...fg(theme.muted)}>No messages yet. Start with a prompt, @file, or /command.</Text> : lines.map((line, index) => <Text key={`${index}:${line}`}>{line}</Text>)}
       {activeLabelSpacerHeight > 0 ? <Box height={activeLabelSpacerHeight} /> : null}
       {showScrollIndicator ? <Text {...fg(theme.muted)}>{indicatorText}</Text> : null}
-      {activeLabel ? <Text {...fg(theme.accent)}>{activeLabel}</Text> : null}
+      {activeLabel ? renderActiveLabel(activeLabel, activeLabelSegments, theme) : null}
     </Box>
   );
 });
 
+function renderActiveLabel(label: string, segments: readonly ActiveLabelSegment[] | undefined, theme: TuiTheme): React.ReactElement {
+  if (segments && segments.length > 0 && segments.map((segment) => segment.text).join("") === label) {
+    return (
+      <Text>
+        {segments.map((segment, index) => (
+          <Text key={`${index}:${segment.text}`} {...fg(segment.color)}>
+            {segment.text}
+          </Text>
+        ))}
+      </Text>
+    );
+  }
+  return <Text {...fg(theme.brand)}>{label}</Text>;
+}
+
 function renderStreamItem(item: StreamItem, width: number): string {
   switch (item.type) {
     case "user":
-      return `${styles.accent(formatTurnHeader("you", width, item.at))}\n${styles.user(sanitizeTerminalText(item.text))}`;
+      return `${styles.brand(formatTurnHeader("you", width, item.at))}\n${styles.user(sanitizeTerminalText(item.text))}`;
     case "assistant":
       return `${styles.muted(formatTurnHeader("claude", width))}\n${renderMarkdown(item.text)}`;
     case "thinking":

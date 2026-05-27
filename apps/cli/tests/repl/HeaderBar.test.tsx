@@ -48,6 +48,24 @@ describe("HeaderBar helpers", () => {
     expect(text).not.toContain("cwd .");
   });
 
+  it("renders the active workspace when it differs from the launch cwd", () => {
+    const text = collectText(
+      HeaderBar({
+        width: 100,
+        workspace: "/work/proj/packages/cli",
+        cwdBase: "/work/proj",
+        modelId: "composer-2-5-fast",
+        accountLabel: "local",
+        chromeState: "ready",
+        queuedPrompts: 0,
+        theme: createTuiTheme({ NO_COLOR: "1" }),
+      }),
+    );
+
+    expect(text).toContain("packages/cli");
+    expect(text).not.toContain("/work/projcomposer");
+  });
+
   it("keeps normalized cwd to a single terminal line", () => {
     expect(formatHeaderCwdLabel("/work/proj/evil\nrow", "/work/proj", 80)).toBe("evil row");
   });

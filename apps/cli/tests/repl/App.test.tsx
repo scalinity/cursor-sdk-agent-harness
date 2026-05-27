@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveChromeState, formatThinkingIndicatorText, formatTurnClock } from "../../src/repl/App.js";
+import { deriveChromeState, formatThinkingGradientSegments, formatThinkingIndicatorText, formatTurnClock, thinkingGradientPeakIndex } from "../../src/repl/App.js";
 
 describe("App turn formatting", () => {
   it("formats the turn clock as HH:MM in local time", () => {
@@ -7,13 +7,46 @@ describe("App turn formatting", () => {
     expect(formatTurnClock(new Date(2026, 0, 1, 9, 5))).toBe("09:05");
   });
 
-  it("animates the thinking indicator text with stable width", () => {
-    expect([0, 1, 2, 3, 4].map(formatThinkingIndicatorText)).toEqual([
+  it("animates the thinking indicator text with stable width and slower dots", () => {
+    expect([0, 1, 2, 3, 4, 7, 8, 11, 12].map(formatThinkingIndicatorText)).toEqual([
+      "Thinking   ",
+      "Thinking   ",
+      "Thinking   ",
       "Thinking   ",
       "Thinking.  ",
+      "Thinking.  ",
+      "Thinking.. ",
       "Thinking.. ",
       "Thinking...",
-      "Thinking   ",
+    ]);
+  });
+
+  it("moves the thinking gradient peak back and forth across the word", () => {
+    expect([0, 1, 2, 3, 4, 5, 6].map((frame) => thinkingGradientPeakIndex(frame, 4))).toEqual([
+      0,
+      1,
+      2,
+      3,
+      2,
+      1,
+      0,
+    ]);
+  });
+
+  it("formats a fade gradient around the active thinking character", () => {
+    const segments = formatThinkingGradientSegments("Thinking...", 2, {
+      dim: "dim",
+      mid: "mid",
+      bright: "bright",
+    });
+
+    expect(segments.map((segment) => segment.text).join("")).toBe("Thinking...");
+    expect(segments.slice(0, 5).map((segment) => segment.color)).toEqual([
+      "dim",
+      "mid",
+      "bright",
+      "mid",
+      "dim",
     ]);
   });
 });

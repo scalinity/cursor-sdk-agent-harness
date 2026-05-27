@@ -31,6 +31,11 @@ export interface ImageAttachment {
   image: SdkImage;
 }
 
+export interface SelectedImageDropPaths {
+  selected: string[];
+  skippedCount: number;
+}
+
 let counter = 0;
 
 function nextId(): string {
@@ -264,6 +269,22 @@ export function mergeImageAttachments(
   const merged = [...current, ...incoming];
   if (merged.length <= MAX_IMAGE_ATTACHMENTS) return merged;
   return merged.slice(0, MAX_IMAGE_ATTACHMENTS);
+}
+
+export function selectImageDropPaths(paths: readonly string[], existingCount: number): SelectedImageDropPaths {
+  const remainingSlots = Math.max(0, MAX_IMAGE_ATTACHMENTS - Math.max(0, existingCount));
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const filePath of paths) {
+    const normalized = normalizeDroppedPath(filePath);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    if (unique.length < remainingSlots) unique.push(normalized);
+  }
+  return {
+    selected: unique,
+    skippedCount: Math.max(0, seen.size - MAX_IMAGE_ATTACHMENTS),
+  };
 }
 
 export function formatImageDropFailure(results: PromiseSettledResult<ImageAttachment>[]): string {

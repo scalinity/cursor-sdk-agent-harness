@@ -9,8 +9,10 @@ import {
   formatImageChipLabel,
   formatImageDropFailure,
   isImagePath,
+  MAX_IMAGE_ATTACHMENTS,
   mergeImageAttachments,
   readImageFromPath,
+  selectImageDropPaths,
   shouldTreatAsImageDrop,
   unwrapQuotedPath,
 } from "../../src/lib/attachments.js";
@@ -100,6 +102,15 @@ describe("CLI attachments", () => {
     expect(attachment.name).toBe("shot.png");
     expect(attachment.image.mimeType).toBe("image/png");
     expect(attachmentImages([attachment])).toEqual([attachment.image]);
+  });
+
+  it("deduplicates and caps dropped paths before reading files", () => {
+    const paths = Array.from({ length: MAX_IMAGE_ATTACHMENTS + 4 }, (_, index) => `/tmp/${index}.png`);
+    const result = selectImageDropPaths([paths[0]!, paths[0]!, ...paths], 2);
+
+    expect(result.selected).toHaveLength(MAX_IMAGE_ATTACHMENTS - 2);
+    expect(result.selected[0]).toBe(paths[0]);
+    expect(result.skippedCount).toBe(4);
   });
 
   it("caps merged attachments at the shared max", () => {

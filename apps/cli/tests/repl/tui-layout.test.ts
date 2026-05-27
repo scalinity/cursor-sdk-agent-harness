@@ -63,8 +63,17 @@ describe("fullscreen TUI helpers", () => {
 
   it("omits Ink color props in NO_COLOR mode", () => {
     const theme = createTuiTheme({ NO_COLOR: "1" });
-    expect(fg(theme.accent)).toEqual({});
+    expect(fg(theme.brand)).toEqual({});
     expect(bg(theme.panel)).toEqual({});
     expect(border(theme.border)).toEqual({});
+  });
+
+  it("keeps default surfaces transparent so terminal profiles do not become gray slabs", () => {
+    const theme = createTuiTheme({});
+    expect(bg(theme.background)).toEqual({});
+    expect(bg(theme.panel)).toEqual({});
+    expect(bg(theme.panelSoft)).toEqual({});
+    expect(fg(theme.brand)).toEqual({ color: "#E04E1F" });
+    expect(border(theme.border)).toEqual({ borderColor: "#66717f" });
   });
 });

@@ -1,4 +1,5 @@
-import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, lstat, mkdir, open, readdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { CliUsageError } from "../errors.js";
@@ -59,10 +60,33 @@ export function formatSkillTitle(name: string): string {
 }
 
 function yamlQuote(value: string): string {
-  if (/[:#\n\r"'\\]/.test(value) || value.startsWith(" ") || value.endsWith(" ")) {
-    return JSON.stringify(value);
+  return JSON.stringify(value);
+}
+
+function parseYamlScalar(value: string): string {
+  if (value.startsWith("\"") && value.endsWith("\"")) {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return typeof parsed === "string" ? parsed : value;
+    } catch {
+      return value.slice(1, -1);
+    }
   }
+  if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1);
   return value;
+}
+
+function assertValidSkillName(name: string): void {
+  if (!isValidSkillName(name)) {
+    throw new CliUsageError("Skill name must use lowercase letters, numbers, and hyphens only.");
+  }
+}
+
+function assertPathInside(parent: string, child: string): void {
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new CliUsageError("Skill path must stay inside the skills directory.");
+  }
 }
 
 function parseFrontmatter(raw: string): { frontmatter: SkillFrontmatter; body: string } {
@@ -74,10 +98,7 @@ function parseFrontmatter(raw: string): { frontmatter: SkillFrontmatter; body: s
     const colonIdx = line.indexOf(":");
     if (colonIdx === -1) continue;
     const key = line.slice(0, colonIdx).trim();
-    let value = line.slice(colonIdx + 1).trim();
-    if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
+    const value = parseYamlScalar(line.slice(colonIdx + 1).trim());
     if (key === "name") frontmatter.name = value;
     else if (key === "description") frontmatter.description = value;
   }
@@ -86,9 +107,7 @@ function parseFrontmatter(raw: string): { frontmatter: SkillFrontmatter; body: s
 }
 
 export function buildSkillMarkdown(options: CreateSkillOptions): string {
-  if (!isValidSkillName(options.name)) {
-    throw new CliUsageError("Skill name must use lowercase letters, numbers, and hyphens only.");
-  }
+  assertValidSkillName(options.name);
   if (options.description.trim().length === 0) {
     throw new CliUsageError("Skill description is required.");
   }
@@ -144,17 +163,55 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
+async function assertNotSymlink(filePath: string, label: string): Promise<void> {
+  try {
+    const entry = await lstat(filePath);
+    if (entry.isSymbolicLink()) throw new CliUsageError(`${label} must not be a symlink: ${filePath}`);
+    if (label === "Skill directory" && !entry.isDirectory()) throw new CliUsageError(`${label} must be a directory: ${filePath}`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+}
+
+async function writeSkillFile(filePath: string, content: string, force: boolean | undefined): Promise<void> {
+  await assertNotSymlink(filePath, "Skill file");
+  const flags = constants.O_WRONLY
+    | constants.O_CREAT
+    | constants.O_TRUNC
+    | constants.O_NOFOLLOW
+    | (force ? 0 : constants.O_EXCL);
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(filePath, flags, 0o600);
+    await handle.writeFile(content, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new CliUsageError(`Skill already exists at ${filePath}. Pass --force to overwrite.`);
+    }
+    throw error;
+  } finally {
+    await handle?.close();
+  }
+}
+
 export async function createSkill(options: CreateSkillOptions): Promise<CreatedSkill> {
+  assertValidSkillName(options.name);
   const skillsRoot = resolveSkillsRoot(options);
   const directory = skillDirectory(skillsRoot, options.name);
   const filePath = skillFilePath(skillsRoot, options.name);
+  assertPathInside(skillsRoot, directory);
+  assertPathInside(skillsRoot, filePath);
 
   if (await pathExists(filePath) && !options.force) {
     throw new CliUsageError(`Skill already exists at ${filePath}. Pass --force to overwrite.`);
   }
 
-  await mkdir(directory, { recursive: true });
-  await writeFile(filePath, buildSkillMarkdown(options), "utf8");
+  await mkdir(skillsRoot, { recursive: true, mode: 0o700 });
+  await assertNotSymlink(skillsRoot, "Skill directory");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await assertNotSymlink(directory, "Skill directory");
+  await writeSkillFile(filePath, buildSkillMarkdown(options), options.force);
 
   return {
     created: true,
@@ -168,6 +225,8 @@ export async function createSkill(options: CreateSkillOptions): Promise<CreatedS
 async function readSkillAt(filePath: string, scope: SkillSummary["scope"]): Promise<SkillSummary | null> {
   let raw: string;
   try {
+    const entry = await lstat(filePath);
+    if (!entry.isFile() || entry.isSymbolicLink()) return null;
     raw = await readFile(filePath, "utf8");
   } catch {
     return null;

@@ -10,12 +10,14 @@ export interface TuiTheme {
   borderFocus?: string;
   text?: string;
   muted?: string;
-  accent?: string;
-  accentWarm?: string;
-  warning?: string;
-  danger?: string;
-  success?: string;
-  cyan?: string;
+  brand?: string;
+  brandWarm?: string;
+  code?: string;
+  stateReady?: string;
+  stateActive?: string;
+  stateWarning?: string;
+  stateDanger?: string;
+  stateSuccess?: string;
 }
 
 export function createTuiTheme(env: NodeJS.ProcessEnv = process.env): TuiTheme {
@@ -23,28 +25,30 @@ export function createTuiTheme(env: NodeJS.ProcessEnv = process.env): TuiTheme {
   if (noColor) return { noColor };
   return {
     noColor,
-    background: "#1f2530",
-    panel: "#242b36",
-    panelSoft: "#2b3340",
+    background: "",
+    panel: "",
+    panelSoft: "",
     border: "#66717f",
-    borderFocus: "#9bd7d8",
+    borderFocus: "#E04E1F",
     text: "#eef2f7",
     muted: "#9aa3ad",
-    accent: "#9bd7d8",
-    accentWarm: "#d48360",
-    warning: "#f2c94c",
-    danger: "#ff7a8a",
-    success: "#95d475",
-    cyan: "#7dd7ff",
+    brand: "#E04E1F",
+    brandWarm: "#d48360",
+    code: "#7dd7ff",
+    stateReady: "#95d475",
+    stateActive: "#9bd7d8",
+    stateWarning: "#f2c94c",
+    stateDanger: "#ff7a8a",
+    stateSuccess: "#95d475",
   };
 }
 
 export function statusColor(theme: TuiTheme, status: "ready" | "connecting" | "connected" | "reconnecting" | "disconnected"): string | undefined {
   if (theme.noColor) return undefined;
-  if (status === "connected") return theme.success;
-  if (status === "connecting" || status === "reconnecting") return theme.warning;
-  if (status === "disconnected") return theme.danger;
-  return theme.accent;
+  if (status === "connected") return theme.stateSuccess;
+  if (status === "connecting" || status === "reconnecting") return theme.stateWarning;
+  if (status === "disconnected") return theme.stateDanger;
+  return theme.stateReady;
 }
 
 export function fg(color: string | undefined): { color?: string } {

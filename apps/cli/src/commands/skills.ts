@@ -66,6 +66,9 @@ export async function createSkillCommand(
   }
 
   let content = options.content;
+  if (options.file && options.content !== undefined) {
+    throw new CliUsageError("Use either --content or --file, not both.");
+  }
   if (options.file) {
     content = await readFile(options.file, "utf8");
   }

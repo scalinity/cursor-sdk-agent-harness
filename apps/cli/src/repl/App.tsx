@@ -24,7 +24,13 @@ import { applyStreamScrollDelta, computeStreamViewportLayout, resolveStreamScrol
 import { StatusBar, type SessionCostState, type SessionTokenState } from "./StatusBar.js";
 import { formatActiveToolLine } from "./ToolCallLine.js";
 import { createTuiTheme, bg, border, fg, truncateMiddle, MIN_COLUMNS, MIN_ROWS } from "./theme.js";
-import { formatThinkingIndicatorText, useSpinnerFrameState } from "./useSpinnerFrame.js";
+import {
+  formatThinkingGradientSegments,
+  formatThinkingIndicatorText,
+  thinkingGradientPeakIndex,
+  useSpinnerFrameState,
+  type ThinkingGradientSegment,
+} from "./useSpinnerFrame.js";
 import { useTerminalSize } from "./useTerminalSize.js";
 import { useReplCleanup, type ReplCleanupController } from "./useReplCleanup.js";
 import { createSessionSnapshot, type CliSessionSnapshot } from "../session.js";
@@ -62,7 +68,7 @@ export function formatTurnClock(date: Date = new Date()): string {
   return date.toTimeString().slice(0, 5);
 }
 
-export { formatThinkingIndicatorText };
+export { formatThinkingGradientSegments, formatThinkingIndicatorText, thinkingGradientPeakIndex };
 
 export function App({
   agent,
@@ -124,10 +130,26 @@ export function App({
   // the active context as "local" rather than inventing account support here.
   // Flag if wrong.
   const accountLabel = "local";
+  const thinkingText = formatThinkingIndicatorText(spinnerState.index);
+  const thinkingLabelText = `${spinner} ${thinkingText}`;
+  const thinkingGradientPeak = thinkingGradientPeakIndex(spinnerState.index, thinkingText.length);
   const activeLabel = turnActive
     ? (runningTool && toolStartRef.current
         ? truncateMiddle(formatActiveToolLine(spinner, runningTool, Date.now() - toolStartRef.current.startMs), streamWidth)
-        : truncateMiddle(`${spinner} ${isStartingRun ? "starting run" : formatThinkingIndicatorText(spinnerState.index)}`, streamWidth))
+        : truncateMiddle(isStartingRun ? `${spinner} starting run` : thinkingLabelText, streamWidth))
+    : undefined;
+  const spinnerSegment: ThinkingGradientSegment | undefined = spinner
+    ? (theme.brand ? { text: `${spinner} `, color: theme.brand } : { text: `${spinner} ` })
+    : undefined;
+  const activeLabelSegments: ThinkingGradientSegment[] | undefined = turnActive && !runningTool && !isStartingRun && activeLabel === thinkingLabelText
+    ? [
+        ...(spinnerSegment ? [spinnerSegment] : []),
+        ...formatThinkingGradientSegments(thinkingText, thinkingGradientPeak, {
+          dim: theme.muted,
+          mid: theme.brandWarm,
+          bright: theme.brand,
+        }),
+      ]
     : undefined;
   const cleanupController = useReplCleanup({ stream, activeRunId, isStartingRun });
   const sessionStateRef = useRef({
@@ -450,8 +472,8 @@ export function App({
         queuedPrompts={queuedPrompts.length}
         theme={theme}
       />
-      <Box flexDirection="column" height={layout.scrollHeight} borderStyle="round" {...border(effectiveOffset > 0 ? theme.accent : theme.border)} paddingX={1} {...bg(theme.panel)}>
-        <StreamView items={buffer.items} height={streamHeight} width={streamWidth} scrollOffset={effectiveOffset} activeLabel={activeLabel} theme={theme} />
+      <Box flexDirection="column" height={layout.scrollHeight} borderStyle="round" {...border(effectiveOffset > 0 ? theme.brand : theme.border)} paddingX={1} {...bg(theme.panel)}>
+        <StreamView items={buffer.items} height={streamHeight} width={streamWidth} scrollOffset={effectiveOffset} activeLabel={activeLabel} activeLabelSegments={activeLabelSegments} theme={theme} />
       </Box>
       {mentionOpen ? <MentionPopup results={mentionResults} selectedIndex={mentionIndex} open={mentionOpen} theme={theme} /> : null}
       {!mentionOpen && slashOpen ? <SlashPalette items={slashItems} selectedIndex={slashIndex} theme={theme} /> : null}
@@ -499,8 +521,8 @@ export function App({
 function TooSmallTerminal({ columns, rows, theme }: { columns: number; rows: number; theme: ReturnType<typeof createTuiTheme> }) {
   return (
     <Box flexDirection="column" paddingX={1} {...bg(theme.background)}>
-      <Text {...fg(theme.accentWarm)} bold>▌ Cursor Harness</Text>
-      <Text {...fg(theme.warning)}>terminal too small: {columns}x{rows}</Text>
+      <Text {...fg(theme.brand)} bold>▌ Cursor Harness</Text>
+      <Text {...fg(theme.stateWarning)}>terminal too small: {columns}x{rows}</Text>
       <Text {...fg(theme.muted)}>minimum supported size is {MIN_COLUMNS}x{MIN_ROWS}</Text>
     </Box>
   );
