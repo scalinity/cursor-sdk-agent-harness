@@ -34,6 +34,50 @@ each phase. Use it as the single source of truth for "what is decided" vs
 
 ---
 
+## CLI Refactor Tier 2 — Information Architecture — 2026-05-27
+
+### Summary
+
+Deduplicated the CLI chrome so cwd lives in the header, session cost lives in the
+status bar with an explicit label, and implementation-specific websocket wording
+is removed from default chrome. The header now uses the Tier 1 `normalizePath`
+path display and shows `{model-id} · local · {state} ●`, where state is derived
+from the existing run/tool/error lifecycle.
+
+### Changes delivered
+
+- `HeaderBar` renders cwd through `normalizePath(workspace, process.cwd())` and
+  replaces the old `{mode} · {model}` / activity split with a single
+  model/account/state indicator.
+- `StatusBar` no longer repeats cwd, model, mode, run id, queue state, or
+  websocket status; it keeps labeled session cost plus command hints.
+- Account/profile is surfaced as `local` because CLI preferences have no active
+  account/profile field; `NOTES.md` records the multi-account follow-up.
+- Live turn usage is modeled explicitly, but current stream frames expose usage
+  only on `run.final_result`; during a live run the status bar says `turn usage
+  unavailable` rather than estimating from character count. `NOTES.md` records
+  backend instrumentation or an explicitly labeled heuristic as the follow-up.
+
+### Verification
+
+- Scoped CLI gates passed after each subsection: `pnpm -F @harness/cli
+  typecheck`, `pnpm -F @harness/cli test`, and `pnpm exec eslint apps/cli`.
+- Full repo gates passed: `pnpm typecheck`, `pnpm lint`, and `pnpm test`
+  (shared 39, eslint-plugin 6, server 468 passing / 1 skipped, web 147, CLI 77,
+  scripts 11; desktop has no test files and exits 0).
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` passed; packaged the
+  macOS app and rebuilt native Electron bindings.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from
+  `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app`.
+- Final review pass is pending: `/review-5`, then `/address` for any findings.
+
+### Next prompt
+
+CLI Refactor Tier 3 — Visual Identity (exact prompt filename not provided in the
+Tier 2 prompt).
+
+---
+
 ## Review Orchestrator Pass — 2026-05-25
 
 ### Summary
