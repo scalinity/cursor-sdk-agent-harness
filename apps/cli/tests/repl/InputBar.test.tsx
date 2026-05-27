@@ -6,6 +6,11 @@ import {
   isBackspaceInput,
   parseSlashCommand,
 } from "../../src/repl/InputBar.js";
+import {
+  shouldReserveArrowKeysForStreamScroll,
+  shouldUseCtrlForPromptHistory,
+} from "../../src/repl/stream-scroll.js";
+import { extractImageDropPaths } from "../../src/lib/attachments.js";
 
 describe("InputBar helpers", () => {
   it("detects the active @-mention trigger before the cursor", () => {
@@ -51,5 +56,17 @@ describe("InputBar helpers", () => {
     expect(history.previous("")).toBe("first");
     expect(history.next("")).toBe("second");
     expect(history.previous("draft")).toBe("draft");
+  });
+
+  it("delegates image drop detection to attachment helpers", () => {
+    expect(extractImageDropPaths("/tmp/shot.png")).toEqual(["/tmp/shot.png"]);
+    expect(extractImageDropPaths("hello")).toBeNull();
+  });
+
+  it("reserves arrow keys for stream scroll when the stream is scrollable", () => {
+    expect(shouldReserveArrowKeysForStreamScroll(true)).toBe(true);
+    expect(shouldUseCtrlForPromptHistory(true)).toBe(true);
+    expect(shouldReserveArrowKeysForStreamScroll(false)).toBe(false);
+    expect(shouldUseCtrlForPromptHistory(false)).toBe(false);
   });
 });

@@ -8,6 +8,7 @@ export const DEFAULT_MODEL_ID = "composer-2-5-fast";
 export const CONFIG_DIR = path.join(homedir(), ".harness-cli");
 export const HISTORY_PATH = path.join(CONFIG_DIR, "history");
 export const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
+export const CLI_DB_PATH = path.join(CONFIG_DIR, "harness.sqlite");
 
 export interface CliPreferences {
   lastAgentId?: string;
@@ -32,6 +33,10 @@ export function resolveExplicitServerUrl(flagValue?: string): string | undefined
 
 export function resolveWebOrigin(flagValue?: string): string {
   return (flagValue ?? process.env.HARNESS_WEB_ORIGIN ?? DEFAULT_WEB_ORIGIN).replace(/\/$/, "");
+}
+
+export function resolveCliDbPath(): string {
+  return process.env.HARNESS_CLI_DB_PATH ?? CLI_DB_PATH;
 }
 
 export async function ensureConfigDir(): Promise<void> {

@@ -5,19 +5,74 @@ import React from "react";
 import { createAgent, listAgents } from "./commands/agents.js";
 import { showHistory } from "./commands/history.js";
 import { runPrompt } from "./commands/run.js";
+import { createSkillCommand, listSkillsCommand, parseSkillPaths } from "./commands/skills.js";
 import { searchWorkspace } from "./commands/search.js";
 import { resolveCliBackend, type CliBackend } from "./backend.js";
 import { DEFAULT_MODEL_ID, readPreferences, readPromptHistory, resolveExplicitServerUrl, resolveServerUrl, writePreferences } from "./config.js";
-import { formatCliError } from "./errors.js";
+import { CliUsageError, formatCliError } from "./errors.js";
 import { App } from "./repl/App.js";
 import { BootScreen } from "./repl/BootScreen.js";
 import { createTuiTheme } from "./repl/theme.js";
+import { readLastSession, writeLastSession, type CliSessionSnapshot } from "./session.js";
 import { mountFullscreen } from "./repl/tui-lifecycle.js";
-import type { CliMode, CliStreamPort, CommandDeps } from "./types.js";
+import type { CliAgentSummary, CliHttpPort, CliMode, CliStreamPort, CommandDeps } from "./types.js";
 
 interface GlobalOptions {
   server?: string;
   origin?: string;
+  resume?: boolean;
+}
+
+
+function primarySubcommand(): string | undefined {
+  for (const arg of process.argv.slice(2)) {
+    if (arg.startsWith("-")) continue;
+    return arg;
+  }
+  return undefined;
+}
+
+function shouldLaunchInteractiveChat(): boolean {
+  return !process.argv.slice(2).some((arg) => arg === "--help" || arg === "-h" || arg === "--version" || arg === "-V");
+}
+
+async function resolveAgentForChat(
+  http: CliHttpPort,
+  input: {
+    agentId?: string;
+    model?: string;
+    mode?: CliMode;
+    workspace: string;
+    savedSession?: CliSessionSnapshot | null;
+  },
+): Promise<CliAgentSummary> {
+  if (input.agentId) {
+    const detail = await http.getAgent(input.agentId);
+    return agentSummaryFromDetail(detail);
+  }
+  if (input.savedSession) {
+    try {
+      const detail = await http.getAgent(input.savedSession.agent.id);
+      return agentSummaryFromDetail(detail);
+    } catch {
+      // Fall back to a fresh agent in the saved workspace if the backing agent is gone.
+    }
+  }
+  const agentInput: { model?: string; mode?: CliMode; workspace: string } = { workspace: input.workspace };
+  if (input.model !== undefined) agentInput.model = input.model;
+  else if (input.savedSession) agentInput.model = input.savedSession.modelId;
+  if (input.mode !== undefined) agentInput.mode = input.mode;
+  else if (input.savedSession) agentInput.mode = input.savedSession.mode;
+  return http.getOrCreateAgent(agentInput);
+}
+
+function agentSummaryFromDetail(agent: { id: string; name: string; modelId: string; executionMode: string }): CliAgentSummary {
+  return {
+    id: agent.id,
+    name: agent.name,
+    modelId: agent.modelId,
+    executionMode: agent.executionMode === "ask" ? "ask" : "agent",
+  };
 }
 
 /**
@@ -53,12 +108,27 @@ async function runChat(options: GlobalOptions & { agent?: string; mode?: CliMode
   if (input.isTTY !== true || output.isTTY !== true) {
     throw new Error("Interactive chat requires a TTY. Pipe prompts to `harness run` or run `harness` with no args on a terminal.");
   }
+  const savedSession = options.resume ? await readLastSession() : null;
+  if (options.resume && !savedSession) {
+    throw new CliUsageError("No saved chat session found. Start a chat with `harness` first.");
+  }
+
   const theme = createTuiTheme();
-  const workspace = options.workspace ?? process.cwd();
+  const workspace = options.workspace ?? savedSession?.workspace ?? process.cwd();
 
   let backend: CliBackend | null = null;
   let stream: CliStreamPort | null = null;
   let cleanedUp = false;
+  let getSnapshot: (() => CliSessionSnapshot) | null = null;
+  const persistSession = async () => {
+    const snapshot = getSnapshot?.();
+    if (!snapshot) return;
+    try {
+      await writeLastSession(snapshot);
+    } catch (error: unknown) {
+      stderr.write(`Session was not saved: ${error instanceof Error ? error.message : String(error)}\n`);
+    }
+  };
   const cleanup = () => {
     if (cleanedUp) return;
     cleanedUp = true;
@@ -72,7 +142,12 @@ async function runChat(options: GlobalOptions & { agent?: string; mode?: CliMode
 
   // Paint the shell immediately; the (embedded) server boots in the background so
   // the user sees instant feedback instead of a frozen terminal during startup.
-  const session = mountFullscreen(React.createElement(BootScreen, { workspace, theme }), { onExit: cleanup });
+  const session = mountFullscreen(React.createElement(BootScreen, { workspace, theme }), {
+    onExit: () => {
+      void persistSession();
+      cleanup();
+    },
+  });
   try {
     let exited = false;
     void session.waitUntilExit().then(() => {
@@ -83,34 +158,50 @@ async function runChat(options: GlobalOptions & { agent?: string; mode?: CliMode
     const http = backend.http;
     await http.ensureCsrfToken();
     const prefs = await readPreferences();
-    const agentInput: { agentId?: string; model?: string; mode?: CliMode; workspace: string } = { workspace };
-    const model = options.model ?? prefs.preferredModel;
-    const mode = options.mode ?? prefs.preferredMode;
-    if (options.agent !== undefined) agentInput.agentId = options.agent;
-    if (model !== undefined) agentInput.model = model;
-    if (mode !== undefined) agentInput.mode = mode;
-    const agent = await http.getOrCreateAgent(agentInput);
+    const model = options.model ?? savedSession?.modelId ?? prefs.preferredModel;
+    const mode = options.mode ?? savedSession?.mode ?? prefs.preferredMode;
+    const agent = await resolveAgentForChat(http, {
+      ...(options.agent !== undefined ? { agentId: options.agent } : {}),
+      ...(model !== undefined ? { model } : {}),
+      ...(mode !== undefined ? { mode } : {}),
+      workspace,
+      savedSession,
+    });
     const token = await http.ensureCsrfToken();
     stream = backend.createStream(token);
     const historyEntries = await readPromptHistory();
+    const chatMode = options.mode ?? savedSession?.mode ?? prefs.preferredMode ?? agent.executionMode ?? "agent";
+    const chatModelId = options.model ?? savedSession?.modelId ?? prefs.preferredModel ?? agent.modelId ?? DEFAULT_MODEL_ID;
     await writePreferences({
-      preferredMode: options.mode ?? prefs.preferredMode ?? agent.executionMode,
-      preferredModel: options.model ?? prefs.preferredModel ?? agent.modelId,
+      lastAgentId: agent.id,
+      preferredMode: chatMode,
+      preferredModel: chatModelId,
     });
 
     if (exited) return;
 
     session.rerender(React.createElement(App, {
       agent,
-      mode: options.mode ?? prefs.preferredMode ?? agent.executionMode ?? "agent",
-      modelId: options.model ?? prefs.preferredModel ?? agent.modelId ?? DEFAULT_MODEL_ID,
+      mode: chatMode,
+      modelId: chatModelId,
       workspace,
       historyEntries,
       http,
       stream,
+      ...(savedSession ? {
+        resume: {
+          buffer: savedSession.buffer,
+          sessionCost: savedSession.sessionCost,
+          scrollOffset: savedSession.scrollOffset,
+        },
+      } : {}),
+      onRegisterSessionSnapshot: (getter) => {
+        getSnapshot = getter;
+      },
     }));
     await session.waitUntilExit();
   } finally {
+    await persistSession();
     session.dispose();
     cleanup();
   }
@@ -126,6 +217,7 @@ const program = new Command();
 program
   .name("harness")
   .description("Terminal-native Cursor SDK Agent Harness client")
+  .option("-r, --resume", "Resume the most recently closed chat session")
   .option("--server <url>", "Attach to an external Harness server instead of the embedded one")
   .option("--origin <url>", "Origin header for WebSocket upgrades (advanced)");
 
@@ -135,7 +227,12 @@ program
   .option("--mode <mode>", "Initial mode: ask | agent", "agent")
   .option("--model <id>", "Model override")
   .option("--workspace <path>", "Workspace directory", process.cwd())
-  .action(async (options) => runCommand(async () => runChat({ ...program.opts<GlobalOptions>(), ...options, mode: normalizeMode(options.mode) })));
+  .action(async (options) => runCommand(async () => runChat({
+    ...program.opts<GlobalOptions>(),
+    ...options,
+    mode: normalizeMode(options.mode),
+    resume: Boolean(program.opts<GlobalOptions>().resume),
+  })));
 
 program
   .command("run")
@@ -173,6 +270,45 @@ agents.command("create").argument("<name>").option("--model <id>", "Model", DEFA
   await runCommand(async () => withBackend(program.opts<GlobalOptions>(), {}, (deps) => createAgent({ name, model: options.model, mode: normalizeMode(options.mode), workspace: options.workspace, json: Boolean(options.json) }, deps)));
 });
 
+const skills = program.command("skills").description("Create and manage Cursor agent skills on disk");
+skills.command("list")
+  .option("--workspace <path>", "Project workspace to scan", process.cwd())
+  .option("--global", "List only global skills from ~/.cursor/skills")
+  .option("--json", "Output JSONL")
+  .action(async (options) => {
+    await runCommand(async () => withBackend(program.opts<GlobalOptions>(), {}, (deps) => listSkillsCommand({
+      workspace: options.workspace,
+      global: Boolean(options.global),
+      json: Boolean(options.json),
+    }, deps)));
+  });
+skills.command("create")
+  .argument("<name>", "Skill folder name (lowercase letters, numbers, hyphens)")
+  .requiredOption("--description <text>", "When the agent should use this skill")
+  .option("--content <markdown>", "Skill body markdown (defaults to a starter template)")
+  .option("--file <path>", "Read skill body markdown from a file")
+  .option("--paths <globs>", "Comma-separated file globs that scope the skill")
+  .option("--manual", "Only invoke when explicitly requested (/skill-name)")
+  .option("--global", "Write to ~/.cursor/skills instead of the project")
+  .option("--workspace <path>", "Project workspace for project-scoped skills", process.cwd())
+  .option("--force", "Overwrite an existing skill")
+  .option("--json", "Output JSONL")
+  .action(async (name: string, options) => {
+    const paths = parseSkillPaths(options.paths);
+    await runCommand(async () => withBackend(program.opts<GlobalOptions>(), {}, (deps) => createSkillCommand({
+      name,
+      description: options.description,
+      ...(options.content !== undefined ? { content: options.content } : {}),
+      ...(options.file !== undefined ? { file: options.file } : {}),
+      ...(paths !== undefined ? { paths } : {}),
+      ...(options.manual ? { manual: true } : {}),
+      ...(options.global ? { global: true } : {}),
+      workspace: options.workspace,
+      ...(options.force ? { force: true } : {}),
+      ...(options.json ? { json: true } : {}),
+    }, deps)));
+  });
+
 program.command("search").argument("<query>").option("--workspace <path>", "Workspace to search").option("--max-results <n>", "Limit", "20").option("--files-only", "File search instead of grep").option("--json", "Output JSONL").action(async (query: string, options) => {
   await runCommand(async () => withBackend(program.opts<GlobalOptions>(), {}, (deps) => searchWorkspace({ query, workspace: options.workspace, maxResults: Number(options.maxResults), filesOnly: Boolean(options.filesOnly), json: Boolean(options.json) }, deps)));
 });
@@ -181,14 +317,19 @@ program.command("history").option("--agent <id>", "Filter by agent").option("--l
   await runCommand(async () => withBackend(program.opts<GlobalOptions>(), {}, (deps) => showHistory({ agent: options.agent, limit: Number(options.limit), json: Boolean(options.json) }, deps)));
 });
 
-if (process.argv.length <= 2) {
+if (primarySubcommand() === undefined) {
   if (input.isTTY !== true) {
     const prompt = await readStdin();
     await runCommand(async () => withBackend(program.opts<GlobalOptions>(), { stream: true }, async (deps) => {
       process.exitCode = await runPrompt({ prompt, mode: "agent" }, deps);
     }));
   } else {
-    await runCommand(async () => runChat(program.opts<GlobalOptions>()));
+    await runCommand(async () => {
+      await program.parseAsync(process.argv);
+      if (shouldLaunchInteractiveChat()) {
+        await runChat({ ...program.opts<GlobalOptions>(), resume: Boolean(program.opts<GlobalOptions>().resume) });
+      }
+    });
   }
 } else {
   await program.parseAsync(process.argv);

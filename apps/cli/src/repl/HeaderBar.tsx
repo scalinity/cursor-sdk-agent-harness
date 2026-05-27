@@ -17,33 +17,58 @@ export interface HeaderBarProps {
   theme: TuiTheme;
 }
 
-export function HeaderBar({ width, workspace, cwdBase, modelId, accountLabel, chromeState, queuedPrompts, theme }: HeaderBarProps) {
+export function HeaderBar({
+  width,
+  cwdBase,
+  modelId,
+  accountLabel,
+  chromeState,
+  queuedPrompts,
+  theme,
+}: HeaderBarProps) {
   const leftWidth = Math.max(18, Math.floor(width * 0.56));
   const rightWidth = Math.max(12, width - leftWidth - 4);
-  const cwdLabel = formatHeaderCwdLabel(workspace, cwdBase, leftWidth);
+  const cwdLabel = formatHeaderCwdLabel(cwdBase, cwdBase, leftWidth);
   const title = width < 84 ? "HARNESS" : "Cursor Harness";
   const queuedLabel = queuedPrompts > 0 ? `${queuedPrompts} queued` : "";
-  const modelLabel = truncateMiddle(formatChromeIndicator(modelId, accountLabel, chromeState), rightWidth);
+  const modelLabel = truncateMiddle(
+    formatChromeIndicator(modelId, accountLabel, chromeState),
+    rightWidth,
+  );
   return (
     <Box flexDirection="column" width={width} paddingX={1} paddingTop={0} {...bg(theme.background)}>
       <Box width={Math.max(1, width - 2)} justifyContent="space-between">
-        <Text {...fg(theme.accentWarm)} bold>▌ {title}</Text>
+        <Text {...fg(theme.accentWarm)} bold>
+          ▌ {title}
+        </Text>
         <Text {...fg(chromeStateColor(theme, chromeState))}>{modelLabel}</Text>
       </Box>
       <Box width={Math.max(1, width - 2)} justifyContent="space-between">
-        <Text {...fg(theme.muted)}>cwd {cwdLabel}</Text>
+        <Text {...fg(theme.muted)}>{cwdLabel}</Text>
         <Text {...fg(theme.muted)}>{queuedLabel}</Text>
       </Box>
     </Box>
   );
 }
 
-export function formatChromeIndicator(modelId: string, accountLabel: string, state: ChromeState): string {
+export function formatChromeIndicator(
+  modelId: string,
+  accountLabel: string,
+  state: ChromeState,
+): string {
   return `${sanitizeChromeLine(modelId)} · ${sanitizeChromeLine(accountLabel)} · ${state} ●`;
 }
 
-export function formatHeaderCwdLabel(workspace: string, cwdBase: string, maxWidth: number): string {
-  return sanitizeChromeLine(normalizePath(workspace, cwdBase, { maxWidth }));
+export function formatHeaderCwdLabel(
+  targetPath: string,
+  cwdBase: string,
+  maxWidth: number,
+): string {
+  const displayPath =
+    targetPath === cwdBase
+      ? truncateMiddle(targetPath, maxWidth)
+      : normalizePath(targetPath, cwdBase, { maxWidth });
+  return sanitizeChromeLine(displayPath);
 }
 
 function sanitizeChromeLine(value: string): string {

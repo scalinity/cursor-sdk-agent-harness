@@ -149,7 +149,37 @@ describe("StreamView helpers", () => {
     expect(out).toContain("Mode switched to agent.");
   });
 
-  it("suppresses running tools and marks them cancelled on interruption", () => {
+  it("renders running task tools immediately so parallel subagents are visible before completion", () => {
+    let buffer = createStreamBuffer();
+    const tasks = ["Review skills.ts correctness", "Review tests and conventions", "Review stream rendering"];
+
+    for (const [index, task] of tasks.entries()) {
+      buffer = ingestStreamFrame(buffer, {
+        ...base,
+        id: `frame-task-${index}`,
+        type: "sdk.tool_call",
+        event: {
+          event_id: `00000000-0000-4000-8000-0000000001${index}1`,
+          schema_version: 1,
+          seq: index + 1,
+          agent_id: "agent-1",
+          run_id: "run-1",
+          occurred_at: base.sent_at,
+          received_at: base.sent_at,
+          sdk_type: "tool_call",
+          kind: "tool_call.running",
+          payload: { call_id: `task-${index}`, name: "task", status: "running", args: { description: task } },
+        },
+      } satisfies ServerFrame);
+    }
+
+    const output = renderStreamItems(buffer.items);
+    for (const task of tasks) {
+      expect(output).toContain(`task ${task}`);
+    }
+  });
+
+  it("renders running tools and marks them cancelled on interruption", () => {
     let buffer = createStreamBuffer();
     buffer = ingestStreamFrame(buffer, {
       ...base,
@@ -167,7 +197,7 @@ describe("StreamView helpers", () => {
         payload: { call_id: "c1", name: "bash", status: "running", args: { command: "sleep 100" } },
       },
     } satisfies ServerFrame);
-    expect(renderStreamItems(buffer.items)).not.toContain("sleep 100");
+    expect(renderStreamItems(buffer.items)).toContain("shell sleep 100");
     buffer = ingestStreamFrame(buffer, {
       ...base,
       type: "run.interrupted",
@@ -189,7 +219,7 @@ describe("StreamView helpers", () => {
     expect(out).toContain("shell sleep 100 (cancelled)");
   });
 
-  it("freezes a still-running tool when the run finishes without a terminal tool frame", () => {
+  it("keeps a still-running tool visible when the run finishes without a terminal tool frame", () => {
     let buffer = createStreamBuffer();
     buffer = ingestStreamFrame(buffer, {
       ...base,
@@ -207,7 +237,7 @@ describe("StreamView helpers", () => {
         payload: { call_id: "c1", name: "bash", status: "running", args: { command: "sleep 100" } },
       },
     } satisfies ServerFrame);
-    expect(renderStreamItems(buffer.items)).not.toContain("sleep 100");
+    expect(renderStreamItems(buffer.items)).toContain("shell sleep 100");
     buffer = ingestStreamFrame(buffer, {
       ...base,
       type: "run.final_result",

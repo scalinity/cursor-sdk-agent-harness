@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import { formatMicros } from "../output/table.js";
 import { bg, createTuiTheme, fg, truncateMiddle, type TuiTheme } from "./theme.js";
+import { formatStreamScrollHints } from "./stream-scroll.js";
 
 export interface SessionCostState {
   micros: number;
@@ -15,6 +16,7 @@ export type LiveTurnUsage =
 export interface StatusBarProps {
   sessionCost: SessionCostState;
   turnUsage?: LiveTurnUsage | null;
+  streamScrollActive?: boolean;
   width?: number;
   theme?: TuiTheme;
 }
@@ -38,7 +40,7 @@ export function StatusBar(props: StatusBarProps) {
 }
 
 function formatStatusDetails(props: StatusBarProps, compact: boolean): string {
-  const hints = compact ? "^C cancel · ^D quit · ^L clear · PgUp/Dn scroll" : "Enter submit · Shift+Enter newline · ↑↓ history · Shift+↑↓ scroll · Esc dismiss · ^C cancel/quit · ^L clear";
+  const hints = formatStreamScrollHints(props.streamScrollActive ?? false, compact);
   const sessionCost = formatSessionCost(props.sessionCost);
   const usage = props.turnUsage ? `${formatLiveTurnUsage(props.turnUsage)} · ` : "";
   return `${usage}${sessionCost} · ${hints}`;

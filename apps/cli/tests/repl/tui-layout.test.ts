@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { computeTuiLayout, countInputLines, MAX_INPUT_VISIBLE_LINES } from "../../src/repl/layout.js";
 import { filterSlashCommands } from "../../src/repl/SlashPalette.js";
-import { clampStreamScrollOffset, formatScrollIndicator, formatTurnHeader, renderViewportLines } from "../../src/repl/StreamView.js";
+import { clampStreamScrollOffset, computeActiveLabelSpacerHeight, formatScrollIndicator, formatTurnHeader, maxStreamScrollOffset, renderViewportLines } from "../../src/repl/StreamView.js";
 import { bg, border, createTuiTheme, fg } from "../../src/repl/theme.js";
 
 describe("fullscreen TUI helpers", () => {
@@ -33,8 +33,16 @@ describe("fullscreen TUI helpers", () => {
 
   it("treats an empty buffer as non-scrollable", () => {
     // After /clear a stale offset must collapse to 0 so no "lines below" indicator renders.
+    expect(maxStreamScrollOffset([], 40, 5)).toBe(0);
     expect(clampStreamScrollOffset([], 40, 5, 99)).toBe(0);
     expect(clampStreamScrollOffset([{ type: "assistant", text: "" }], 40, 5, 99)).toBe(0);
+  });
+
+  it("keeps the active indicator at the bottom of sparse chat viewports", () => {
+    expect(computeActiveLabelSpacerHeight(1, 5)).toBe(4);
+    expect(computeActiveLabelSpacerHeight(0, 5)).toBe(4);
+    expect(computeActiveLabelSpacerHeight(5, 5)).toBe(0);
+    expect(computeActiveLabelSpacerHeight(8, 5)).toBe(0);
   });
 
   it("keeps the scroll indicator within one row", () => {

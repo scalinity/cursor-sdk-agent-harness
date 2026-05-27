@@ -1,6 +1,6 @@
 import { HarnessHttpClient } from "./client/http.js";
 import { HarnessWsClient } from "./client/ws.js";
-import { resolveExplicitServerUrl, resolveWebOrigin } from "./config.js";
+import { resolveCliDbPath, resolveExplicitServerUrl, resolveWebOrigin } from "./config.js";
 import type { CliHttpPort, CliStreamPort } from "./types.js";
 
 export interface BackendOptions {
@@ -57,6 +57,22 @@ export async function resolveCliBackend(options: BackendOptions): Promise<CliBac
   };
 }
 
+export function buildEmbeddedServerEnvOverrides(origin: string): NodeJS.ProcessEnv {
+  return {
+    // Pino would otherwise stream JSON logs to stdout and shred the fullscreen
+    // TUI. Run-level failures still surface to the user as error frames.
+    LOG_LEVEL: "silent",
+    // Keep the CLI's zero-setup embedded server isolated from the desktop app's
+    // persistent run history. Explicit --server/HARNESS_SERVER_URL still opts
+    // into whichever external server the user selected.
+    DB_PATH: resolveCliDbPath(),
+    // Keep the server's allowed Origin aligned with the header the WS client
+    // sends, so the loopback upgrade passes the origin policy even when the
+    // user overrides --origin.
+    WEB_ORIGIN: origin,
+  };
+}
+
 async function startEmbeddedServer(origin: string): Promise<{ url: string; close: () => Promise<void> }> {
   // Variable specifier keeps this a runtime-only import: TypeScript leaves it as
   // a dynamic `Promise<any>` instead of resolving @harness/server's built dist
@@ -65,14 +81,6 @@ async function startEmbeddedServer(origin: string): Promise<{ url: string; close
   const mod = (await import(specifier)) as { startServer: StartServerFn };
   return mod.startServer({
     listenPort: 0,
-    envOverrides: {
-      // Pino would otherwise stream JSON logs to stdout and shred the fullscreen
-      // TUI. Run-level failures still surface to the user as error frames.
-      LOG_LEVEL: "silent",
-      // Keep the server's allowed Origin aligned with the header the WS client
-      // sends, so the loopback upgrade passes the origin policy even when the
-      // user overrides --origin.
-      WEB_ORIGIN: origin,
-    },
+    envOverrides: buildEmbeddedServerEnvOverrides(origin),
   });
 }

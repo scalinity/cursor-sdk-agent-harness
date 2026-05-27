@@ -1,10 +1,13 @@
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import type { ContextChip } from "@harness/shared";
+import { extractImageDropPaths, formatImageChipLabel, shouldTreatAsImageDrop } from "../lib/attachments.js";
+import type { ImageAttachment } from "../lib/attachments.js";
 import type { MentionSelectionItem } from "../types.js";
 import { bg, border, fg, hardWrapText, type TuiTheme } from "./theme.js";
 import { mentionItemToChip } from "./MentionPopup.js";
 import { isKnownSlashCommand, type KnownSlashCommandName, type SlashPaletteItem } from "./SlashPalette.js";
+import { shouldReserveArrowKeysForStreamScroll, shouldUseCtrlForPromptHistory } from "./stream-scroll.js";
 
 export interface MentionTrigger {
   start: number;
@@ -75,6 +78,7 @@ export class PromptHistory {
 export interface InputBarProps {
   disabled?: boolean;
   chips: ContextChip[];
+  imageAttachments?: ImageAttachment[];
   history: PromptHistory;
   mentionItems?: MentionSelectionItem[];
   selectedMentionIndex?: number;
@@ -82,7 +86,8 @@ export interface InputBarProps {
   selectedSlashIndex?: number;
   width?: number;
   maxVisibleLines?: number;
-  placeholder?: string;
+  /** When true, ↑/↓ scroll the stream and prompt history moves to Ctrl+↑/↓. */
+  streamScrollActive?: boolean;
   theme: TuiTheme;
   onMentionNavigate?: (delta: number) => void;
   onMentionDismiss?: () => void;
@@ -93,11 +98,14 @@ export interface InputBarProps {
   onChange?: (text: string, mention: MentionTrigger | null) => void;
   onClear?: () => void;
   onEscape?: () => void;
+  onImageDrop?: (paths: string[]) => void;
+  onRemoveLastImage?: () => void;
 }
 
 export function InputBar({
   disabled = false,
   chips,
+  imageAttachments = [],
   history,
   mentionItems = [],
   selectedMentionIndex = 0,
@@ -105,7 +113,7 @@ export function InputBar({
   selectedSlashIndex = 0,
   width = 80,
   maxVisibleLines = 4,
-  placeholder = "ask, edit, search, or type /",
+  streamScrollActive = false,
   theme,
   onMentionNavigate,
   onMentionDismiss,
@@ -116,6 +124,8 @@ export function InputBar({
   onChange,
   onClear,
   onEscape,
+  onImageDrop,
+  onRemoveLastImage,
 }: InputBarProps) {
   const [value, setValue] = useState("");
   const setDraft = (next: string) => {
@@ -176,23 +186,32 @@ export function InputBar({
       return;
     }
 
-    if (key.shift && (key.upArrow || key.downArrow)) return;
+    if (shouldReserveArrowKeysForStreamScroll(streamScrollActive) && (key.upArrow || key.downArrow) && !key.ctrl && !key.meta) return;
 
     if (key.ctrl && input === "c" && value.length > 0) {
       setDraft("");
       onClear?.();
       return;
     }
-    if (key.upArrow && value.length === 0) {
-      setDraft(history.previous(value));
-      return;
-    }
-    if (key.downArrow && value.length === 0) {
-      setDraft(history.next(value));
-      return;
+    const promptHistoryNeedsCtrl = shouldUseCtrlForPromptHistory(streamScrollActive);
+    if (value.length === 0 && (key.upArrow || key.downArrow) && (!promptHistoryNeedsCtrl || key.ctrl)) {
+      if (key.upArrow) {
+        setDraft(history.previous(value));
+        return;
+      }
+      if (key.downArrow) {
+        setDraft(history.next(value));
+        return;
+      }
     }
     if (isBackspaceInput(input, key)) {
-      if (value.length > 0) setDraft(Array.from(value).slice(0, -1).join(""));
+      if (value.length > 0) {
+        setDraft(Array.from(value).slice(0, -1).join(""));
+        return;
+      }
+      if (imageAttachments.length > 0) {
+        onRemoveLastImage?.();
+      }
       return;
     }
     if (isReturn) {
@@ -201,13 +220,20 @@ export function InputBar({
         return;
       }
       const trimmed = value.trim();
-      if (!trimmed || disabled) return;
+      if ((!trimmed && imageAttachments.length === 0) || disabled) return;
       setDraft("");
       onSubmit(trimmed);
       return;
     }
     if (key.ctrl || key.meta || key.delete || key.leftArrow || key.rightArrow || key.pageDown || key.pageUp || key.tab) return;
-    if (input.length > 0) setDraft(value + input.replace(/\r\n?/g, "\n"));
+    if (input.length > 0) {
+      const dropPaths = extractImageDropPaths(input);
+      if (dropPaths && shouldTreatAsImageDrop(input, dropPaths)) {
+        onImageDrop?.(dropPaths);
+        return;
+      }
+      setDraft(value + input.replace(/\r\n?/g, "\n"));
+    }
   });
 
   const allVisibleLines = value.length > 0 ? value.split("\n").flatMap((line) => hardWrapText(line, Math.max(12, width - 8))) : [""];
@@ -219,12 +245,19 @@ export function InputBar({
     <Box flexDirection="column" borderStyle="round" {...border(theme.borderFocus)} paddingX={1} {...bg(theme.panel)}>
       {visibleLines.map((line, index) => (
         <Box key={`${hiddenLineCount + index}:${line}`}>
-          {index === 0 ? chips.map((chip) => (
-            <Text key={chip.id} {...fg(theme.accent)}>[@{chip.mention.displayLabel}] </Text>
-          )) : null}
+          {index === 0 ? (
+            <>
+              {chips.map((chip) => (
+                <Text key={chip.id} {...fg(theme.accent)}>[@{chip.mention.displayLabel}] </Text>
+              ))}
+              {imageAttachments.map((attachment) => (
+                <Text key={attachment.id} {...fg(theme.accentWarm)}>[img:{formatImageChipLabel(attachment.name)}] </Text>
+              ))}
+            </>
+          ) : null}
           <Text {...fg(theme.accent)}>{index === 0 ? "❯ " : "  "}</Text>
           {hiddenLineCount > 0 && index === 0 ? <Text {...fg(theme.muted)}>… </Text> : null}
-          {value.length === 0 && index === 0 ? <Text {...fg(theme.muted)}>{placeholder}</Text> : <Text {...fg(theme.text)}>{line}</Text>}
+          {line.length > 0 ? <Text {...fg(theme.text)}>{line}</Text> : null}
           {index === lastLineIndex ? <Text {...fg(theme.accent)}>█</Text> : null}
         </Box>
       ))}

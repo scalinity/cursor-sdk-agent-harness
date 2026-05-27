@@ -34,6 +34,41 @@ each phase. Use it as the single source of truth for "what is decided" vs
 
 ---
 
+## CLI Thinking Indicator Placement — 2026-05-27
+
+### Summary
+
+Adjusted the CLI REPL active-run indicator so the non-tool agent activity label
+sits at the bottom of the chat viewport instead of directly below the latest
+message. Replaced the old `agent working` copy with an animated, fixed-width
+`Thinking...` text cycle while preserving the existing spinner and running-tool
+status line behavior.
+
+### Changes delivered
+
+- `StreamView` now reserves spacer rows before the active label when the visible
+  transcript is shorter than the scroll viewport, keeping the indicator pinned
+  to the bottom of the chat area.
+- Non-tool active turns now render `Thinking...` with animated trailing dots;
+  running tools continue to show the tool-specific spinner/timer line.
+- Added focused regression coverage for the spacer calculation and animated
+  thinking text.
+
+### Verification
+
+- `pnpm -F @harness/cli test -- tests/repl/App.test.tsx tests/repl/tui-layout.test.ts`
+  passed after first confirming the new tests failed for missing production
+  helpers.
+- `pnpm -F @harness/cli typecheck` passed.
+- `pnpm typecheck` passed.
+- `pnpm lint` passed.
+- `pnpm test` passed.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` passed.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from
+  `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app`.
+
+---
+
 ## CLI Refactor Tier 2 — Information Architecture — 2026-05-27
 
 ### Summary
@@ -77,6 +112,39 @@ from the existing run/tool/error lifecycle.
 
 CLI Refactor Tier 3 — Visual Identity (exact prompt filename not provided in the
 Tier 2 prompt).
+
+---
+
+## CLI Header Cwd Display Fix — 2026-05-27
+
+### Summary
+
+Fixed the CLI header path chrome so it displays the captured launch directory
+itself instead of normalizing the active workspace to `.` when both paths match.
+The header now shows the path without the literal `cwd` label.
+
+### Changes delivered
+
+- `HeaderBar` renders `cwdBase` as the header path instead of normalizing the
+  active workspace path for that chrome line.
+- `formatHeaderCwdLabel` keeps relative formatting for non-current targets but
+  preserves the captured launch cwd as a visible path when it is the displayed
+  target.
+- Added regression coverage for the previous `cwd .` output and the removed
+  `cwd` prefix.
+
+### Verification
+
+- `pnpm -F @harness/cli exec vitest run tests/repl/HeaderBar.test.tsx` passed
+  (6 tests).
+- `pnpm -F @harness/cli typecheck` passed.
+- `pnpm exec eslint apps/cli/src/repl/HeaderBar.tsx apps/cli/tests/repl/HeaderBar.test.tsx`
+  passed.
+- Package-wide `pnpm -F @harness/cli test` is currently blocked by unrelated
+  dirty `tests/repl/StreamView.test.tsx` expectations for running tool output.
+- Package-wide `pnpm exec eslint apps/cli` is currently blocked by unrelated
+  dirty `apps/cli/src/lib/attachments.ts`, `apps/cli/src/repl/App.tsx`, and
+  `apps/cli/tests/session.test.ts` lint errors.
 
 ---
 
@@ -3661,3 +3729,58 @@ Ran a focused review-orchestrator pass across the agent harness and chat streami
 
 - Performance reviewers still recommend a larger future pass on chunked client event storage, incremental timeline/tool projections, and lightweight large-payload replay rows. These are broader architectural optimizations and were not folded into this reliability patch.
 - Additional direct tests for `EventTimeline` and `useAgentStream` lifecycle edge cases remain useful follow-up coverage.
+
+---
+
+## CLI Refactor Tier 3 Phase 0-light — 2026-05-27
+
+### Summary
+
+Re-verified the CLI visual-identity preconditions before Tier 3. `RENDERING_AUDIT.md` exists, Tier 1 render tokenization is present, and CLI theme code is centralized enough to proceed, but raw fallback hex values still exist outside the main theme module in the render style factory and its test fixture. Per the Tier 3 prompt, recorded that as color drift in the audit before stopping for the brand-accent confirmation gate.
+
+### Files modified
+
+- `RENDERING_AUDIT.md` — appended `## Color drift` noting duplicate fallback hex values in `apps/cli/src/render/styles.ts` and `apps/cli/tests/render/styles.test.ts`.
+- `docs/IMPLEMENTATION_STATUS.md` — recorded this status entry.
+
+### Verification
+
+- `git diff --check -- RENDERING_AUDIT.md` — pass.
+- No typecheck/lint/test run in this checkpoint because Phase 0-light only changed documentation and intentionally stops before rendering code changes.
+
+### Next phase
+
+Confirm the Tier 3 brand accent before 3.1. Default proposed accent: vermillion `#E04E1F`.
+
+---
+
+## CLI Running Subagent Visibility — 2026-05-27
+
+### Summary
+
+Fixed the CLI REPL transcript so running `sdk.tool_call` frames render immediately instead of staying hidden until completion. Parallel task/subagent launches now appear in the stream as soon as the server emits their running frames, while terminal run frames still freeze any dangling running tools on final result, interruption, or error. Also cleared current CLI lint blockers in the dirty slice by replacing control-character regex literals in image-drop parsing with explicit prefix/code-point checks and removing unused imports.
+
+### Files modified
+
+- `apps/cli/src/repl/StreamView.tsx` — renders running tool calls in the transcript and updates the running-tool reconciliation comment.
+- `apps/cli/tests/repl/StreamView.test.tsx` — adds regression coverage for three parallel running task tools and updates interruption/final-result expectations for visible running tools.
+- `apps/cli/src/lib/attachments.ts` — removes lint-blocking control-character regex literals without changing bracketed-paste/image-drop behavior.
+- `apps/cli/src/repl/App.tsx` — removes an unused import from the current CLI slice.
+- `apps/cli/tests/session.test.ts` — removes an unused import from the current CLI slice.
+- `docs/IMPLEMENTATION_STATUS.md` — recorded this status entry.
+
+### Verification
+
+- Reproduced the issue with `pnpm -F @harness/cli exec vitest run tests/repl/StreamView.test.tsx`: new regression failed because running task output was empty.
+- `pnpm -F @harness/cli exec vitest run tests/repl/StreamView.test.tsx` — pass, 7 tests.
+- `pnpm -F @harness/cli typecheck` — pass.
+- `pnpm -F @harness/cli test` — pass, 25 files / 117 tests.
+- `pnpm typecheck` — pass.
+- `pnpm lint` — pass.
+- `pnpm test` — pass: shared 39, eslint-plugin 6, web 147, server 468 passing / 1 skipped, CLI 117, scripts 11.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass; rebuilt web/server/desktop and packaged macOS app.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` — installed timestamp May 27 02:22:56 2026.
+
+### Next phase
+
+Continue with the Tier 3 brand-accent confirmation gate when ready. Default proposed accent remains vermillion `#E04E1F`.

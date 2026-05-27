@@ -39,13 +39,13 @@ describe("StatusBar helpers", () => {
     expect(output).toContain("session $0.0009");
   });
 
-  it("formats available live turn tokens and cost before session cost", () => {
-    const output = formatStatusBar({
-      sessionCost: { micros: 100_000, hasUnavailableTurn: false },
-      turnUsage: { status: "available", tokens: 12_345, costMicros: 9_000 },
-    });
-
-    expect(output).toContain("12,345 tok · turn $0.009");
-    expect(output).toContain("session $0.10");
+  it("formats status hints based on scroll mode", () => {
+    const wide = { width: 140, sessionCost: { micros: 0, hasUnavailableTurn: false } };
+    const scrollable = formatStatusBar({ ...wide, streamScrollActive: true });
+    expect(scrollable).toContain("Ctrl+G latest");
+    const promptHistory = formatStatusBar({ ...wide, streamScrollActive: false });
+    expect(promptHistory).toContain("↑↓ prompt history");
+    const compact = formatStatusBar({ sessionCost: { micros: 0, hasUnavailableTurn: false }, streamScrollActive: false, width: 80 });
+    expect(compact).toContain("↑↓ prompts");
   });
 });

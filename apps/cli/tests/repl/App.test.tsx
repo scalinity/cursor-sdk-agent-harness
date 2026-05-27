@@ -1,10 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { deriveChromeState, formatTurnClock } from "../../src/repl/App.js";
+import { deriveChromeState, formatThinkingIndicatorText, formatTurnClock } from "../../src/repl/App.js";
 
 describe("App turn formatting", () => {
   it("formats the turn clock as HH:MM in local time", () => {
     expect(formatTurnClock(new Date(2026, 4, 27, 14, 32))).toBe("14:32");
     expect(formatTurnClock(new Date(2026, 0, 1, 9, 5))).toBe("09:05");
+  });
+
+  it("animates the thinking indicator text with stable width", () => {
+    expect([0, 1, 2, 3, 4].map(formatThinkingIndicatorText)).toEqual([
+      "Thinking   ",
+      "Thinking.  ",
+      "Thinking.. ",
+      "Thinking...",
+      "Thinking   ",
+    ]);
   });
 });
 

@@ -138,6 +138,10 @@ export function renderViewportLines(text: string, width: number, height: number,
   return wrapped.slice(start, start + viewportHeight);
 }
 
+export function maxStreamScrollOffset(items: readonly StreamItem[], width: number, height: number, activeLabel?: string | undefined): number {
+  return clampStreamScrollOffset(items, width, height, Number.MAX_SAFE_INTEGER, activeLabel);
+}
+
 export function clampStreamScrollOffset(items: readonly StreamItem[], width: number, height: number, scrollOffset: number, activeLabel?: string | undefined): number {
   const rendered = renderStreamItems(items, Math.max(12, width));
   const labelHeight = activeLabel ? 1 : 0;
@@ -150,7 +154,7 @@ export function clampStreamScrollOffset(items: readonly StreamItem[], width: num
 
 export function formatScrollIndicator(scrollOffset: number, width: number): string {
   const safeWidth = Math.max(12, width);
-  const text = safeWidth >= 48 ? `── ▼ ${scrollOffset} lines below · Shift+↓ PgDn ──` : `▼ ${scrollOffset} below`;
+  const text = safeWidth >= 48 ? `── ▼ ${scrollOffset} lines below · ↓ PgDn or Ctrl+G latest ──` : `▼ ${scrollOffset} below`;
   return truncateMiddle(text, safeWidth);
 }
 
@@ -163,6 +167,10 @@ export function formatTurnHeader(label: string, width: number, at?: string): str
   const prefix = `── ${label} · ${at} `;
   const fill = Math.max(0, Math.max(12, width) - visibleLength(prefix));
   return `${prefix}${"─".repeat(fill)}`;
+}
+
+export function computeActiveLabelSpacerHeight(visibleLineCount: number, bodyHeight: number): number {
+  return Math.max(0, Math.max(1, bodyHeight) - Math.max(1, visibleLineCount));
 }
 
 export interface StreamViewProps {
@@ -189,12 +197,15 @@ export const StreamView = memo(function StreamView({ items, height, width = proc
   const indicatorHeight = showScrollIndicator ? 1 : 0;
   const bodyHeight = Math.max(1, height - labelHeight - indicatorHeight);
   const lines = useMemo(() => rendered.length > 0 ? renderViewportLines(rendered, safeWidth, bodyHeight, scrollOffset) : [], [bodyHeight, rendered, scrollOffset, safeWidth]);
+  const visibleLineCount = lines.length === 0 ? 1 : lines.length;
+  const activeLabelSpacerHeight = activeLabel ? computeActiveLabelSpacerHeight(visibleLineCount, bodyHeight) : 0;
   const indicatorText = formatScrollIndicator(scrollOffset, safeWidth);
   return (
     <Box flexDirection="column" height={height}>
       {lines.length === 0 ? <Text {...fg(theme.muted)}>No messages yet. Start with a prompt, @file, or /command.</Text> : lines.map((line, index) => <Text key={`${index}:${line}`}>{line}</Text>)}
-      {activeLabel ? <Text {...fg(theme.accent)}>{activeLabel}</Text> : null}
+      {activeLabelSpacerHeight > 0 ? <Box height={activeLabelSpacerHeight} /> : null}
       {showScrollIndicator ? <Text {...fg(theme.muted)}>{indicatorText}</Text> : null}
+      {activeLabel ? <Text {...fg(theme.accent)}>{activeLabel}</Text> : null}
     </Box>
   );
 });
@@ -208,9 +219,7 @@ function renderStreamItem(item: StreamItem, width: number): string {
     case "thinking":
       return styles.thinking(`◐ Thinking...\n  ${sanitizeTerminalText(item.text)}`);
     case "tool":
-      // Running tools render live in the active-run overlay (spinner + timer),
-      // so they are suppressed here; they reappear frozen once completed/cancelled.
-      return item.status === "running" ? "" : formatToolCallLine(item);
+      return formatToolCallLine(item);
     case "diff":
       return renderFileEdit(item);
     case "approval":
@@ -247,12 +256,9 @@ function sumTokens(input: number | null, output: number | null): number | null {
   return (input ?? 0) + (output ?? 0);
 }
 
-// Tools are suppressed from the static buffer while running (shown live in the
-// overlay). When a run ends we must flip any still-running tool to a terminal
-// status so it reappears frozen instead of rendering as an empty line. NOTE:
-// only frames ingestStreamFrame handles (final_result/interrupted/error) trigger
-// this; a run that ends via an sdk.status-only terminal frame is not reconciled
-// here (see NOTES.md).
+// Running tools stay visible in the transcript so parallel task/subagent launches
+// are observable before their completed frames arrive. Terminal run frames still
+// freeze any dangling running tools to keep replay and final output coherent.
 function reconcileRunningTools(items: StreamItem[], status: "completed" | "cancelled"): void {
   for (let index = 0; index < items.length; index += 1) {
     const candidate = items[index];

@@ -214,3 +214,7 @@ Current Tier 1 state:
 - `apps/cli/src/repl/StatusBar.tsx` still duplicates cwd/model/mode/run-state/connection with header chrome and still exposes websocket jargon (`ws ...`); this remains Tier 2 scope.
 - There is no active account/profile field in CLI preferences (`~/.harness-cli/config.json` currently stores `lastAgentId`, `preferredMode`, and `preferredModel` only). Tier 2.2 should flag account/profile as an assumption or use an explicit fallback label without building multi-account support.
 - Live streaming frames expose token/cost usage only at `run.final_result`; `sdk.assistant`, `sdk.status`, and tool frames do not carry usage deltas. Tier 2.4 should not ship a fake live counter without backend instrumentation or an explicitly accepted heuristic.
+
+## Color drift
+
+Tier 3 Phase 0-light re-verified color centralization on 2026-05-27. CLI render call-sites now route through `apps/cli/src/repl/theme.ts` and `apps/cli/src/render/styles.ts`, but color literals are still duplicated outside the theme module: `apps/cli/src/render/styles.ts` carries fallback hex values for `text`, `muted`, `accent`, `warning`, `danger`, `success`, and `cyan`, and `apps/cli/tests/render/styles.test.ts` repeats the same values in a test fixture. Tier 3.1 should remove those duplicate literals while renaming the generic accent role to `brand` and separating state tokens.

@@ -1,8 +1,17 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import type { AgentSummary, ContextChip, ContextSearchResult, ServerFrame } from "@harness/shared";
 import { isRunStatusTerminalFrame, isTerminalFrame } from "../client/ws.js";
 import { appendPromptHistory, writePreferences } from "../config.js";
+import {
+  attachmentImages,
+  formatImageDropFailure,
+  MAX_IMAGE_ATTACHMENTS,
+  mergeImageAttachments,
+  readImageFromPath,
+  type ImageAttachment,
+} from "../lib/attachments.js";
+import { createSkill, listSkills, resolveSkillBySlashCommand, readSkillBody, buildSkillInvocationPrompt } from "../lib/skills.js";
 import { renderTable, shortId } from "../output/table.js";
 import type { CliAgentSummary, CliHttpPort, CliMode, CliStreamPort } from "../types.js";
 import { HeaderBar, type ChromeState } from "./HeaderBar.js";
@@ -10,13 +19,21 @@ import { InputBar, parseSlashCommand, PromptHistory, type MentionTrigger } from 
 import { computeTuiLayout, countInputLines, MAX_INPUT_VISIBLE_LINES } from "./layout.js";
 import { MentionPopup, flattenMentionResults, MAX_MENTION_ITEMS, moveMentionSelection } from "./MentionPopup.js";
 import { filterSlashCommands, SlashPalette } from "./SlashPalette.js";
-import { clampStreamScrollOffset, createStreamBuffer, ingestStreamFrame, StreamView, type StreamBuffer, type StreamItem } from "./StreamView.js";
+import { createStreamBuffer, ingestStreamFrame, StreamView, type StreamBuffer, type StreamItem } from "./StreamView.js";
+import { applyStreamScrollDelta, computeStreamViewportLayout, resolveStreamScrollDelta } from "./stream-scroll.js";
 import { StatusBar, type LiveTurnUsage, type SessionCostState } from "./StatusBar.js";
 import { formatActiveToolLine } from "./ToolCallLine.js";
 import { createTuiTheme, bg, border, fg, truncateMiddle, MIN_COLUMNS, MIN_ROWS } from "./theme.js";
-import { useSpinnerFrame } from "./useSpinnerFrame.js";
+import { formatThinkingIndicatorText, useSpinnerFrameState } from "./useSpinnerFrame.js";
 import { useTerminalSize } from "./useTerminalSize.js";
 import { useReplCleanup, type ReplCleanupController } from "./useReplCleanup.js";
+import { createSessionSnapshot, type CliSessionSnapshot } from "../session.js";
+
+export interface ReplResumeState {
+  buffer: StreamBuffer;
+  sessionCost: SessionCostState;
+  scrollOffset: number;
+}
 
 export interface ReplAppProps {
   agent: CliAgentSummary;
@@ -26,6 +43,8 @@ export interface ReplAppProps {
   historyEntries: string[];
   http: CliHttpPort;
   stream: CliStreamPort;
+  resume?: ReplResumeState;
+  onRegisterSessionSnapshot?: (getter: () => CliSessionSnapshot) => void;
 }
 
 type StreamConnectionStatus = "ready" | "connecting" | "connected" | "reconnecting" | "disconnected";
@@ -35,34 +54,48 @@ interface PromptRequest {
   agentId: string;
   mode: CliMode;
   mentions: Array<ContextChip["mention"]>;
+  images: ImageAttachment[];
 }
 
 export function formatTurnClock(date: Date = new Date()): string {
   return date.toTimeString().slice(0, 5);
 }
 
-export function App({ agent, mode: initialMode, modelId: initialModelId, workspace, historyEntries, http, stream }: ReplAppProps) {
+export { formatThinkingIndicatorText };
+
+export function App({
+  agent,
+  mode: initialMode,
+  modelId: initialModelId,
+  workspace,
+  historyEntries,
+  http,
+  stream,
+  resume,
+  onRegisterSessionSnapshot,
+}: ReplAppProps) {
   const { exit } = useApp();
   const theme = createTuiTheme();
   const size = useTerminalSize();
   const [activeAgent, setActiveAgent] = useState<CliAgentSummary>(agent);
   const [mode, setMode] = useState<CliMode>(initialMode);
   const [modelId, setModelId] = useState(initialModelId);
-  const [buffer, setBuffer] = useState<StreamBuffer>(() => createStreamBuffer());
+  const [buffer, setBuffer] = useState<StreamBuffer>(() => resume?.buffer ?? createStreamBuffer());
   const [chips, setChips] = useState<ContextChip[]>([]);
+  const [imageAttachments, setImageAttachments] = useState<ImageAttachment[]>([]);
   const [mentionResults, setMentionResults] = useState<ContextSearchResult | null>(null);
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
   const [inputDraft, setInputDraft] = useState("");
-  const [scrollOffset, setScrollOffset] = useState(0);
+  const [scrollOffset, setScrollOffset] = useState(resume?.scrollOffset ?? 0);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [agentTurnActive, setAgentTurnActive] = useState(false);
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [queuedPrompts, setQueuedPrompts] = useState<PromptRequest[]>([]);
   const [streamStatus, setStreamStatus] = useState<StreamConnectionStatus>("ready");
-  const [sessionCost, setSessionCost] = useState<SessionCostState>({ micros: 0, hasUnavailableTurn: false });
+  const [sessionCost, setSessionCost] = useState<SessionCostState>(() => resume?.sessionCost ?? { micros: 0, hasUnavailableTurn: false });
   const [turnUsage, setTurnUsage] = useState<LiveTurnUsage | null>(null);
   const [pendingApproval, setPendingApproval] = useState<{ runId: string; requestId: string } | null>(null);
   const [history] = useState(() => new PromptHistory(historyEntries));
@@ -80,7 +113,8 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
   const streamWidth = Math.max(12, layout.columns - 4);
   const busy = activeRunId !== null || isStartingRun;
   const turnActive = isStartingRun || agentTurnActive;
-  const spinner = useSpinnerFrame(turnActive);
+  const spinnerState = useSpinnerFrameState(turnActive);
+  const spinner = spinnerState.frame;
   const runningTool = toolStartRef.current ? findRunningTool(buffer.items, toolStartRef.current.callId) : undefined;
   const lastItem = buffer.items.at(-1);
   const chromeState = deriveChromeState({ streamStatus, turnActive, busy, toolRunning: runningTool !== undefined, lastItemType: lastItem?.type });
@@ -92,9 +126,39 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
   const activeLabel = turnActive
     ? (runningTool && toolStartRef.current
         ? truncateMiddle(formatActiveToolLine(spinner, runningTool, Date.now() - toolStartRef.current.startMs), streamWidth)
-        : `${spinner} ${isStartingRun ? "starting run" : "agent working"}`)
+        : truncateMiddle(`${spinner} ${isStartingRun ? "starting run" : formatThinkingIndicatorText(spinnerState.index)}`, streamWidth))
     : undefined;
   const cleanupController = useReplCleanup({ stream, activeRunId, isStartingRun });
+  const sessionStateRef = useRef({
+    workspace,
+    agent,
+    mode: initialMode,
+    modelId: initialModelId,
+    sessionCost: resume?.sessionCost ?? { micros: 0, hasUnavailableTurn: false },
+    buffer: resume?.buffer ?? createStreamBuffer(),
+    scrollOffset: resume?.scrollOffset ?? 0,
+  });
+  sessionStateRef.current = {
+    workspace,
+    agent: activeAgent,
+    mode,
+    modelId,
+    sessionCost,
+    buffer,
+    scrollOffset,
+  };
+
+  useEffect(() => {
+    onRegisterSessionSnapshot?.(() => createSessionSnapshot(sessionStateRef.current));
+  }, [onRegisterSessionSnapshot]);
+
+  const resumedRef = useRef(resume !== undefined);
+  useEffect(() => {
+    if (!resumedRef.current) return;
+    setBuffer((current) => ({
+      items: [...current.items, { type: "system", text: "Resumed previous chat session." }],
+    }));
+  }, []);
 
   const appendUser = (text: string) => setBuffer((current) => ({ items: [...current.items, { type: "user", text, at: formatTurnClock() }] }));
   const appendSystem = (text: string) => setBuffer((current) => ({ items: [...current.items, { type: "system", text }] }));
@@ -104,8 +168,24 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
     agentId: activeAgent.id,
     mode,
     mentions: chips.map((chip) => chip.mention),
+    images: imageAttachments,
   });
-  const clampOffset = (offset: number) => clampStreamScrollOffset(buffer.items, streamWidth, streamHeight, offset, activeLabel);
+  const streamViewport = useMemo(
+    () => computeStreamViewportLayout(buffer.items, streamWidth, streamHeight, scrollOffset, activeLabel),
+    [activeLabel, buffer.items, scrollOffset, streamHeight, streamWidth],
+  );
+  const { maxOffset, bodyHeight, effectiveOffset, streamScrollActive } = streamViewport;
+
+  useEffect(() => {
+    if (scrollOffset !== effectiveOffset) {
+      setScrollOffset(effectiveOffset);
+    }
+  }, [effectiveOffset, scrollOffset]);
+
+  const clearComposerAttachments = () => {
+    setChips([]);
+    setImageAttachments([]);
+  };
   const clearMentionState = () => {
     mentionRequestSeqRef.current += 1;
     clearMentionTimer(mentionTimerRef);
@@ -120,22 +200,16 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
       setScrollOffset(0);
       return;
     }
-    if (key.shift && key.upArrow) {
-      setScrollOffset((current) => clampOffset(current + 1));
-      return;
-    }
-    if (key.shift && key.downArrow) {
-      setScrollOffset((current) => Math.max(0, clampOffset(current) - 1));
-      return;
-    }
-    if (key.pageUp) {
-      const page = Math.max(3, Math.floor(streamHeight * 0.8));
-      setScrollOffset((current) => clampOffset(current + page));
-      return;
-    }
-    if (key.pageDown) {
-      const page = Math.max(3, Math.floor(streamHeight * 0.8));
-      setScrollOffset((current) => Math.max(0, clampOffset(current) - page));
+    const overlayOpen = mentionOpen || slashOpen;
+    const scrollDelta = overlayOpen
+      ? null
+      : resolveStreamScrollDelta(
+          { upArrow: key.upArrow, downArrow: key.downArrow, pageUp: key.pageUp, pageDown: key.pageDown, shift: key.shift, ctrl: key.ctrl, meta: key.meta, input },
+          { bodyHeight, maxOffset },
+          effectiveOffset,
+        );
+    if (scrollDelta !== null) {
+      setScrollOffset(applyStreamScrollDelta(effectiveOffset, scrollDelta, maxOffset));
       return;
     }
     if (key.ctrl && input === "c") {
@@ -159,50 +233,109 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
     }
   });
 
-  const submitPrompt = (text: string) => {
-    setSlashDismissed(false);
-    const slash = parseSlashCommand(text);
-    if (slash) {
-      void handleSlashCommand({
-        slash,
-        activeAgent,
-        http,
-        mode,
-        modelId,
-        workspace,
-        cleanup: cleanupController,
-        exit,
-        setActiveAgent,
-        setMode,
-        setModelId,
-        setBuffer,
-        setScrollOffset,
-      }).catch((error: unknown) => {
-        appendError(error instanceof Error ? error.message : String(error));
-      });
-      return;
-    }
-    const request = promptSnapshot(text);
+  const dispatchPrompt = (request: PromptRequest, userDisplay?: string) => {
+    const promptText = request.text.trim();
+    if (promptText.length === 0 && request.images.length === 0) return;
     if (busy) {
       queueRef.current = [...queueRef.current, request];
       setQueuedPrompts(queueRef.current);
-      appendSystem(`queued: ${text}`);
+      clearComposerAttachments();
+      appendSystem(`queued: ${userDisplay ?? request.text}`);
       return;
     }
-    startPrompt(request);
+    startPrompt(request, userDisplay);
   };
 
-  const startPrompt = (request: PromptRequest) => {
+  const submitPrompt = (text: string) => {
+    setSlashDismissed(false);
+    void (async () => {
+      const slash = parseSlashCommand(text);
+      if (slash?.command === "unknown" && slash.args[0]) {
+        const skill = await resolveSkillBySlashCommand(slash.args[0], workspace);
+        if (skill) {
+          clearComposerAttachments();
+          const body = await readSkillBody(skill.filePath);
+          const args = slash.args.slice(1);
+          const prompt = buildSkillInvocationPrompt(skill, body, args);
+          const display = `/${skill.name}${args.length > 0 ? ` ${args.join(" ")}` : ""}`;
+          dispatchPrompt(promptSnapshot(prompt), display);
+          return;
+        }
+      }
+      if (slash) {
+        clearComposerAttachments();
+        void handleSlashCommand({
+          slash,
+          activeAgent,
+          http,
+          mode,
+          modelId,
+          workspace,
+          cleanup: cleanupController,
+          exit,
+          setActiveAgent,
+          setMode,
+          setModelId,
+          setBuffer,
+          setScrollOffset,
+          clearComposerAttachments,
+        }).catch((error: unknown) => {
+          appendError(error instanceof Error ? error.message : String(error));
+        });
+        return;
+      }
+      const promptText = text.trim();
+      if (promptText.length === 0 && imageAttachments.length === 0) return;
+      dispatchPrompt(promptSnapshot(promptText.length > 0 ? promptText : "(see attached image)"));
+    })();
+  };
+
+  const handleImageDrop = (paths: string[]) => {
+    void Promise.allSettled(paths.map((filePath) => readImageFromPath(filePath))).then((results) => {
+      const loaded: ImageAttachment[] = [];
+      const failures: string[] = [];
+      for (const result of results) {
+        if (result.status === "fulfilled") loaded.push(result.value);
+        else failures.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+      }
+      if (loaded.length === 0) {
+        appendError(formatImageDropFailure(results));
+        return;
+      }
+      setImageAttachments((current) => {
+        const merged = mergeImageAttachments(current, loaded);
+        if (merged.length < current.length + loaded.length) {
+          appendSystem(`At most ${MAX_IMAGE_ATTACHMENTS} images per message.`);
+        }
+        return merged;
+      });
+      if (failures.length > 0) {
+        appendError(`Could not attach ${failures.length} dropped image${failures.length === 1 ? "" : "s"}: ${failures.join("; ")}`);
+      }
+    });
+  };
+
+  const startPrompt = (request: PromptRequest, userDisplay?: string) => {
     if (cleanupController.disposedRef.current) return;
     setIsStartingRun(true);
     setStreamStatus("connecting");
-    setScrollOffset(0);
+    if (effectiveOffset === 0) setScrollOffset(0);
     appendPromptHistory(request.text).catch((error: unknown) => {
       appendError(`Prompt history was not saved: ${error instanceof Error ? error.message : String(error)}`);
     });
-    appendUser(request.text);
-    void http.createRun({ agentId: request.agentId, prompt: request.text, executionMode: request.mode, mentions: request.mentions }).then((run) => {
+    const userLine = request.images.length > 0
+      ? `${userDisplay ?? request.text}${(userDisplay ?? request.text).length > 0 ? " " : ""}[${request.images.length} image${request.images.length === 1 ? "" : "s"}]`
+      : (userDisplay ?? request.text);
+    appendUser(userLine);
+    void http.createRun({
+      agentId: request.agentId,
+      prompt: request.text,
+      executionMode: request.mode,
+      mentions: request.mentions,
+      ...(request.images.length > 0 ? { images: attachmentImages(request.images) } : {}),
+    }).then((run) => {
       if (cleanupController.disposedRef.current) return;
+      clearComposerAttachments();
       let runFinished = false;
       const finishRun = () => {
         if (runFinished) return;
@@ -318,13 +451,14 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         queuedPrompts={queuedPrompts.length}
         theme={theme}
       />
-      <Box flexDirection="column" height={layout.scrollHeight} borderStyle="round" {...border(scrollOffset > 0 ? theme.accent : theme.border)} paddingX={1} {...bg(theme.panel)}>
-        <StreamView items={buffer.items} height={streamHeight} width={streamWidth} scrollOffset={scrollOffset} activeLabel={activeLabel} theme={theme} />
+      <Box flexDirection="column" height={layout.scrollHeight} borderStyle="round" {...border(effectiveOffset > 0 ? theme.accent : theme.border)} paddingX={1} {...bg(theme.panel)}>
+        <StreamView items={buffer.items} height={streamHeight} width={streamWidth} scrollOffset={effectiveOffset} activeLabel={activeLabel} theme={theme} />
       </Box>
       {mentionOpen ? <MentionPopup results={mentionResults} selectedIndex={mentionIndex} open={mentionOpen} theme={theme} /> : null}
       {!mentionOpen && slashOpen ? <SlashPalette items={slashItems} selectedIndex={slashIndex} theme={theme} /> : null}
       <InputBar
         chips={chips}
+        imageAttachments={imageAttachments}
         history={history}
         mentionItems={mentionItems}
         selectedMentionIndex={mentionIndex}
@@ -332,6 +466,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         selectedSlashIndex={slashIndex}
         width={layout.columns}
         maxVisibleLines={Math.max(1, Math.min(MAX_INPUT_VISIBLE_LINES, layout.inputHeight - 2))}
+        streamScrollActive={streamScrollActive}
         theme={theme}
         onMentionNavigate={(delta) => setMentionIndex((current) => moveMentionSelection(current, delta, mentionItems.length))}
         onMentionDismiss={clearMentionState}
@@ -344,6 +479,8 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         onSubmit={submitPrompt}
         onChange={handleInputChange}
         onClear={() => setInputDraft("")}
+        onImageDrop={handleImageDrop}
+        onRemoveLastImage={() => setImageAttachments((current) => current.slice(0, -1))}
         onEscape={() => {
           setSlashDismissed(true);
           clearMentionState();
@@ -352,6 +489,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
       <StatusBar
         sessionCost={sessionCost}
         turnUsage={turnActive ? turnUsage : null}
+        streamScrollActive={streamScrollActive}
         width={layout.columns}
         theme={theme}
       />
@@ -383,6 +521,7 @@ interface SlashCommandContext {
   setModelId: React.Dispatch<React.SetStateAction<string>>;
   setBuffer: React.Dispatch<React.SetStateAction<StreamBuffer>>;
   setScrollOffset: React.Dispatch<React.SetStateAction<number>>;
+  clearComposerAttachments: () => void;
 }
 
 async function handleSlashCommand(ctx: SlashCommandContext): Promise<void> {
@@ -402,6 +541,7 @@ async function handleSlashCommand(ctx: SlashCommandContext): Promise<void> {
     case "clear":
       ctx.setScrollOffset(0);
       ctx.setBuffer(createStreamBuffer());
+      ctx.clearComposerAttachments();
       return;
     case "exit":
       cleanupAndExit(ctx.cleanup, ctx.exit);
@@ -415,8 +555,11 @@ async function handleSlashCommand(ctx: SlashCommandContext): Promise<void> {
     case "model":
       await switchModel(slash.args[0], ctx, appendMessage, appendError);
       return;
+    case "skill":
+      await handleSkillSlash(slash.args, ctx, appendMessage, appendError);
+      return;
     case "unknown":
-      appendError("Unknown slash command.");
+      appendError("Unknown slash command. Use /skill list to see skills, or invoke one with /skill-name.");
       return;
   }
 }
@@ -503,6 +646,40 @@ async function switchModel(
   ctx.setModelId(next.modelId);
   await writePreferences({ preferredMode: ctx.mode, preferredModel: next.modelId });
   appendMessage(`Model switched to ${next.modelId}.`);
+}
+
+async function handleSkillSlash(
+  args: string[],
+  ctx: SlashCommandContext,
+  appendMessage: (message: string) => void,
+  appendError: (message: string) => void,
+): Promise<void> {
+  const subcommand = args[0];
+  if (subcommand === "list") {
+    const skills = await listSkills({ workspace: ctx.workspace });
+    if (skills.length === 0) {
+      appendMessage("No skills found in this workspace or ~/.cursor/skills.");
+      return;
+    }
+    appendMessage(skills.map((skill) => `${skill.scope}:${skill.name} · ${skill.description}`).join("\n"));
+    return;
+  }
+  if (subcommand === "create") {
+    const name = args[1];
+    const description = args.slice(2).join(" ").trim();
+    if (!name || description.length === 0) {
+      appendError("Usage: /skill create <name> <description>");
+      return;
+    }
+    try {
+      const created = await createSkill({ name, description, workspace: ctx.workspace });
+      appendMessage(`Skill created at ${created.filePath}`);
+    } catch (error: unknown) {
+      appendError(error instanceof Error ? error.message : String(error));
+    }
+    return;
+  }
+  appendError("Usage: /skill create <name> <description> | /skill list");
 }
 
 function cliAgentFromSummary(agent: Pick<AgentSummary, "id" | "name" | "modelId" | "executionMode">): CliAgentSummary {
