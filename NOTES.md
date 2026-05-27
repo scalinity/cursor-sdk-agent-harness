@@ -67,3 +67,13 @@ deliberately **not** fixed in this tier. Tier numbers refer to the 3-tier plan
   `tool-call.ts` stores `secondaryDetail: \`in ${scope}\``. Deferred to Tier 3
   (visual identity / relabeling) — the "in " decoration should move to the
   render layer when Tier 3 owns labels/i18n.
+
+## Known limitation — running-tool reconciliation (T1R-W1 follow-up)
+
+- `reconcileRunningTools` (`StreamView.tsx`) flips still-running (suppressed)
+  tools to a terminal status only on the frames `ingestStreamFrame` handles:
+  `run.final_result` / `error` → completed, `run.interrupted` → cancelled. A run
+  that terminates via an `sdk.status`-only frame (FINISHED/ERROR with no
+  `run.final_result`) is NOT reconciled — `ingestStreamFrame` has no `sdk.status`
+  case — so a tool whose terminal frame was also dropped would stay blank. The
+  normal terminal path (`run.final_result`) is covered; this is the residual edge.
