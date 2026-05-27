@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { glyph } from "./glyphs.js";
+
 const THINKING_DOT_FRAMES = ["Thinking   ", "Thinking.  ", "Thinking.. ", "Thinking..."] as const;
-const BRAILLE_LOADING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"] as const;
+/** Braille dot frames for the live thinking/boot spinner (animated REPL indicator only). */
+export const THINKING_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"] as const;
 export const THINKING_DOT_FRAME_HOLD = 8;
+export const THINKING_SPINNER_FRAME_COUNT = THINKING_SPINNER_FRAMES.length;
 const THINKING_CYCLE_LENGTH = THINKING_DOT_FRAME_HOLD * THINKING_DOT_FRAMES.length;
 
 export interface SpinnerFrameState {
@@ -31,7 +34,7 @@ export function formatThinkingIndicatorText(frameIndex: number): string {
 }
 
 export function formatThinkingSpinnerFrame(frameIndex: number): string {
-  return BRAILLE_LOADING_FRAMES[positiveModulo(frameIndex, BRAILLE_LOADING_FRAMES.length)] ?? glyph.thinking;
+  return THINKING_SPINNER_FRAMES[positiveModulo(frameIndex, THINKING_SPINNER_FRAMES.length)] ?? glyph.thinking;
 }
 
 export function thinkingGradientPeakIndex(frameIndex: number, width: number): number {

@@ -16,6 +16,7 @@ export interface SubagentDashboardProps {
   totalTokens?: number;
   totalTokensPartial?: boolean;
   totalCostMicros?: number | null;
+  totalCostPartial?: boolean;
   loading?: boolean;
   error?: string | null;
   onRetry?: () => void;
@@ -68,6 +69,13 @@ function formatTokenCounter(value: number, partial: boolean): string {
   return `partial ${formatTokens(value)}`;
 }
 
+function formatCostCounter(value: number | null, partial: boolean): string {
+  if (value === null && partial) return "unavailable";
+  if (value === null) return "--";
+  if (!partial) return formatMicros(value);
+  return `partial ${formatMicros(value)}`;
+}
+
 export function SubagentDashboard({
   subagents,
   activeCount,
@@ -75,6 +83,7 @@ export function SubagentDashboard({
   totalTokens: totalTokensProp,
   totalTokensPartial: totalTokensPartialProp,
   totalCostMicros: totalCostMicrosProp,
+  totalCostPartial: totalCostPartialProp,
   loading = false,
   error = null,
   onRetry,
@@ -91,13 +100,16 @@ export function SubagentDashboard({
     () => totalTokensPartialProp ?? subagents.some((item) => item.tokenCountPartial),
     [subagents, totalTokensPartialProp],
   );
+  const totalCostPartial = useMemo(
+    () => totalCostPartialProp ?? subagents.some((item) => item.costMicros === null),
+    [subagents, totalCostPartialProp],
+  );
   const totalCostMicros = useMemo(() => {
     if (totalCostMicrosProp !== undefined) return totalCostMicrosProp;
-    const costs = subagents
-      .map((item) => item.costMicros)
-      .filter((cost): cost is number => cost !== null);
-    return costs.length > 0 ? costs.reduce((sum, cost) => sum + cost, 0) : null;
-  }, [subagents, totalCostMicrosProp]);
+    if (subagents.length === 0) return null;
+    if (totalCostPartial) return null;
+    return subagents.reduce((sum, item) => sum + (item.costMicros ?? 0), 0);
+  }, [subagents, totalCostMicrosProp, totalCostPartial]);
   const summary = `${formatTokens(activeCount)} running, ${formatTokens(completedCount)} completed — ${formatTokenCounter(totalTokens, totalTokensPartial)} tokens`;
   const autoCollapsed = !loading && !error && activeCount === 0 && completedCount > 0 && subagents.length > 0;
   const collapsed = manualCollapsed || (autoCollapsed && !manualExpanded);
@@ -140,7 +152,7 @@ export function SubagentDashboard({
           <div className="mt-1 text-sm text-text-primary">{summary}</div>
         </div>
         <div className="mono flex items-center gap-2 text-xs text-text-tertiary">
-          <span>{formatMicros(totalCostMicros)}</span>
+          <span>{formatCostCounter(totalCostMicros, totalCostPartial)}</span>
           <span aria-hidden="true">·</span>
           <span>{formatTokens(subagents.length)} total</span>
           <button

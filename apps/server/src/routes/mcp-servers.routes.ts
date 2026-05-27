@@ -24,7 +24,8 @@ import {
   hydrateMcpSecrets,
   type ExternalizedMcpSecrets,
 } from "../mcp/mcp-secret-config.js";
-import type { McpSecretStore } from "../keychain/mcp-secret-store.js";
+import { ForeignMcpSecretRefError } from "../mcp/mcp-secret-errors.js";
+import { MissingMcpSecretError, type McpSecretStore } from "../keychain/mcp-secret-store.js";
 
 export interface McpServersRoutesDeps {
   mcpServers: McpServersRepo;
@@ -50,6 +51,27 @@ function send422(reply: FastifyReply, error: z.ZodError) {
     code: "VALIDATION_ERROR",
     details: error.issues,
   });
+}
+
+function sendMcpSecretRouteError(reply: FastifyReply, err: unknown): FastifyReply | null {
+  if (err instanceof ForeignMcpSecretRefError) {
+    return reply.code(422).send({
+      code: err.code,
+      message: err.message,
+      serverId: err.serverId,
+      path: err.path,
+      refServerId: err.refServerId,
+    });
+  }
+  if (err instanceof MissingMcpSecretError) {
+    return reply.code(503).send({
+      code: err.code,
+      message: `${err.message}. Re-save the MCP server secrets in the editor.`,
+      serverId: err.serverId,
+      path: err.path,
+    });
+  }
+  return null;
 }
 
 function transportFromRow(row: McpServerRow): "stdio" | "http" | "sse" {
@@ -251,14 +273,28 @@ export async function registerMcpServersRoutes(
       });
     }
     const id = randomUUID();
-    const storageResult = await configForStorage(parsed.data.config, id, deps.mcpSecretStore);
+    let storageResult: ExternalizedMcpSecrets;
+    try {
+      storageResult = await configForStorage(parsed.data.config, id, deps.mcpSecretStore);
+    } catch (err) {
+      const response = sendMcpSecretRouteError(reply, err);
+      if (response) return response;
+      throw err;
+    }
+    let probeConfig: McpServerRow["config"];
+    try {
+      probeConfig = await configForUse(storageResult.config, id, deps.mcpSecretStore);
+    } catch (err) {
+      const response = sendMcpSecretRouteError(reply, err);
+      if (response) return response;
+      throw err;
+    }
     const row = deps.mcpServers.create({
       id,
       name: parsed.data.name,
       enabled: parsed.data.enabled,
       config: storageResult.config,
     });
-    const probeConfig = await configForUse(row.config, row.id, deps.mcpSecretStore);
     const probe = await runProbe(validate, probeConfig, probeOptions);
     const outcome = probeOutcomeFromResult(probe);
     const updated = deps.mcpServers.update(row.id, {
@@ -295,11 +331,18 @@ export async function registerMcpServersRoutes(
           message: `An MCP server named "${parsed.data.name}" already exists.`,
         });
       }
-      const storageResult = await configForStorage(
-        parsed.data.config,
-        req.params.id,
-        deps.mcpSecretStore,
-      );
+      let storageResult: ExternalizedMcpSecrets;
+      try {
+        storageResult = await configForStorage(
+          parsed.data.config,
+          req.params.id,
+          deps.mcpSecretStore,
+        );
+      } catch (err) {
+        const response = sendMcpSecretRouteError(reply, err);
+        if (response) return response;
+        throw err;
+      }
       const configChanged =
         storageResult.wroteSecrets ||
         JSON.stringify(storageResult.config) !== JSON.stringify(existing.config);
@@ -322,6 +365,24 @@ export async function registerMcpServersRoutes(
       }
       probeInFlight.add(req.params.id);
       try {
+        let probeConfig: McpServerRow["config"];
+        try {
+          probeConfig = await configForUse(
+            storageResult.config,
+            req.params.id,
+            deps.mcpSecretStore,
+          );
+        } catch (err) {
+          const response = sendMcpSecretRouteError(reply, err);
+          if (response) return response;
+          throw err;
+        }
+        await deleteStaleSecretPaths(
+          deps.mcpSecretStore,
+          req.params.id,
+          existing.config,
+          storageResult.config,
+        );
         // Config changed → re-probe and persist the verdict atomically.
         // Reset status to `unknown` first so a slow probe isn't masked by a
         // stale `valid` row in the meantime.
@@ -330,25 +391,15 @@ export async function registerMcpServersRoutes(
           validationStatus: "unknown",
           validationMessage: null,
         });
-        const probeConfig = await configForUse(
-          storageResult.config,
-          req.params.id,
-          deps.mcpSecretStore,
-        );
         const probe = await runProbe(validate, probeConfig, probeOptions);
         const outcome = probeOutcomeFromResult(probe);
         const row = deps.mcpServers.update(req.params.id, {
+          ...baseUpdate,
           validationStatus: outcome.status,
           validationMessage: outcome.message,
           lastStatus: outcome.lastStatus,
           lastCheckedAt: new Date().toISOString(),
         });
-        await deleteStaleSecretPaths(
-          deps.mcpSecretStore,
-          req.params.id,
-          existing.config,
-          row.config,
-        );
         return mcpServerSummarySchema.parse(toSummary(row));
       } finally {
         probeInFlight.delete(req.params.id);
@@ -428,11 +479,18 @@ export async function registerMcpServersRoutes(
           validationStatus: "unknown",
           validationMessage: null,
         });
-        const probeConfig = await configForUse(
-          existing.config,
-          existing.id,
-          deps.mcpSecretStore,
-        );
+        let probeConfig: McpServerRow["config"];
+        try {
+          probeConfig = await configForUse(
+            existing.config,
+            existing.id,
+            deps.mcpSecretStore,
+          );
+        } catch (err) {
+          const response = sendMcpSecretRouteError(reply, err);
+          if (response) return response;
+          throw err;
+        }
         const probe = await runProbe(validate, probeConfig, probeOptions);
         const outcome = probeOutcomeFromResult(probe);
         const row = deps.mcpServers.update(req.params.id, {
@@ -480,10 +538,18 @@ export async function registerMcpServersRoutes(
       // or any intermediary.
       reply.header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
       reply.header("Pragma", "no-cache");
+      let config: McpServerRow["config"];
+      try {
+        config = await configForUse(row.config, row.id, deps.mcpSecretStore);
+      } catch (err) {
+        const response = sendMcpSecretRouteError(reply, err);
+        if (response) return response;
+        throw err;
+      }
       return mcpServerRevealResponseSchema.parse({
         id: row.id,
         name: row.name,
-        config: await configForUse(row.config, row.id, deps.mcpSecretStore),
+        config,
       });
     },
   );

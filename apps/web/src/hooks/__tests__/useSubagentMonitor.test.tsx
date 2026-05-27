@@ -41,6 +41,7 @@ describe("useSubagentMonitor", () => {
         totalTokens: 12,
         totalTokensPartial: true,
         totalCostMicros: null,
+        totalCostPartial: true,
       }),
     );
     globalThis.fetch = fetchMock as unknown as typeof fetch;
