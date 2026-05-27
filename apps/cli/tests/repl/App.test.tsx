@@ -28,6 +28,19 @@ describe("App turn formatting", () => {
     expect(formatThinkingIndicatorText(THINKING_DOT_FRAME_HOLD * 3)).toBe("Thinking...");
   });
 
+  it("animates the thinking spinner glyph on every frame", async () => {
+    const mod = await import("../../src/repl/useSpinnerFrame.js") as typeof import("../../src/repl/useSpinnerFrame.js") & {
+      formatThinkingSpinnerFrame?: (frameIndex: number) => string;
+    };
+
+    expect([0, 1, 2, 3].map((frame) => mod.formatThinkingSpinnerFrame?.(frame))).toEqual([
+      "⠋",
+      "⠙",
+      "⠹",
+      "⠸",
+    ]);
+  });
+
   it("moves the thinking gradient peak back and forth across the word", () => {
     expect([0, 1, 2, 3, 4, 5, 6].map((frame) => thinkingGradientPeakIndex(frame, 4))).toEqual([
       0,

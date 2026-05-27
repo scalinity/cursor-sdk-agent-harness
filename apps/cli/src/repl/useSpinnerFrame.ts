@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { glyph } from "./glyphs.js";
 const THINKING_DOT_FRAMES = ["Thinking   ", "Thinking.  ", "Thinking.. ", "Thinking..."] as const;
+const BRAILLE_LOADING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"] as const;
 export const THINKING_DOT_FRAME_HOLD = 8;
 const THINKING_CYCLE_LENGTH = THINKING_DOT_FRAME_HOLD * THINKING_DOT_FRAMES.length;
 
@@ -27,6 +28,10 @@ function positiveModulo(value: number, divisor: number): number {
 export function formatThinkingIndicatorText(frameIndex: number): string {
   const phase = Math.floor(Math.max(0, frameIndex) / THINKING_DOT_FRAME_HOLD);
   return THINKING_DOT_FRAMES[positiveModulo(phase, THINKING_DOT_FRAMES.length)] ?? "Thinking...";
+}
+
+export function formatThinkingSpinnerFrame(frameIndex: number): string {
+  return BRAILLE_LOADING_FRAMES[positiveModulo(frameIndex, BRAILLE_LOADING_FRAMES.length)] ?? glyph.thinking;
 }
 
 export function thinkingGradientPeakIndex(frameIndex: number, width: number): number {
@@ -63,7 +68,7 @@ export function useSpinnerFrameState(active: boolean): SpinnerFrameState {
     return () => clearInterval(timer);
   }, [active]);
 
-  const frame = active ? glyph.thinking : "";
+  const frame = active ? formatThinkingSpinnerFrame(index) : "";
   return { frame, index };
 }
 
