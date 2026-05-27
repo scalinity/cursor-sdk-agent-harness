@@ -31,13 +31,25 @@ describe("usage aggregate components", () => {
 
     expect(screen.getByText("partial $0.004567")).toBeTruthy();
     expect(screen.getByText("partial 350")).toBeTruthy();
-    expect(screen.getByText("partial 8.0%")).toBeTruthy();
+    expect(screen.getByText("unavailable")).toBeTruthy();
+    expect(screen.getByText("cache data incomplete for one or more runs")).toBeTruthy();
   });
 
   it("labels trend and breakdown cost/tokens as partial when a bucket has unavailable usage", () => {
     render(
       <>
-        <UsageTrendChart points={[{ date: "2026-05-20", cost: 4567, tokens: 350, costUnavailableCount: 2, tokenUnavailableCount: 2 }]} />
+        <UsageTrendChart
+          points={[
+            {
+              date: "2026-05-20",
+              cost: 4567,
+              tokens: 350,
+              costUnavailableCount: 2,
+              tokenUnavailableCount: 2,
+              cacheUnavailableCount: 0,
+            },
+          ]}
+        />
         <UsageBreakdownTable
           byModel={[{ id: "composer", name: "composer", runs: 3, cost: 4567, tokens: 350, costUnavailableCount: 2, tokenUnavailableCount: 2 }]}
           byAgent={[{ id: "agent", name: "Agent", runs: 3, cost: 4567, tokens: 350, costUnavailableCount: 2, tokenUnavailableCount: 2 }]}

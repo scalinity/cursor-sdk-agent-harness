@@ -4365,6 +4365,45 @@ Finished the remaining CLI visual identity refinements on the current dirty tree
 
 The wider checkout still contains unrelated dirty counter/server/web/shared work from before this visual pass. Stage only the intended CLI visual identity files if committing this pass separately.
 
+---
+
+## CLI thinking spinner animation — 2026-05-27
+
+### Summary
+
+Restored animated thinking/boot/tool spinners after the visual-identity pass froze `glyph.thinking` (`◐`). The live REPL spinner cycles Braille dot frames (`⠋` … `⠧`) via `THINKING_SPINNER_FRAMES`; static `◐` remains for non-animated tool markers. Gradient peak width uses trimmed thinking text (no trailing pad spaces).
+
+### Files modified
+
+- `apps/cli/src/repl/useSpinnerFrame.ts` — Braille frame cycle; export `THINKING_SPINNER_FRAME_COUNT`.
+- `apps/cli/src/repl/App.tsx` — gradient peak uses `thinkingText.trimEnd().length`.
+- `apps/cli/THEME.md` — document Braille live spinner vs static `glyph.thinking`.
+- `apps/cli/tests/repl/useSpinnerFrame.test.ts` — cycle + regression tests.
+- `apps/cli/tests/repl/App.test.tsx` — update spinner glyph expectations.
+
+### Verification
+
+- `pnpm -F @harness/cli typecheck` — pass.
+- `pnpm -F @harness/cli lint` — pass.
+- `pnpm -F @harness/cli test` — pass, 28 files / 159 tests.
+- `pnpm -F @harness/cli build` — pass.
+
+---
+
+## Multi-model review fixes — 2026-05-27
+
+### Summary
+
+Addressed adversarial review findings across MCP secrets, replay slimming, usage/subagent honesty, and agent runtime error handling. Foreign `keychain:mcp-secret:` refs are rejected at storage; missing Keychain entries return `503 MCP_SECRET_MISSING` instead of opaque `500`s; stale secret cleanup runs after hydration verification and before probe; large replay events fail closed when SQL metadata is incomplete; subagent dashboard/API expose `totalCostPartial`; daily usage includes `cacheUnavailableCount`; cache summary cards show `unavailable` when cache data is incomplete.
+
+### Verification
+
+- `pnpm typecheck` — pass.
+- `pnpm lint` — pass.
+- `pnpm test` — pass.
+
+---
+
 ## 2026-05-27 — Review debate merge-comment hook
 
 Added a small repo script to standardize review debate handoff comments and guarantee Codex gets tagged in the final handoff line.

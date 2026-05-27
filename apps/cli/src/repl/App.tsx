@@ -144,7 +144,10 @@ export function App({
   const accountLabel = "local";
   const thinkingText = formatThinkingIndicatorText(spinnerState.index);
   const thinkingLabelText = `${spinner} ${thinkingText}`;
-  const thinkingGradientPeak = thinkingGradientPeakIndex(spinnerState.index, thinkingText.length);
+  const thinkingGradientPeak = thinkingGradientPeakIndex(
+    spinnerState.index,
+    thinkingText.trimEnd().length,
+  );
   const activeLabel = turnActive
     ? (runningTool && toolStartRef.current
         ? truncateMiddle(formatActiveToolLine(spinner, runningTool, Date.now() - toolStartRef.current.startMs), streamWidth)

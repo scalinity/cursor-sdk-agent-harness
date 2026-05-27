@@ -35,6 +35,8 @@
 - `glyph.thinking` = `◐`
 - `glyph.readyDot` = `●`
 
+The live thinking/boot spinner animates Braille dot frames (`⠋` … `⠧`) via `THINKING_SPINNER_FRAMES` in `useSpinnerFrame.ts`. Use static `glyph.thinking` (`◐`) only for non-animated tool/status markers (e.g. `ToolCallLine` when not driven by the spinner hook).
+
 Allowed non-state glyphs (layout/information only; keep stable by rule):
 
 - `─`, `┌`, `└`, `│` (frame and diff box borders)
