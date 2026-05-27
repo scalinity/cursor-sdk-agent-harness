@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+reviews:
+  drafts: false
+  base_branches:
+    - main
+  path_filters:
+    - "!**/*.md"
+    - "!**/*.txt"
+    - "!**/LICENSE*"
+    - "!**/package-lock.json"
+    - "!**/yarn.lock"
+    - "!**/poetry.lock"
+    - "!**/*.lock"
+  request_changes_workflow: false
+  high_level_summary: true
+  collapse_walkthrough: true
+  poem: false
+
+chat:
+  auto_reply: true
