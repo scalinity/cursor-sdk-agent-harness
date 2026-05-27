@@ -197,3 +197,47 @@ For SDK behavior specifically, the order is: ledger → SDK `.d.ts` files in `no
 - Update `IMPLEMENTATION_STATUS.md` even when uncertain — say so explicitly there.
 - Surface architectural assumptions as inline "Assuming X because Y. Flag if wrong." comments in code.
 - Restate apparent contradictions before resolving them.
+
+## Cursor Cloud specific instructions
+
+### D-Bus and Keytar (Critical for server startup)
+
+The server uses `keytar` (via `libsecret`) for keychain operations (CSRF secret, API key storage). On Cloud Agent VMs, `gnome-keyring-daemon`'s `setPassword` hangs unless the D-Bus session's Secret Service has its default alias set to the in-memory `session` collection.
+
+Before running `pnpm dev` or any server process, execute:
+
+```bash
+export DBUS_SESSION_BUS_ADDRESS="unix:path=$(ls /tmp/dbus-!(*daemon*) 2>/dev/null | head -1)"
+
+# Ensure gnome-keyring-daemon is running with secrets component
+pgrep -f "gnome-keyring-daemon.*secrets" >/dev/null || gnome-keyring-daemon --start --components=secrets >/dev/null 2>&1
+
+# Set the session collection as the default alias (avoids unlock prompts)
+python3 -c "
+import dbus
+bus = dbus.SessionBus()
+proxy = bus.get_object('org.freedesktop.secrets', '/org/freedesktop/secrets')
+service = dbus.Interface(proxy, 'org.freedesktop.Secret.Service')
+service.SetAlias('default', '/org/freedesktop/secrets/collection/session')
+" 2>/dev/null
+```
+
+Without this, `keytar.setPassword()` triggers `org.gnome.keyring.SystemPrompter` which hangs indefinitely in headless environments.
+
+### Running services
+
+| Service | Command | Address |
+|---|---|---|
+| Full dev (server + web) | `pnpm dev` | server: `127.0.0.1:4783`, web: `127.0.0.1:5173` |
+
+The `pnpm dev` script starts both the Fastify server (tsx watch) and Vite dev server concurrently. The shared package must be built first (`pnpm -F @harness/shared build`) for the server to import its types at runtime.
+
+### Checks (see Common commands in this file)
+
+- `pnpm typecheck` — requires `@harness/shared` and `@harness/server` to be built first (the typecheck script builds shared automatically, but desktop typecheck needs server dist)
+- `pnpm lint` — ESLint flat config, no prerequisites
+- `pnpm test` — Vitest across all packages, uses in-memory keychain stubs (no D-Bus needed for tests)
+
+### API key requirement
+
+The Cursor SDK API key (`CURSOR_API_KEY`) is required to actually send messages/create runs. Without it, the UI loads fully but agent creation returns `MISSING_API_KEY`. Tests use mocks and don't need a real key.
