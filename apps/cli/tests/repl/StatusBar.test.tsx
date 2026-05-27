@@ -14,7 +14,8 @@ describe("StatusBar helpers", () => {
     });
 
     expect(output).toContain("session $0.00");
-    expect(output).toContain("ws ready");
+    expect(output).not.toContain("ws");
+    expect(output).not.toContain("ready");
     expect(output).not.toContain("dir:");
     expect(output).not.toContain("CursorHarness");
     expect(output).not.toContain("composer-2-5-fast");

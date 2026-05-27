@@ -1,6 +1,5 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { sanitizeTerminalText } from "../output/sanitize.js";
 import { formatMicros } from "../output/table.js";
 import type { CliMode } from "../types.js";
 import { bg, createTuiTheme, fg, truncateMiddle, type TuiTheme } from "./theme.js";
@@ -38,5 +37,5 @@ export function StatusBar(props: StatusBarProps) {
 function formatStatusDetails(props: StatusBarProps, compact: boolean): string {
   const hints = compact ? "^C cancel · ^D quit · ^L clear · PgUp/Dn scroll" : "Enter submit · Shift+Enter newline · ↑↓ history · Shift+↑↓ scroll · Esc dismiss · ^C cancel/quit · ^L clear";
   const sessionCost = `session ${formatMicros(props.sessionCostMicros)}`;
-  return `${sessionCost} · ws ${sanitizeTerminalText(props.connection)} · ${hints}`;
+  return `${sessionCost} · ${hints}`;
 }
