@@ -1,8 +1,7 @@
 import { useRef } from "react";
-import { codeEditEventsForRun, parseCodeEditPayload, selectedCodeEditEvent } from "../../lib/code-edit-events.js";
+import { parseCodeEditPayload, selectedCodeEditEvent } from "../../lib/code-edit-events.js";
 import { cn } from "../../lib/cn.js";
-import { useRunStore } from "../../state/run-store.js";
-import type { CanonicalRunEvent } from "../../state/run-store.js";
+import { useRunStore, type CanonicalRunEvent } from "../../state/run-store.js";
 import { useUiStore } from "../../state/ui-store.js";
 import { CodeEditPreviewPanel } from "../streaming/CodeEditPreviewPanel.js";
 import { RightPaneTabs } from "./RightTabs.js";
@@ -53,10 +52,9 @@ export function RightPane({ activeRunId }: RightPaneProps) {
 }
 
 function DiffSurface({ activeRunId }: RightPaneProps) {
-  const events = useRunStore((s) => (activeRunId ? (s.eventsByRunId[activeRunId]?.events ?? EMPTY_EVENTS) : EMPTY_EVENTS));
+  const editEvents = useRunStore((s) => (activeRunId ? (s.eventsByRunId[activeRunId]?.codeEditEvents ?? EMPTY_EVENTS) : EMPTY_EVENTS));
   const selectedEventId = useUiStore((s) => (activeRunId ? (s.selectedCodeEditEventByRunId[activeRunId] ?? null) : null));
-  const editEvents = codeEditEventsForRun(events);
-  const activeEvent = selectedCodeEditEvent(events, selectedEventId);
+  const activeEvent = selectedCodeEditEvent(editEvents, selectedEventId);
   const payload = activeEvent ? parseCodeEditPayload(activeEvent.payload) : null;
   const activePath = payload?.edits[0]?.path ?? null;
   const segments = activePath ? activePath.split("/") : [];

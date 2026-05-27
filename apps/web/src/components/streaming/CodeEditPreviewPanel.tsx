@@ -1,7 +1,7 @@
 import type { ReplaySpeed } from "@harness/shared";
-import { codeEditEventsForRun, parseCodeEditPayload, selectedCodeEditEvent } from "../../lib/code-edit-events.js";
+import { parseCodeEditPayload, selectedCodeEditEvent } from "../../lib/code-edit-events.js";
 import { cn } from "../../lib/cn.js";
-import { useRunStore } from "../../state/run-store.js";
+import { useRunStore, type CanonicalRunEvent } from "../../state/run-store.js";
 import { useUiStore } from "../../state/ui-store.js";
 import { CodeEditPreview } from "./CodeEditPreview.js";
 
@@ -11,10 +11,10 @@ export interface CodeEditPreviewPanelProps {
 }
 
 const SPEEDS: ReplaySpeed[] = ["1x", "2x", "4x", "instant"];
-const EMPTY_EVENTS: ReturnType<typeof codeEditEventsForRun> = [];
+const EMPTY_EVENTS: CanonicalRunEvent[] = [];
 
 export function CodeEditPreviewPanel({ runId, compact }: CodeEditPreviewPanelProps) {
-  const events = useRunStore((s) => (runId ? (s.eventsByRunId[runId]?.events ?? EMPTY_EVENTS) : EMPTY_EVENTS));
+  const editEvents = useRunStore((s) => (runId ? (s.eventsByRunId[runId]?.codeEditEvents ?? EMPTY_EVENTS) : EMPTY_EVENTS));
   const selectedEventId = useUiStore((s) => (runId ? (s.selectedCodeEditEventByRunId[runId] ?? null) : null));
   const selectCodeEditEvent = useUiStore((s) => s.selectCodeEditEvent);
   const replaySpeed = useUiStore((s) => (runId ? (s.replaySpeedByRunId[runId] ?? "1x") : "1x"));
@@ -22,8 +22,7 @@ export function CodeEditPreviewPanel({ runId, compact }: CodeEditPreviewPanelPro
   const setReplaySpeed = useUiStore((s) => s.setReplaySpeed);
   const setReplayPaused = useUiStore((s) => s.setReplayPaused);
 
-  const editEvents = codeEditEventsForRun(events);
-  const activeEvent = selectedCodeEditEvent(events, selectedEventId);
+  const activeEvent = selectedCodeEditEvent(editEvents, selectedEventId);
   const activePayload = activeEvent ? parseCodeEditPayload(activeEvent.payload) : null;
   const activeIndex = activeEvent ? editEvents.findIndex((event) => event.event_id === activeEvent.event_id) : -1;
 

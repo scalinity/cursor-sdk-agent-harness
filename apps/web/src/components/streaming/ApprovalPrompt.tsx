@@ -28,21 +28,25 @@ export interface ApprovalPromptProps {
 }
 
 function findContext(
-  events: CanonicalRunEvent[],
+  chunks: ReadonlyArray<ReadonlyArray<CanonicalRunEvent>>,
   upTo: number,
 ): { task: CanonicalRunEvent | null; toolCall: CanonicalRunEvent | null } {
   let task: CanonicalRunEvent | null = null;
   let toolCall: CanonicalRunEvent | null = null;
-  for (let i = events.length - 1; i >= 0; i--) {
-    const evt = events[i];
-    if (!evt || evt.seq >= upTo) continue;
-    if (toolCall === null && evt.sdk_type === "tool_call" && evt.kind === "tool_call.running") {
-      toolCall = evt;
+  for (let chunkIndex = chunks.length - 1; chunkIndex >= 0; chunkIndex -= 1) {
+    const chunk = chunks[chunkIndex];
+    if (!chunk) continue;
+    for (let i = chunk.length - 1; i >= 0; i -= 1) {
+      const evt = chunk[i];
+      if (!evt || evt.seq >= upTo) continue;
+      if (toolCall === null && evt.sdk_type === "tool_call" && evt.kind === "tool_call.running") {
+        toolCall = evt;
+      }
+      if (task === null && evt.sdk_type === "task") {
+        task = evt;
+      }
+      if (task !== null && toolCall !== null) return { task, toolCall };
     }
-    if (task === null && evt.sdk_type === "task") {
-      task = evt;
-    }
-    if (task !== null && toolCall !== null) break;
   }
   return { task, toolCall };
 }
@@ -71,10 +75,10 @@ export function ApprovalPrompt({
   const requestEvent = useRunStore((s) =>
     s.eventsByRunId[runId]?.bySeq.get(approval.requestSeq) ?? null,
   );
-  const events = useRunStore((s) => s.eventsByRunId[runId]?.events ?? null);
+  const eventChunks = useRunStore((s) => s.eventsByRunId[runId]?.eventChunks ?? null);
   const context = useMemo(
-    () => findContext(events ?? [], approval.requestSeq),
-    [events, approval.requestSeq],
+    () => findContext(eventChunks ?? [], approval.requestSeq),
+    [eventChunks, approval.requestSeq],
   );
 
   const pending = approval.status === "pending";

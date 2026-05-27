@@ -1,13 +1,15 @@
-import { useMemo } from "react";
-import { deriveToolCallProjections, groupToolCallLanes } from "../lib/tool-call-projection.js";
-import { useRunStore, type CanonicalRunEvent } from "../state/run-store.js";
+import { useRunStore } from "../state/run-store.js";
+import type { ToolCallLaneGroup, ToolCallProjection } from "../lib/tool-call-projection.js";
 
-const EMPTY_EVENTS: CanonicalRunEvent[] = [];
+const EMPTY_CALLS: ToolCallProjection[] = [];
+const EMPTY_GROUPS: ToolCallLaneGroup[] = [];
 
 export function useToolCallProjection(runId: string | null) {
-  const events = useRunStore((s) => (runId ? (s.eventsByRunId[runId]?.events ?? EMPTY_EVENTS) : EMPTY_EVENTS));
-  return useMemo(() => {
-    const calls = deriveToolCallProjections(events);
-    return { calls, groups: groupToolCallLanes(calls) };
-  }, [events]);
+  const calls = useRunStore((s) =>
+    runId ? (s.eventsByRunId[runId]?.toolCallProjections ?? EMPTY_CALLS) : EMPTY_CALLS,
+  );
+  const groups = useRunStore((s) =>
+    runId ? (s.eventsByRunId[runId]?.toolCallGroups ?? EMPTY_GROUPS) : EMPTY_GROUPS,
+  );
+  return { calls, groups };
 }

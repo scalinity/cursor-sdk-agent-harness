@@ -10,10 +10,9 @@
  * `bySeq` is a plain Map (not a Record) because seq numbers are sparse
  * during gap recovery and the lookup is hot during replay drainage.
  *
- * `events` is a parallel CanonicalRunEvent[] kept in seq order — this
- * lets renderers iterate without rebuilding the array per render
- * (RV2-S5). `toolCallCount` is maintained incrementally to avoid the
- * per-render O(n) scan in CenterPane (RV2-S4).
+ * `eventChunks` keeps canonical events in seq order without copying the
+ * whole run on every append. Hot renderers subscribe to the incremental
+ * projections below instead of rescanning the full event log per frame.
  */
 import type {
   CanonicalEventBase,
@@ -25,7 +24,16 @@ import type {
   UsageSource,
 } from "@harness/shared";
 import { create } from "zustand";
+import { parseCodeEditPayload } from "../lib/code-edit-events.js";
 import { clientPerf } from "../lib/perf-counters.js";
+import {
+  groupToolCallLanes,
+  upsertToolCallProjection,
+  type ToolCallLaneGroup,
+  type ToolCallProjection,
+} from "../lib/tool-call-projection.js";
+
+const EVENT_CHUNK_SIZE = 256;
 
 /**
  * The shape of every canonical event the client knows about. We type the
@@ -91,19 +99,31 @@ export interface ApprovalState {
 export interface RunEventState {
   seqList: number[];
   bySeq: Map<number, CanonicalRunEvent>;
-  /**
-   * Parallel array kept in seq order. Renderers iterate this directly so
-   * the timeline component doesn't rebuild a `seqList.map(seq => bySeq.get(seq))`
-   * array per render.
-   */
-  events: CanonicalRunEvent[];
+  byEventId: Map<string, CanonicalRunEvent>;
+  /** Fixed-size seq-ordered chunks. Append copies at most one chunk. */
+  eventChunks: CanonicalRunEvent[][];
+  /** Bumps whenever eventChunks changes; useful for memo keys. */
+  eventsVersion: number;
   lastSeq: number;
+  lastReceivedAt: string | null;
   /** Concatenated assistant text from delta/snapshot events. */
   assistantText: string;
   /** Concatenated thinking text from delta/snapshot events. */
   thinkingText: string;
+  /** Latest thinking_duration_ms from thinking events. */
+  thinkingDurationMs: number | null;
   /** Maintained incrementally as `sdk.tool_call` frames arrive. */
   toolCallCount: number;
+  /** Incremental projection for ToolCallLane and health checks. */
+  toolCallProjections: ToolCallProjection[];
+  toolCallGroups: ToolCallLaneGroup[];
+  /** Derived code-edit events in seq order. */
+  codeEditEvents: CanonicalRunEvent[];
+  codeEditEventBySourceCallId: Record<string, CanonicalRunEvent>;
+  /** Sub-agent lifecycle events in seq order. */
+  subagentLifecycleEvents: CanonicalRunEvent[];
+  /** request_id -> nearest running tool call when the approval was requested. */
+  approvalToolCallIdByRequestId: Record<string, string>;
   /**
    * Phase 13 — keyed by `request_id`. Tracks the latest known state of
    * each approval prompt the timeline has seen. Updated as
@@ -130,11 +150,21 @@ function emptyEventState(): RunEventState {
   return {
     seqList: [],
     bySeq: new Map(),
-    events: [],
+    byEventId: new Map(),
+    eventChunks: [],
+    eventsVersion: 0,
     lastSeq: 0,
+    lastReceivedAt: null,
     assistantText: "",
     thinkingText: "",
+    thinkingDurationMs: null,
     toolCallCount: 0,
+    toolCallProjections: [],
+    toolCallGroups: [],
+    codeEditEvents: [],
+    codeEditEventBySourceCallId: {},
+    subagentLifecycleEvents: [],
+    approvalToolCallIdByRequestId: {},
     approvalsByRequestId: {},
   };
 }
@@ -180,21 +210,83 @@ function applyTextEvent(
 }
 
 /**
- * Binary-insert `seq` into the sorted `seqList` (and `events` array,
- * positioned to match the seq order). The hot path is the append case
- * where seq is greater than the last element; that short-circuits to a
- * single push. Out-of-order arrivals (rare, gap recovery) fall back to
- * binary insertion at the correct position, keeping the slot lookup
- * O(log n) instead of the previous O(n log n) Array.sort.
+ * Flatten event chunks for non-hot compatibility surfaces. Keep this out of
+ * ingest so appending a token never copies the whole run's event history.
+ */
+export function flattenEventChunks(
+  chunks: ReadonlyArray<ReadonlyArray<CanonicalRunEvent>>,
+): CanonicalRunEvent[] {
+  return chunks.flatMap((chunk) => [...chunk]);
+}
+
+function rechunkEvents(events: readonly CanonicalRunEvent[]): CanonicalRunEvent[][] {
+  const chunks: CanonicalRunEvent[][] = [];
+  for (let i = 0; i < events.length; i += EVENT_CHUNK_SIZE) {
+    chunks.push(events.slice(i, i + EVENT_CHUNK_SIZE));
+  }
+  return chunks;
+}
+
+function appendEventChunk(
+  chunks: readonly CanonicalRunEvent[][],
+  canonical: CanonicalRunEvent,
+): CanonicalRunEvent[][] {
+  const next = chunks.slice();
+  const last = next[next.length - 1];
+  if (!last || last.length >= EVENT_CHUNK_SIZE) {
+    next.push([canonical]);
+  } else {
+    next[next.length - 1] = [...last, canonical];
+  }
+  return next;
+}
+
+function insertEventBySeq(
+  events: readonly CanonicalRunEvent[],
+  canonical: CanonicalRunEvent,
+): CanonicalRunEvent[] {
+  if (events.length === 0 || events[events.length - 1]!.seq < canonical.seq) {
+    return [...events, canonical];
+  }
+  const next = events.slice();
+  let lo = 0;
+  let hi = next.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (next[mid]!.seq < canonical.seq) lo = mid + 1;
+    else hi = mid;
+  }
+  next.splice(lo, 0, canonical);
+  return next;
+}
+
+function latestRunningToolCallId(projections: readonly ToolCallProjection[]): string | null {
+  for (let i = projections.length - 1; i >= 0; i -= 1) {
+    const projection = projections[i];
+    if (projection?.status === "running") return projection.callId;
+  }
+  return null;
+}
+
+function thinkingDurationFromPayload(payload: unknown): number | null {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
+  const value = (payload as { thinking_duration_ms?: unknown }).thinking_duration_ms;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Binary-insert `seq` into the sorted `seqList` and mirror the event into
+ * chunked storage. The hot path copies the seq list and at most one chunk;
+ * rare out-of-order recovery flattens/rechunks to preserve seq order.
  */
 function insertSeqInOrder(
   list: number[],
-  events: CanonicalRunEvent[],
+  chunks: CanonicalRunEvent[][],
   seq: number,
   canonical: CanonicalRunEvent,
-): { list: number[]; events: CanonicalRunEvent[] } {
+): { list: number[]; chunks: CanonicalRunEvent[][] } {
   if (list.length === 0 || list[list.length - 1]! < seq) {
-    return { list: [...list, seq], events: [...events, canonical] };
+    return { list: [...list, seq], chunks: appendEventChunk(chunks, canonical) };
   }
   let lo = 0;
   let hi = list.length;
@@ -204,10 +296,10 @@ function insertSeqInOrder(
     else hi = mid;
   }
   const nextList = list.slice();
-  const nextEvents = events.slice();
   nextList.splice(lo, 0, seq);
-  nextEvents.splice(lo, 0, canonical);
-  return { list: nextList, events: nextEvents };
+  const flattened = flattenEventChunks(chunks);
+  flattened.splice(lo, 0, canonical);
+  return { list: nextList, chunks: rechunkEvents(flattened) };
 }
 
 /**
@@ -257,11 +349,21 @@ export const useRunStore = create<RunState>((set) => ({
         ? {
             seqList: prevEvents.seqList,
             bySeq: prevEvents.bySeq,
-            events: prevEvents.events,
+            byEventId: prevEvents.byEventId,
+            eventChunks: prevEvents.eventChunks,
+            eventsVersion: prevEvents.eventsVersion,
             lastSeq: prevEvents.lastSeq,
+            lastReceivedAt: prevEvents.lastReceivedAt,
             assistantText: prevEvents.assistantText,
             thinkingText: prevEvents.thinkingText,
+            thinkingDurationMs: prevEvents.thinkingDurationMs,
             toolCallCount: prevEvents.toolCallCount,
+            toolCallProjections: prevEvents.toolCallProjections,
+            toolCallGroups: prevEvents.toolCallGroups,
+            codeEditEvents: prevEvents.codeEditEvents,
+            codeEditEventBySourceCallId: prevEvents.codeEditEventBySourceCallId,
+            subagentLifecycleEvents: prevEvents.subagentLifecycleEvents,
+            approvalToolCallIdByRequestId: prevEvents.approvalToolCallIdByRequestId,
             approvalsByRequestId: prevEvents.approvalsByRequestId,
           }
         : emptyEventState();
@@ -287,16 +389,21 @@ export const useRunStore = create<RunState>((set) => ({
 
       const inserted = insertSeqInOrder(
         nextEvents.seqList,
-        nextEvents.events,
+        nextEvents.eventChunks,
         evt.seq,
         canonical,
       );
       nextEvents.seqList = inserted.list;
-      nextEvents.events = inserted.events;
+      nextEvents.eventChunks = inserted.chunks;
+      nextEvents.eventsVersion += 1;
       const newBySeq = new Map(nextEvents.bySeq);
       newBySeq.set(evt.seq, canonical);
       nextEvents.bySeq = newBySeq;
+      const newByEventId = new Map(nextEvents.byEventId);
+      newByEventId.set(evt.event_id, canonical);
+      nextEvents.byEventId = newByEventId;
       nextEvents.lastSeq = Math.max(nextEvents.lastSeq, evt.seq);
+      nextEvents.lastReceivedAt = evt.received_at;
 
       // Text accumulators.
       if (frame.type === "sdk.assistant") {
@@ -311,9 +418,16 @@ export const useRunStore = create<RunState>((set) => ({
           frame.event.kind,
           frame.event.payload,
         );
+        const duration = thinkingDurationFromPayload(frame.event.payload);
+        if (duration !== null) nextEvents.thinkingDurationMs = duration;
       } else if (frame.type === "sdk.tool_call") {
         // Maintain incrementally so renderers don't rescan the seqList.
         nextEvents.toolCallCount += 1;
+        nextEvents.toolCallProjections = upsertToolCallProjection(
+          nextEvents.toolCallProjections,
+          canonical,
+        );
+        nextEvents.toolCallGroups = groupToolCallLanes(nextEvents.toolCallProjections);
       } else if (frame.type === "sdk.request") {
         // Phase 13 — record a pending approval prompt keyed by
         // request_id. The originating seq lets the renderer scroll
@@ -328,6 +442,7 @@ export const useRunStore = create<RunState>((set) => ({
         // protocol grows the per-run approval count meaningfully,
         // swap this for a structural-share Map or Immer-style draft.
         const reqId = frame.event.payload.request_id;
+        const toolCallId = latestRunningToolCallId(nextEvents.toolCallProjections);
         nextEvents.approvalsByRequestId = {
           ...nextEvents.approvalsByRequestId,
           [reqId]: {
@@ -341,6 +456,12 @@ export const useRunStore = create<RunState>((set) => ({
             message: null,
           },
         };
+        if (toolCallId !== null) {
+          nextEvents.approvalToolCallIdByRequestId = {
+            ...nextEvents.approvalToolCallIdByRequestId,
+            [reqId]: toolCallId,
+          };
+        }
       } else if (frame.type === "approval.resolved") {
         const reqId = frame.event.payload.request_id;
         const prev = nextEvents.approvalsByRequestId[reqId];
@@ -373,6 +494,22 @@ export const useRunStore = create<RunState>((set) => ({
             message: frame.event.payload.message,
           },
         };
+      }
+
+      if (evt.kind === "code_edit.detected") {
+        const payload = parseCodeEditPayload(evt.payload);
+        nextEvents.codeEditEvents = insertEventBySeq(nextEvents.codeEditEvents, canonical);
+        if (payload?.source_call_id) {
+          nextEvents.codeEditEventBySourceCallId = {
+            ...nextEvents.codeEditEventBySourceCallId,
+            [payload.source_call_id]: canonical,
+          };
+        }
+      } else if (evt.kind === "subagent.spawned" || evt.kind === "subagent.completed") {
+        nextEvents.subagentLifecycleEvents = insertEventBySeq(
+          nextEvents.subagentLifecycleEvents,
+          canonical,
+        );
       }
 
       // Run-level projections — only rebuild byId when the frame type

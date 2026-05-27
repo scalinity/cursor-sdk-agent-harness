@@ -1,6 +1,5 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useAutoCollapse } from "../../hooks/useAutoCollapse.js";
-import { findCodeEditEventForCall } from "../../lib/code-edit-events.js";
 import { cn } from "../../lib/cn.js";
 import { safeJsonString } from "../../lib/safe-payload.js";
 import type { ToolCallProjection } from "../../lib/tool-call-projection.js";
@@ -9,13 +8,6 @@ import { useUiStore } from "../../state/ui-store.js";
 import { CodeEditPreview } from "./CodeEditPreview.js";
 import { JsonInspector } from "./JsonInspector.js";
 import { StreamingSurfaceBoundary } from "./StreamingSurfaceBoundary.js";
-import type { CanonicalRunEvent } from "../../state/run-store.js";
-
-// F-001: stable empty-array reference for the Zustand selector below.
-// `?? []` returns a new array every render and triggers an infinite
-// `useSyncExternalStore` snapshot-mismatch loop. Mirrors the pattern in
-// CodeEditPreviewPanel.tsx.
-const EMPTY_EVENTS: CanonicalRunEvent[] = [];
 
 export interface ToolCallCardProps {
   call: ToolCallProjection;
@@ -102,9 +94,10 @@ export function ToolCallCard({
   longRunning = false,
 }: ToolCallCardProps) {
   const [pinned, setPinned] = useState(false);
-  const events = useRunStore((s) => s.eventsByRunId[runId]?.events ?? EMPTY_EVENTS);
+  const codeEditEvent = useRunStore((s) =>
+    s.eventsByRunId[runId]?.codeEditEventBySourceCallId[call.callId] ?? null,
+  );
   const selectCodeEditEvent = useUiStore((s) => s.selectCodeEditEvent);
-  const codeEditEvent = useMemo(() => findCodeEditEventForCall(events, call.callId), [events, call.callId]);
   const { collapsed, setCollapsed } = useAutoCollapse({ status: call.status, pinned });
   const icon = iconForTool(call.name);
   const preview = resultPreview(call.result);

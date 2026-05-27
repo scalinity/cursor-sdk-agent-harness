@@ -4,7 +4,6 @@ import { useRunHealth } from "../../hooks/useRunHealth.js";
 import {
   useRunStore,
   type ApprovalState,
-  type CanonicalRunEvent,
 } from "../../state/run-store.js";
 import { ToolCallCard } from "./ToolCallCard.js";
 import { StreamingSurfaceBoundary } from "./StreamingSurfaceBoundary.js";
@@ -23,33 +22,19 @@ export interface ToolCallLaneProps {
  * no such tool call, the badge is absent (the inline ApprovalPrompt
  * still renders).
  *
- * RV2-W4: pure function over (events, approvals). The caller
- * subscribes to those slices via the store selector and memoizes
- * this call, so badges refresh the moment the relevant store
- * mutation lands instead of waiting up to 2s for the next
- * useRunHealth tick.
+ * RV2-W4: pure function over incremental store projections. Badges refresh
+ * when the relevant approval state lands without scanning every canonical
+ * event in the run.
  */
 function deriveAwaitingApprovalCallIds(
-  events: ReadonlyArray<CanonicalRunEvent>,
   approvals: Record<string, ApprovalState>,
+  approvalToolCallIds: Record<string, string>,
 ): Set<string> {
   const out = new Set<string>();
   for (const approval of Object.values(approvals)) {
     if (approval.status !== "pending") continue;
-    for (let i = events.length - 1; i >= 0; i--) {
-      const evt = events[i];
-      if (!evt || evt.seq >= approval.requestSeq) continue;
-      if (evt.sdk_type !== "tool_call") continue;
-      const p = evt.payload as { call_id?: unknown } | null;
-      const cid =
-        p && typeof p === "object" && typeof p.call_id === "string"
-          ? p.call_id
-          : null;
-      if (cid) {
-        out.add(cid);
-        break;
-      }
-    }
+    const callId = approvalToolCallIds[approval.requestId];
+    if (callId) out.add(callId);
   }
   return out;
 }
@@ -57,18 +42,18 @@ function deriveAwaitingApprovalCallIds(
 export function ToolCallLane({ runId }: ToolCallLaneProps) {
   const { calls, groups } = useToolCallProjection(runId);
   const { toolCallHealth } = useRunHealth(runId);
-  const events = useRunStore((s) =>
-    runId ? (s.eventsByRunId[runId]?.events ?? null) : null,
-  );
   const approvalsMap = useRunStore((s) =>
     runId ? (s.eventsByRunId[runId]?.approvalsByRequestId ?? null) : null,
   );
+  const approvalToolCallIds = useRunStore((s) =>
+    runId ? (s.eventsByRunId[runId]?.approvalToolCallIdByRequestId ?? null) : null,
+  );
   // RV2-W4: pure useMemo over the slices we just subscribed to.
-  // Re-runs only when events or approvalsByRequestId actually
-  // changes — not on every useRunHealth tick.
+  // Re-runs only when approvalsByRequestId or the incremental request->tool
+  // projection changes, not on every event or useRunHealth tick.
   const awaiting = useMemo(
-    () => deriveAwaitingApprovalCallIds(events ?? [], approvalsMap ?? {}),
-    [events, approvalsMap],
+    () => deriveAwaitingApprovalCallIds(approvalsMap ?? {}, approvalToolCallIds ?? {}),
+    [approvalsMap, approvalToolCallIds],
   );
 
   if (!runId || calls.length === 0) return null;

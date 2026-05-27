@@ -134,6 +134,44 @@ export function deriveToolCallProjections(events: readonly CanonicalRunEvent[]):
   return order.map((callId) => byCallId.get(callId)).filter((p): p is ToolCallProjection => p !== undefined);
 }
 
+export function upsertToolCallProjection(
+  projections: readonly ToolCallProjection[],
+  event: CanonicalRunEvent,
+): ToolCallProjection[] {
+  if (event.sdk_type !== "tool_call" || !event.kind.startsWith("tool_call.")) {
+    return projections.slice();
+  }
+  const parsed = toolPayloadSchema.safeParse(event.payload);
+  if (!parsed.success) return projections.slice();
+  const payload = parsed.data;
+  const index = projections.findIndex((projection) => projection.callId === payload.call_id);
+  if (index === -1) {
+    return [...projections, projectionFromEvent(event, payload)];
+  }
+
+  const existing = { ...projections[index]! };
+  existing.status = payload.status;
+  existing.name = payload.name || existing.name;
+  if (payload.args !== undefined) existing.args = payload.args;
+  if (payload.result !== undefined) existing.result = payload.result;
+  if (payload.truncated !== undefined) existing.truncated = payload.truncated;
+  const largePayloadRefs = normalizeLargePayloadRefs(payload.large_payload_refs);
+  if (largePayloadRefs !== undefined) existing.largePayloadRefs = largePayloadRefs;
+  if (payload.status !== "running") {
+    existing.completedAtSeq = event.seq;
+    existing.completedAt = payload.timing?.completed_at ?? event.occurred_at;
+    existing.durationMs =
+      payload.timing?.duration_ms ?? durationFromDates(existing.startedAt, existing.completedAt);
+  }
+  if (payload.status === "error") {
+    existing.errorMessage = typeof payload.result === "string" ? payload.result : "Tool call failed.";
+  }
+
+  const next = projections.slice();
+  next[index] = existing;
+  return next;
+}
+
 function overlaps(a: ToolCallProjection, b: ToolCallProjection): boolean {
   const aEnd = a.completedAtSeq ?? Number.POSITIVE_INFINITY;
   const bEnd = b.completedAtSeq ?? Number.POSITIVE_INFINITY;

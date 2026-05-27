@@ -1,4 +1,5 @@
-import { useRunStore } from "../../state/run-store.js";
+import { Fragment } from "react";
+import { useRunStore, type CanonicalRunEvent } from "../../state/run-store.js";
 import { UserMessage } from "../timeline/UserMessage.js";
 import { StreamingMarkdown } from "../streaming/StreamingMarkdown.js";
 import { ThinkingTrace } from "../streaming/ThinkingTrace.js";
@@ -24,6 +25,31 @@ export interface EventTimelineProps {
   ) => void;
 }
 
+function requestIdFromEvent(evt: CanonicalRunEvent): string | null {
+  const payload = evt.payload as { request_id?: unknown } | null;
+  return payload && typeof payload === "object" && typeof payload.request_id === "string"
+    ? payload.request_id
+    : null;
+}
+
+function hasRequestEvent(
+  chunks: ReadonlyArray<ReadonlyArray<CanonicalRunEvent>>,
+  reqId: string,
+): boolean {
+  for (const chunk of chunks) {
+    for (const event of chunk) {
+      if (
+        event.sdk_type === "request" &&
+        event.kind === "request.created" &&
+        requestIdFromEvent(event) === reqId
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /**
  * Phase 09 timeline. Events remain the canonical ordering source, but related
  * deltas are rendered through aggregate streaming surfaces: one assistant
@@ -33,8 +59,8 @@ export interface EventTimelineProps {
  * preserving event order for surrounding markers.
  */
 export function EventTimeline({ runId, onApprovalResolve }: EventTimelineProps) {
-  const events = useRunStore((s) =>
-    runId ? (s.eventsByRunId[runId]?.events ?? null) : null,
+  const eventChunks = useRunStore((s) =>
+    runId ? (s.eventsByRunId[runId]?.eventChunks ?? null) : null,
   );
   const approvalsMap = useRunStore((s) =>
     runId ? (s.eventsByRunId[runId]?.approvalsByRequestId ?? null) : null,
@@ -48,7 +74,7 @@ export function EventTimeline({ runId, onApprovalResolve }: EventTimelineProps) 
       </div>
     );
   }
-  if (!events || events.length === 0) {
+  if (!eventChunks || eventChunks.length === 0) {
     return (
       <div className="px-2 py-6 text-md text-text-tertiary">No messages yet. Start a run.</div>
     );
@@ -72,146 +98,139 @@ export function EventTimeline({ runId, onApprovalResolve }: EventTimelineProps) 
           </span>
         </div>
       ) : null}
-      {events.map((evt) => {
-        if (evt.sdk_type === "system") {
-          return (
-            <StreamingSurfaceBoundary key={evt.event_id} surface="system-banner">
-              <SystemBanner event={evt} />
-            </StreamingSurfaceBoundary>
-          );
-        }
-        if (evt.sdk_type === "user") {
-          return <UserMessage key={evt.event_id} event={evt} />;
-        }
-        if (evt.sdk_type === "thinking") {
-          if (thinkingRendered) return null;
-          thinkingRendered = true;
-          return (
-            <StreamingSurfaceBoundary key={`thinking-${runId}`} surface="thinking-trace">
-              <ThinkingTrace runId={runId} />
-            </StreamingSurfaceBoundary>
-          );
-        }
-        if (evt.sdk_type === "assistant") {
-          if (assistantRendered) return null;
-          assistantRendered = true;
-          return (
-            <div key={`assistant-${runId}`} className="agent-message">
-              <div className="agent-message__head">
-                <span className="agent-message__glyph mono">A</span>
-                <span className="font-semibold text-accent-primary">Harness</span>
-                <span className="mono text-xs text-text-tertiary">
-                  {new Date(evt.occurred_at).toLocaleTimeString()}
-                </span>
-              </div>
-              <StreamingSurfaceBoundary surface="assistant-markdown">
-                <StreamingMarkdown runId={runId} source="assistant" />
-              </StreamingSurfaceBoundary>
-            </div>
-          );
-        }
-        if (evt.sdk_type === "tool_call") {
-          if (evt.kind === "code_edit.detected") {
-            if (codeEditRendered) return null;
-            codeEditRendered = true;
+      {eventChunks.map((chunk, chunkIndex) => (
+        <Fragment key={chunk[0]?.event_id ?? `chunk-${chunkIndex}`}>
+          {chunk.map((evt) => {
+            if (evt.sdk_type === "system") {
+              return (
+                <StreamingSurfaceBoundary key={evt.event_id} surface="system-banner">
+                  <SystemBanner event={evt} />
+                </StreamingSurfaceBoundary>
+              );
+            }
+            if (evt.sdk_type === "user") {
+              return <UserMessage key={evt.event_id} event={evt} />;
+            }
+            if (evt.sdk_type === "thinking") {
+              if (thinkingRendered) return null;
+              thinkingRendered = true;
+              return (
+                <StreamingSurfaceBoundary key={`thinking-${runId}`} surface="thinking-trace">
+                  <ThinkingTrace runId={runId} />
+                </StreamingSurfaceBoundary>
+              );
+            }
+            if (evt.sdk_type === "assistant") {
+              if (assistantRendered) return null;
+              assistantRendered = true;
+              return (
+                <div key={`assistant-${runId}`} className="agent-message">
+                  <div className="agent-message__head">
+                    <span className="agent-message__glyph mono">A</span>
+                    <span className="font-semibold text-accent-primary">Harness</span>
+                    <span className="mono text-xs text-text-tertiary">
+                      {new Date(evt.occurred_at).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <StreamingSurfaceBoundary surface="assistant-markdown">
+                    <StreamingMarkdown runId={runId} source="assistant" />
+                  </StreamingSurfaceBoundary>
+                </div>
+              );
+            }
+            if (evt.sdk_type === "tool_call") {
+              if (evt.kind === "code_edit.detected") {
+                if (codeEditRendered) return null;
+                codeEditRendered = true;
+                return (
+                  <StreamingSurfaceBoundary key={`code-edits-${runId}`} surface="code-edits">
+                    <CodeEditPreviewPanel runId={runId} />
+                  </StreamingSurfaceBoundary>
+                );
+              }
+              if (toolLaneRendered) return null;
+              toolLaneRendered = true;
+              return (
+                <StreamingSurfaceBoundary key={`tool-calls-${runId}`} surface="tool-calls">
+                  <ToolCallLane runId={runId} />
+                </StreamingSurfaceBoundary>
+              );
+            }
+            if (evt.sdk_type === "status") {
+              return (
+                <div key={evt.event_id} className="my-2 flex items-center gap-2 text-xs text-text-tertiary">
+                  <span className="mono">[{evt.kind}]</span>
+                  <RunStatusPill runId={runId} />
+                </div>
+              );
+            }
+            if (evt.sdk_type === "request" && evt.kind === "request.created") {
+              // RV2-W6: render the inline ApprovalPrompt directly from
+              // `approvalsByRequestId`. The store projects this map from
+              // both `request.created` and `approval.resolved`/`.failed`
+              // frames, so a request whose `request.created` row was
+              // pruned by retention still has its outcome visible here.
+              // The `request_seq` in the store always points to the
+              // earliest seq we observed (request if seen, outcome
+              // otherwise), so the prompt anchors at the right place
+              // even in the degraded case.
+              const payload = evt.payload as { request_id?: unknown } | null;
+              const reqId = requestIdFromEvent(evt);
+              if (!reqId) return null;
+              const approval = approvalsMap?.[reqId];
+              if (!approval) return null;
+              return (
+                <StreamingSurfaceBoundary key={evt.event_id} surface="approval-prompt">
+                  <ApprovalPrompt
+                    runId={runId}
+                    approval={approval}
+                    onResolve={(rid, decision, reason) => {
+                      if (onApprovalResolve) onApprovalResolve(rid, decision, reason);
+                    }}
+                  />
+                </StreamingSurfaceBoundary>
+              );
+            }
+            // RV2-W6: an outcome whose `request.created` was pruned still
+            // gets rendered — anchor the prompt at the outcome's seq via
+            // requestSeq (which the store sets to the originating seq if
+            // seen, else the outcome's). Skip when the request row IS
+            // present (the branch above already rendered it).
+            if (
+              evt.sdk_type === "request" &&
+              (evt.kind === "approval.resolved" || evt.kind === "approval.failed")
+            ) {
+              const payload = evt.payload as { request_id?: unknown } | null;
+              const reqId = requestIdFromEvent(evt);
+              if (!reqId) return null;
+              const approval = approvalsMap?.[reqId];
+              if (!approval) return null;
+              // If the originating request event is in the timeline, the
+              // branch above renders this approval; skip here to avoid a
+              // duplicate.
+              const hasRequestEvt = hasRequestEvent(eventChunks, reqId);
+              if (hasRequestEvt) return null;
+              return (
+                <StreamingSurfaceBoundary key={evt.event_id} surface="approval-prompt">
+                  <ApprovalPrompt
+                    runId={runId}
+                    approval={approval}
+                    onResolve={(rid, decision, reason) => {
+                      if (onApprovalResolve) onApprovalResolve(rid, decision, reason);
+                    }}
+                  />
+                </StreamingSurfaceBoundary>
+              );
+            }
             return (
-              <StreamingSurfaceBoundary key={`code-edits-${runId}`} surface="code-edits">
-                <CodeEditPreviewPanel runId={runId} />
-              </StreamingSurfaceBoundary>
+              <div key={evt.event_id} className="my-1 text-xs text-text-tertiary">
+                <span className="mono">[{evt.kind}]</span>
+                <span className="ml-2">{evt.occurred_at}</span>
+              </div>
             );
-          }
-          if (toolLaneRendered) return null;
-          toolLaneRendered = true;
-          return (
-            <StreamingSurfaceBoundary key={`tool-calls-${runId}`} surface="tool-calls">
-              <ToolCallLane runId={runId} />
-            </StreamingSurfaceBoundary>
-          );
-        }
-        if (evt.sdk_type === "status") {
-          return (
-            <div key={evt.event_id} className="my-2 flex items-center gap-2 text-xs text-text-tertiary">
-              <span className="mono">[{evt.kind}]</span>
-              <RunStatusPill runId={runId} />
-            </div>
-          );
-        }
-        if (evt.sdk_type === "request" && evt.kind === "request.created") {
-          // RV2-W6: render the inline ApprovalPrompt directly from
-          // `approvalsByRequestId`. The store projects this map from
-          // both `request.created` and `approval.resolved`/`.failed`
-          // frames, so a request whose `request.created` row was
-          // pruned by retention still has its outcome visible here.
-          // The `request_seq` in the store always points to the
-          // earliest seq we observed (request if seen, outcome
-          // otherwise), so the prompt anchors at the right place
-          // even in the degraded case.
-          const payload = evt.payload as { request_id?: unknown } | null;
-          const reqId =
-            payload && typeof payload === "object" && typeof payload.request_id === "string"
-              ? payload.request_id
-              : null;
-          if (!reqId) return null;
-          const approval = approvalsMap?.[reqId];
-          if (!approval) return null;
-          return (
-            <StreamingSurfaceBoundary key={evt.event_id} surface="approval-prompt">
-              <ApprovalPrompt
-                runId={runId}
-                approval={approval}
-                onResolve={(rid, decision, reason) => {
-                  if (onApprovalResolve) onApprovalResolve(rid, decision, reason);
-                }}
-              />
-            </StreamingSurfaceBoundary>
-          );
-        }
-        // RV2-W6: an outcome whose `request.created` was pruned still
-        // gets rendered — anchor the prompt at the outcome's seq via
-        // requestSeq (which the store sets to the originating seq if
-        // seen, else the outcome's). Skip when the request row IS
-        // present (the branch above already rendered it).
-        if (
-          evt.sdk_type === "request" &&
-          (evt.kind === "approval.resolved" || evt.kind === "approval.failed")
-        ) {
-          const payload = evt.payload as { request_id?: unknown } | null;
-          const reqId =
-            payload && typeof payload === "object" && typeof payload.request_id === "string"
-              ? payload.request_id
-              : null;
-          if (!reqId) return null;
-          const approval = approvalsMap?.[reqId];
-          if (!approval) return null;
-          // If the originating request event is in the timeline, the
-          // branch above renders this approval; skip here to avoid a
-          // duplicate.
-          const hasRequestEvt = events.some(
-            (e) =>
-              e.sdk_type === "request" &&
-              e.kind === "request.created" &&
-              (e.payload as { request_id?: unknown } | null)?.request_id === reqId,
-          );
-          if (hasRequestEvt) return null;
-          return (
-            <StreamingSurfaceBoundary key={evt.event_id} surface="approval-prompt">
-              <ApprovalPrompt
-                runId={runId}
-                approval={approval}
-                onResolve={(rid, decision, reason) => {
-                  if (onApprovalResolve) onApprovalResolve(rid, decision, reason);
-                }}
-              />
-            </StreamingSurfaceBoundary>
-          );
-        }
-        return (
-          <div key={evt.event_id} className="my-1 text-xs text-text-tertiary">
-            <span className="mono">[{evt.kind}]</span>
-            <span className="ml-2">{evt.occurred_at}</span>
-          </div>
-        );
-      })}
+          })}
+        </Fragment>
+      ))}
     </>
   );
 }

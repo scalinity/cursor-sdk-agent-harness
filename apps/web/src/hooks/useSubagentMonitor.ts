@@ -75,11 +75,8 @@ export function useSubagentMonitor(parentRunId: string | null): UseSubagentMonit
 
   const lifecycleKey = useRunStore((state) => {
     if (!parentRunId) return "";
-    const events = state.eventsByRunId[parentRunId]?.events ?? [];
-    return events
-      .filter((event) => event.kind === "subagent.spawned" || event.kind === "subagent.completed")
-      .map((event) => `${event.seq}:${event.kind}`)
-      .join("|");
+    const events = state.eventsByRunId[parentRunId]?.subagentLifecycleEvents ?? [];
+    return events.map((event) => `${event.seq}:${event.kind}`).join("|");
   });
 
   const childRunIdsKey = useMemo(
@@ -92,11 +89,8 @@ export function useSubagentMonitor(parentRunId: string | null): UseSubagentMonit
   // The actual Record<string, string[]> is derived in useMemo below.
   const eventStreamsKey = useRunStore((state) => {
     if (childRunIdsKey.length === 0 || !parentRunId) return "";
-    const parentEvents = state.eventsByRunId[parentRunId]?.events ?? [];
-    return parentEvents
-      .filter((e) => e.kind === "subagent.spawned" || e.kind === "subagent.completed")
-      .map((e) => `${e.seq}:${e.kind}`)
-      .join("|");
+    const parentEvents = state.eventsByRunId[parentRunId]?.subagentLifecycleEvents ?? [];
+    return parentEvents.map((e) => `${e.seq}:${e.kind}`).join("|");
   });
 
   const eventStreamsByRunId = useMemo((): Record<string, string[]> => {
@@ -106,9 +100,8 @@ export function useSubagentMonitor(parentRunId: string | null): UseSubagentMonit
     for (const runId of childRunIds) {
       streams[runId] = [];
     }
-    const parentEvents = useRunStore.getState().eventsByRunId[parentRunId]?.events ?? [];
+    const parentEvents = useRunStore.getState().eventsByRunId[parentRunId]?.subagentLifecycleEvents ?? [];
     for (const event of parentEvents) {
-      if (event.kind !== "subagent.spawned" && event.kind !== "subagent.completed") continue;
       const childRunId = childRunIdFromPayload(event.payload);
       if (childRunId === null || !childRunIds.has(childRunId)) continue;
       streams[childRunId]?.push(formatLifecycleEvent(event));

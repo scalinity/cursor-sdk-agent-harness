@@ -5,12 +5,14 @@ import {
   type ServerFrame,
 } from "@harness/shared";
 import { httpRequest } from "../lib/http-client.js";
-import { useRunStore, type CanonicalRunEvent } from "../state/run-store.js";
+import {
+  flattenEventChunks,
+  useRunStore,
+  type CanonicalRunEvent,
+} from "../state/run-store.js";
 
-// F-001: stable empty-array reference for the Zustand selector below.
-// `?? []` returns a new array every render, which Zustand sees as a
-// snapshot change → infinite `useSyncExternalStore` re-render loop.
-const EMPTY_EVENTS: CanonicalRunEvent[] = [];
+// F-001: stable empty-array references for Zustand selectors below.
+const EMPTY_CHUNKS: CanonicalRunEvent[][] = [];
 
 export type RunReplayInput = {
   runId: string;
@@ -78,7 +80,8 @@ export function useRunReplay(input: RunReplayInput): RunReplayState {
   const [error, setError] = useState<string | null>(null);
   const resetRun = useRunStore((s) => s.resetRun);
   const ingestServerFrame = useRunStore((s) => s.ingestServerFrame);
-  const visibleEvents = useRunStore((s) => s.eventsByRunId[input.runId]?.events ?? EMPTY_EVENTS);
+  const visibleChunks = useRunStore((s) => s.eventsByRunId[input.runId]?.eventChunks ?? EMPTY_CHUNKS);
+  const visibleVersion = useRunStore((s) => s.eventsByRunId[input.runId]?.eventsVersion ?? 0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -138,6 +141,10 @@ export function useRunReplay(input: RunReplayInput): RunReplayState {
   const allEvents = useMemo(
     () => frames.map(toCanonical).filter((event): event is CanonicalRunEvent => event !== null),
     [frames],
+  );
+  const visibleEvents = useMemo(
+    () => flattenEventChunks(visibleChunks),
+    [visibleChunks, visibleVersion],
   );
   const finalSeq = allEvents.at(-1)?.seq ?? 0;
 

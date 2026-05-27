@@ -6,16 +6,16 @@
  *  - per-run "stalled" banner when the most recent event is older than
  *    180s AND the run is in CREATING/RUNNING state
  *
- * Computed from `received_at` timestamps on the run-store's
- * `eventsByRunId[runId].events`. No new server data needed — Section 11
- * thresholds are pure clock math against the canonical event log.
+ * Computed from incremental run-store projections and `lastReceivedAt`.
+ * No new server data needed — Section 11 thresholds are pure clock math
+ * against the canonical event log.
  *
  * The hook does not subscribe to a tick interval in components — that
  * would burn cycles even when nothing is rendering. Instead it owns a
  * single setInterval and forces a re-read via `useSyncExternalStore`.
  */
 import { useEffect, useMemo, useState } from "react";
-import { useRunStore, type CanonicalRunEvent } from "../state/run-store.js";
+import { useRunStore } from "../state/run-store.js";
 
 const STILL_RUNNING_MS = 30_000;
 const LONG_RUNNING_MS = 120_000;
@@ -45,35 +45,6 @@ export interface UseRunHealthResult {
   msSinceLastEvent: number | null;
 }
 
-function collectToolCallTiming(
-  events: CanonicalRunEvent[],
-): Record<string, { startedAt: string; completed: boolean }> {
-  const byCallId: Record<string, { startedAt: string; completed: boolean }> = {};
-  for (const evt of events) {
-    if (evt.sdk_type !== "tool_call") continue;
-    const p = evt.payload as { call_id?: unknown; timing?: unknown } | null;
-    if (!p || typeof p !== "object") continue;
-    const callId = typeof p.call_id === "string" ? p.call_id : null;
-    if (!callId) continue;
-    const timing = p.timing as { started_at?: unknown } | null;
-    const startedAt =
-      timing && typeof timing === "object" && typeof timing.started_at === "string"
-        ? timing.started_at
-        : evt.received_at;
-    if (evt.kind === "tool_call.running") {
-      byCallId[callId] = { startedAt, completed: false };
-    } else if (
-      evt.kind === "tool_call.completed" ||
-      evt.kind === "tool_call.error"
-    ) {
-      const existing = byCallId[callId];
-      if (existing) existing.completed = true;
-      else byCallId[callId] = { startedAt, completed: true };
-    }
-  }
-  return byCallId;
-}
-
 let externalNowMs: () => number = () => Date.now();
 /**
  * Test seam: lets a test inject a deterministic clock so the stall
@@ -101,34 +72,27 @@ function useHealthTick(): number {
 
 export function useRunHealth(runId: string | null): UseRunHealthResult {
   const tick = useHealthTick();
-  const events = useRunStore((s) =>
-    runId ? (s.eventsByRunId[runId]?.events ?? null) : null,
+  const toolCallProjections = useRunStore((s) =>
+    runId ? (s.eventsByRunId[runId]?.toolCallProjections ?? null) : null,
+  );
+  const lastReceivedAt = useRunStore((s) =>
+    runId ? (s.eventsByRunId[runId]?.lastReceivedAt ?? null) : null,
   );
   const runRecord = useRunStore((s) =>
     runId ? (s.byId[runId] ?? null) : null,
   );
 
-  // RV2-W7: collect the running-tool timing snapshot keyed ONLY on
-  // events. Re-running on every 2s tick was O(events.length) per
-  // tick per caller; long runs paid for it twice per second. Now the
-  // O(N) walk only re-runs when `events` itself changes. The tick-
-  // bound memo below derives elapsed-ms from this snapshot in
-  // O(running calls).
+  // Running tool timing is already projected during ingest, so ticks only
+  // walk the currently running calls instead of every event in the run.
   const runningTiming = useMemo(() => {
-    if (!events || events.length === 0) return {};
-    const all = collectToolCallTiming(events);
     const running: Record<string, { startedAt: string }> = {};
-    for (const [callId, t] of Object.entries(all)) {
-      if (!t.completed) running[callId] = { startedAt: t.startedAt };
+    for (const projection of toolCallProjections ?? []) {
+      if (projection.status === "running") {
+        running[projection.callId] = { startedAt: projection.startedAt };
+      }
     }
     return running;
-  }, [events]);
-
-  const lastReceivedAt = useMemo(() => {
-    if (!events || events.length === 0) return null;
-    const last = events[events.length - 1];
-    return last ? last.received_at : null;
-  }, [events]);
+  }, [toolCallProjections]);
 
   return useMemo(() => {
     void tick; // recompute on every tick
