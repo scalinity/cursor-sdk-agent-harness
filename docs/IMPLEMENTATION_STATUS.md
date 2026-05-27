@@ -4197,3 +4197,63 @@ Addressed the review findings from the CLI visual/session pass. The default chat
 ### Next phase
 
 Commit and push `main`.
+
+---
+
+## Counter Accuracy Review — 2026-05-27
+
+### Summary
+
+Reviewed the run usage token and cost counters for exactness. Server-side cost extraction now refuses to emit an exact cost unless the complete billing tuple is observed (`inputTokens`, `outputTokens`, and `cacheReadTokens`), and multi-turn aggregation preserves missing-field partialness instead of converting absent values into zeros. The web usage badge now distinguishes exact usage, token-only usage with unavailable cost, partial token usage, and fully unavailable usage. A stale `TerminalSurface` test was reconciled with the existing AI-command helper behavior so the full repo gates can run against the current checkout.
+
+### Files modified
+
+- `apps/server/src/sdk/usage-extractor.ts` — require complete token/cache data before pricing and preserve missing usage fields across accumulated turns.
+- `apps/server/src/sdk/__tests__/usage-extractor.test.ts` and `usage-extractor-fixtures.test.ts` — add regressions for missing output tokens, missing cached-input split, and partial multi-turn aggregation.
+- `apps/web/src/components/streaming/CostBadge.tsx` and `streaming-surfaces.test.tsx` — label unavailable-cost and partial-token states without presenting them as exact.
+- `apps/web/src/components/shell/TerminalSurface.test.tsx` — update stale expectations to the current Terminal AI helper behavior so the full gate is meaningful.
+- `docs/IMPLEMENTATION_STATUS.md` — recorded this review pass and verification evidence.
+
+### Verification
+
+- `pnpm -F @harness/server test src/sdk/__tests__/usage-extractor.test.ts src/sdk/__tests__/usage-extractor-fixtures.test.ts` — pass, 21 tests.
+- `pnpm -F @harness/web test src/components/streaming/streaming-surfaces.test.tsx` — pass, 3 tests.
+- `pnpm -F @harness/server typecheck` — pass.
+- `pnpm -F @harness/web typecheck` — pass.
+- `pnpm -F @harness/web test src/components/shell/TerminalSurface.test.tsx src/components/shell/__tests__/TerminalSurface.test.tsx` — pass, 5 tests.
+- `pnpm typecheck && pnpm lint && pnpm test` — pass: shared 39, eslint-plugin 6, web 155, server 475 passing / 1 skipped, CLI 155, desktop 0 test files, scripts 11.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — partial: web/server/desktop builds and Electron `.app` packaging completed, but DMG conversion failed in `hdiutil convert` with exit code 1.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` — pass, installed timestamp May 27 04:28 2026.
+
+### Next phase
+
+Review the dirty tree boundaries before committing; this checkout includes unrelated MCP/keychain/browser/terminal changes alongside this counter review.
+
+---
+
+## Harness/Chat Streaming Review Address Pass — 2026-05-27
+
+### Summary
+
+Addressed the remaining harness and chat-streaming review report items. Client run events are now chunked with indexed lookup/projection state so hot-path ingest no longer copies and rescans the whole run history. Timeline, tool-call, code-edit, approval, subagent, replay, and run-health consumers now read those maintained projections. Replay uses a lightweight server-side row shape for large tool-call payloads so frame construction can emit large-payload references without eagerly parsing the full stored JSON. MCP server secrets are externalized through Keychain-backed references, terminal AI command generation has explicit insert/run controls, and usage extraction now tolerates additional Cursor SDK final-result token/price shapes.
+
+### Files modified
+
+- `apps/server/src/db/repositories/events.repo.ts` and `apps/server/src/ws/ws-plugin.ts` — add replay-specific event rows and use them for websocket replay.
+- `apps/server/src/keychain/*`, `apps/server/src/mcp/mcp-secret-config.ts`, `apps/server/src/routes/mcp-servers.routes.ts`, and `apps/server/src/app.ts` — store MCP secret-bearing config values outside SQLite and hydrate only when needed.
+- `apps/server/src/sdk/usage-extractor.ts`, `apps/server/src/sdk/agent-runtime.ts`, and related tests — broaden final-result usage extraction and preserve verified unavailable behavior.
+- `apps/web/src/state/run-store.ts`, `apps/web/src/hooks/*`, and `apps/web/src/components/{shell,streaming}/*` — chunk run events and consume incremental projections for timeline, replay, tools, approvals, code edits, subagents, health, terminal AI, and cost display.
+- `apps/web/src/components/shell/EventTimeline.test.tsx`, `apps/web/src/hooks/__tests__/useAgentStream.test.tsx`, and existing store/hook/surface tests — cover chunked timelines, missing approval request rows, stream retry lifecycle, replay health, terminal AI controls, and updated usage displays.
+- `docs/IMPLEMENTATION_STATUS.md` — recorded this address pass and verification evidence.
+
+### Verification
+
+- `pnpm typecheck` — pass.
+- `pnpm lint` — pass.
+- `pnpm test` — pass: shared 39, eslint-plugin 6, web 155, server 475 passing / 1 skipped, CLI 155, desktop 0 test files, scripts 11.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass on retry; the first attempt built the app bundle but hit a transient `hdiutil convert` failure while creating the DMG, manual `hdiutil create`/`convert` then succeeded, and the rerun completed packaging.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` — installed timestamp May 27 04:29:54 2026.
+
+### Next phase
+
+No remaining review-report blockers identified for the harness/chat-streaming address pass. Commit and push `main`.

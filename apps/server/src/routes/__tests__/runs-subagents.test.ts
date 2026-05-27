@@ -276,6 +276,63 @@ describe("GET /api/runs/:runId/subagents", () => {
     expect(res.statusCode).toBe(204);
     expect(repos.runs.getById(parent.id)).toBeNull();
     expect(repos.runs.getById(child.id)).toBeNull();
+    expect(
+      db.raw.prepare("SELECT COUNT(*) AS n FROM events WHERE run_id IN (?, ?)").get(parent.id, child.id),
+    ).toEqual({ n: 0 });
+
+    await app.close();
+    db.close();
+  });
+
+  it("refuses to delete a terminal parent while any child run is still active", async () => {
+    const db = openTestDb({ skipSeed: false });
+    const repos = createRepositories(db.raw);
+    const agent = createAgent(repos);
+    const parent = repos.runs.create({
+      agentId: agent.id,
+      status: "RUNNING",
+      promptPreview: "Coordinate reviewers",
+      modelId: "composer-2-5-fast",
+      mode: "local",
+    });
+    const child = repos.runs.create({
+      id: "subagent-still-running",
+      agentId: agent.id,
+      status: "RUNNING",
+      promptPreview: "Subagent: Reviewer Active",
+      name: "Reviewer Active",
+      parentRunId: parent.id,
+      modelId: "composer-2-5-fast",
+      mode: "local",
+    });
+    finishRun(repos, parent.id, {
+      input_tokens: 10,
+      output_tokens: 5,
+      cached_input_tokens: null,
+      reasoning_tokens: null,
+      cost_usd_micros: 100,
+      usage_source: "sdk_final_result",
+    });
+    repos.events.appendCanonicalEvent({
+      runId: child.id,
+      agentId: agent.id,
+      sdkType: "assistant",
+      kind: "assistant.delta",
+      payload: { text: "active child content" },
+      raw: { type: "assistant", text: "active child raw" },
+      occurredAt: "2026-05-25T12:00:00.000Z",
+    });
+
+    const app = await buildRunsApp(repos);
+    const res = await app.inject({ method: "DELETE", url: `/api/runs/${parent.id}` });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("RUN_TREE_NOT_TERMINAL");
+    expect(repos.runs.getById(parent.id)).not.toBeNull();
+    expect(repos.runs.getById(child.id)).not.toBeNull();
+    expect(
+      db.raw.prepare("SELECT COUNT(*) AS n FROM events WHERE run_id = ?").get(child.id),
+    ).toEqual({ n: 1 });
 
     await app.close();
     db.close();

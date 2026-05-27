@@ -81,6 +81,28 @@ describe("streaming surfaces", () => {
           lastTurnInputTokens: null,
           lastTurnOutputTokens: null,
         },
+        partialTokens: {
+          id: "partialTokens",
+          agentId: "agent-1",
+          status: "FINISHED",
+          startedAt: null,
+          finishedAt: null,
+          finalText: null,
+          interruptedReason: null,
+          usage: {
+            input_tokens: 10,
+            output_tokens: null,
+            cached_input_tokens: 0,
+            reasoning_tokens: null,
+            cost_usd_micros: null,
+            usage_source: "sdk_final_result",
+          },
+          usageSource: "sdk_final_result",
+          durationMs: 10,
+          modelId: null,
+          lastTurnInputTokens: null,
+          lastTurnOutputTokens: null,
+        },
         unavailable: {
           id: "unavailable",
           agentId: "agent-1",
@@ -116,7 +138,10 @@ describe("streaming surfaces", () => {
     expect(screen.getByText(/5,288 tok/)).not.toBeNull();
 
     rerender(<CostBadge runId="pricingMissing" />);
-    expect(screen.getByText("Tokens recorded, pricing not configured")).not.toBeNull();
+    expect(screen.getByText("Tokens recorded, cost unavailable")).not.toBeNull();
+
+    rerender(<CostBadge runId="partialTokens" />);
+    expect(screen.getByText("Partial tokens recorded, cost unavailable")).not.toBeNull();
 
     rerender(<CostBadge runId="unavailable" />);
     expect(screen.getByText("Usage unavailable")).not.toBeNull();

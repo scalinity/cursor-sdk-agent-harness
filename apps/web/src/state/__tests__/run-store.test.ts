@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { ServerFrame } from "@harness/shared";
-import { useRunStore } from "../run-store.js";
+import { flattenEventChunks, useRunStore, type RunEventState } from "../run-store.js";
+
+function eventsFor(state: RunEventState) {
+  return flattenEventChunks(state.eventChunks);
+}
 
 const BASE_EVENT = {
   schema_version: 1 as const,
@@ -47,6 +51,32 @@ function statusFrame(seq: number, status: "RUNNING" | "FINISHED"): ServerFrame {
   };
 }
 
+function toolFrame(
+  seq: number,
+  callId: string,
+  status: "running" | "completed" | "error" = "completed",
+): ServerFrame {
+  return {
+    id: `tool-frame-${seq}`,
+    type: "sdk.tool_call",
+    sent_at: BASE_EVENT.occurred_at,
+    event: {
+      ...BASE_EVENT,
+      event_id: `00000000-0000-0000-0000-${seq.toString().padStart(12, "0")}`,
+      sdk_type: "tool_call",
+      seq,
+      kind: status === "running" ? "tool_call.running" : status === "error" ? "tool_call.error" : "tool_call.completed",
+      payload: {
+        call_id: callId,
+        name: "read",
+        status,
+        args: { path: "x" },
+        timing: { started_at: BASE_EVENT.occurred_at },
+      },
+    },
+  };
+}
+
 describe("run-store", () => {
   beforeEach(() => {
     useRunStore.setState({
@@ -83,7 +113,7 @@ describe("run-store", () => {
   it("preserves server replay metadata without requiring caller options", () => {
     useRunStore.getState().ingestServerFrame({ ...assistantFrame(1, "Hi"), replayed: true });
     const state = useRunStore.getState().eventsByRunId["run-1"]!;
-    expect(state.events[0]?.replayed).toBe(true);
+    expect(eventsFor(state)[0]?.replayed).toBe(true);
   });
 
   it("updates run status projection on sdk.status frames", () => {
@@ -99,12 +129,13 @@ describe("run-store", () => {
     expect(useRunStore.getState().eventsByRunId["run-1"]).toBeUndefined();
   });
 
-  it("maintains a parallel events array in seq order (RV2-S5)", () => {
+  it("stores chunked events in seq order without relying on a flat ingest array", () => {
     useRunStore.getState().ingestServerFrame(assistantFrame(1, "A"));
     useRunStore.getState().ingestServerFrame(assistantFrame(2, "B"));
     const state = useRunStore.getState().eventsByRunId["run-1"]!;
-    expect(state.events.map((e) => e.seq)).toEqual([1, 2]);
-    expect(state.events[0]!.payload).toEqual({
+    expect(state.eventChunks).toHaveLength(1);
+    expect(eventsFor(state).map((e) => e.seq)).toEqual([1, 2]);
+    expect(eventsFor(state)[0]!.payload).toEqual({
       role: "assistant",
       text_delta: "A",
       is_replacement: false,
@@ -112,40 +143,32 @@ describe("run-store", () => {
     });
   });
 
-  it("binary-inserts out-of-order seqs into events + seqList (RV2-S2)", () => {
+  it("splits long runs into fixed-size event chunks", () => {
+    for (let seq = 1; seq <= 300; seq += 1) {
+      useRunStore.getState().ingestServerFrame(assistantFrame(seq, "x"));
+    }
+    const state = useRunStore.getState().eventsByRunId["run-1"]!;
+    expect(state.eventChunks.map((chunk) => chunk.length)).toEqual([256, 44]);
+    expect(eventsFor(state).at(-1)?.seq).toBe(300);
+  });
+
+  it("binary-inserts out-of-order seqs into chunks + seqList (RV2-S2)", () => {
     useRunStore.getState().ingestServerFrame(assistantFrame(1, "a"));
     useRunStore.getState().ingestServerFrame(assistantFrame(3, "c"));
     // Out-of-order: seq 2 arrives after seq 3.
     useRunStore.getState().ingestServerFrame(assistantFrame(2, "b"));
     const state = useRunStore.getState().eventsByRunId["run-1"]!;
     expect(state.seqList).toEqual([1, 2, 3]);
-    expect(state.events.map((e) => e.seq)).toEqual([1, 2, 3]);
+    expect(eventsFor(state).map((e) => e.seq)).toEqual([1, 2, 3]);
   });
 
-  it("increments toolCallCount per sdk.tool_call frame (RV2-S4)", () => {
-    const toolFrame = (seq: number): ServerFrame => ({
-      id: `frame-${seq}`,
-      type: "sdk.tool_call",
-      sent_at: BASE_EVENT.occurred_at,
-      event: {
-        ...BASE_EVENT,
-        event_id: `00000000-0000-0000-0000-${seq.toString().padStart(12, "0")}`,
-        sdk_type: "tool_call",
-        seq,
-        kind: "tool_call.completed",
-        payload: {
-          call_id: `call-${seq}`,
-          name: "read",
-          status: "completed",
-          args: { path: "x" },
-        },
-      },
-    });
+  it("increments toolCallCount and tool projections per sdk.tool_call frame (RV2-S4)", () => {
     useRunStore.getState().ingestServerFrame(assistantFrame(1, "hi"));
-    useRunStore.getState().ingestServerFrame(toolFrame(2));
-    useRunStore.getState().ingestServerFrame(toolFrame(3));
+    useRunStore.getState().ingestServerFrame(toolFrame(2, "call-2"));
+    useRunStore.getState().ingestServerFrame(toolFrame(3, "call-3"));
     const state = useRunStore.getState().eventsByRunId["run-1"]!;
     expect(state.toolCallCount).toBe(2);
+    expect(state.toolCallProjections.map((call) => call.callId)).toEqual(["call-2", "call-3"]);
   });
 
   it("projects CANCELLED status from run.interrupted with user_cancelled (RV2-W4)", () => {

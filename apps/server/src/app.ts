@@ -9,6 +9,7 @@ import {
   CursorApiKeyStore,
   CsrfSecretStore,
   ProviderKeyStore,
+  McpSecretStore,
 } from "./keychain/index.js";
 import { assertBindAllowed } from "./security/bind-policy.js";
 import { CsrfTokenizer, csrfPlugin } from "./security/csrf.js";
@@ -89,6 +90,7 @@ export interface AppDeps {
    */
   terminalSession?: TerminalSession;
   providerKeyStore?: ProviderKeyStore;
+  mcpSecretStore?: McpSecretStore;
   searchService?: SearchService;
   modelRouter?: ModelRouter;
 }
@@ -150,6 +152,8 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     deps.apiKeyStore ?? new CursorApiKeyStore({ service: env.KEYCHAIN_SERVICE });
   const providerKeyStore =
     deps.providerKeyStore ?? new ProviderKeyStore({ service: env.KEYCHAIN_SERVICE });
+  const mcpSecretStore =
+    deps.mcpSecretStore ?? new McpSecretStore({ service: env.KEYCHAIN_SERVICE });
   const csrfSecretStore =
     deps.csrfSecretStore ?? new CsrfSecretStore({ service: env.KEYCHAIN_SERVICE });
   const csrfTokenizer =
@@ -245,6 +249,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     settingsRepo: repos.settings,
     workspacePolicy,
     apiKeyStore,
+    mcpSecretStore,
     sdk,
     logger: app.log,
     activeRuns,
@@ -328,7 +333,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     },
     events: { events: repos.events },
     usage: { runsRepo: repos.runs, settingsRepo: repos.settings },
-    mcpServers: { mcpServers: repos.mcpServers },
+    mcpServers: { mcpServers: repos.mcpServers, mcpSecretStore },
     subagents: { subagents: repos.subagents, mcpServers: repos.mcpServers },
     observability: { perfCounters },
     git: {

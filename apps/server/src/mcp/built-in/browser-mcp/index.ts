@@ -1,3 +1,4 @@
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -39,6 +40,7 @@ export interface BrowserMcpServer {
  * in-process client.
  */
 export async function startBrowserMcpServer(): Promise<BrowserMcpServer> {
+  const capability = randomBytes(32).toString("base64url");
   const httpServer = createServer((req, res) => {
     void route(req, res).catch((err: unknown) => {
       if (!res.headersSent) {
@@ -56,10 +58,20 @@ export async function startBrowserMcpServer(): Promise<BrowserMcpServer> {
   });
 
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const match = /^\/mcp\/([^/?#]+)/.exec(req.url ?? "/");
+    const parsedUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+    const match = /^\/mcp\/([^/?#]+)/.exec(parsedUrl.pathname);
     if (!match || match[1] === undefined) {
       res.statusCode = 404;
       res.end();
+      return;
+    }
+    const providedCapability = parsedUrl.searchParams.get("capability");
+    if (providedCapability === null) {
+      sendAuthError(res, 401);
+      return;
+    }
+    if (!capabilityMatches(providedCapability, capability)) {
+      sendAuthError(res, 403);
       return;
     }
     const agentId = decodeURIComponent(match[1]);
@@ -93,7 +105,8 @@ export async function startBrowserMcpServer(): Promise<BrowserMcpServer> {
 
   const handle: BrowserMcpServer = {
     baseUrl,
-    urlForAgent: (agentId: string) => `${baseUrl}/mcp/${encodeURIComponent(agentId)}`,
+    urlForAgent: (agentId: string) =>
+      `${baseUrl}/mcp/${encodeURIComponent(agentId)}?capability=${encodeURIComponent(capability)}`,
     close: () =>
       new Promise<void>((resolve) => {
         activeMcpServer = null;
@@ -102,6 +115,25 @@ export async function startBrowserMcpServer(): Promise<BrowserMcpServer> {
   };
   activeMcpServer = handle;
   return handle;
+}
+
+function capabilityMatches(candidate: string, expected: string): boolean {
+  const candidateBuffer = Buffer.from(candidate);
+  const expectedBuffer = Buffer.from(expected);
+  return (
+    candidateBuffer.length === expectedBuffer.length &&
+    timingSafeEqual(candidateBuffer, expectedBuffer)
+  );
+}
+
+function sendAuthError(res: ServerResponse, statusCode: 401 | 403): void {
+  res.statusCode = statusCode;
+  res.setHeader("content-type", "application/json");
+  res.end(
+    JSON.stringify({
+      error: statusCode === 401 ? "missing_capability" : "invalid_capability",
+    }),
+  );
 }
 
 /** Module-level handle, set once the MCP server starts. */

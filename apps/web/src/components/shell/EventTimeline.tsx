@@ -174,7 +174,6 @@ export function EventTimeline({ runId, onApprovalResolve }: EventTimelineProps) 
               // earliest seq we observed (request if seen, outcome
               // otherwise), so the prompt anchors at the right place
               // even in the degraded case.
-              const payload = evt.payload as { request_id?: unknown } | null;
               const reqId = requestIdFromEvent(evt);
               if (!reqId) return null;
               const approval = approvalsMap?.[reqId];
@@ -200,7 +199,6 @@ export function EventTimeline({ runId, onApprovalResolve }: EventTimelineProps) 
               evt.sdk_type === "request" &&
               (evt.kind === "approval.resolved" || evt.kind === "approval.failed")
             ) {
-              const payload = evt.payload as { request_id?: unknown } | null;
               const reqId = requestIdFromEvent(evt);
               if (!reqId) return null;
               const approval = approvalsMap?.[reqId];

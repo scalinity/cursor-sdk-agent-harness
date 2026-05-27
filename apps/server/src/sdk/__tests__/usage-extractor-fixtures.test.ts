@@ -82,19 +82,15 @@ describe("Phase 14 usage parse fixtures", () => {
       modelId: "composer-2-5-fast",
       pricing: PRICING,
     });
-    // The shape parses — we know inputTokens — but outputTokens is null
-    // and the cost formula has no output rate to apply. The extractor
-    // emits sdk_final_result with the partial tokens; cost is null only
-    // if we can't compute it. With inputTokens alone and a positive
-    // input rate, the formula DOES produce a positive cost; that's
-    // accurate to the spec — the "cannot compute" case is when EVERY
-    // rate is zero, not when one token field is missing.
+    // The shape parses — we know inputTokens — but outputTokens and the
+    // cached-input split are null, so the billing tuple is incomplete.
+    // The extractor preserves the partial tokens but refuses to publish an
+    // exact-looking cost.
     expect(out.usage_source).toBe("sdk_final_result");
     expect(out.input_tokens).toBe(500);
     expect(out.output_tokens).toBeNull();
     expect(out.cached_input_tokens).toBeNull();
-    // 500 input tokens * $2/M = $0.001 = 1_000 micros, promo=1.0
-    expect(out.cost_usd_micros).toBe(1_000);
+    expect(out.cost_usd_micros).toBeNull();
   });
 
   it("unknown-shape: final_result.usage has keys we don't recognize", () => {

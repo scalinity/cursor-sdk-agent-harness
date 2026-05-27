@@ -7,6 +7,7 @@ import { AgentsRepo } from "../../db/repositories/agents.repo.js";
 import { EventsRepo } from "../../db/repositories/events.repo.js";
 import { RunsRepo } from "../../db/repositories/runs.repo.js";
 import { createRunBus, type RunBus } from "../../ws/run-bus.js";
+import { buildServerFrame } from "../../ws/frame-builder.js";
 import { createPersistAndBroadcast } from "../persist-and-broadcast.js";
 
 const silentLogger = pino({ level: "silent" });
@@ -91,6 +92,52 @@ describe("persist-and-broadcast pipeline", () => {
 
     const rows = events.getByRunIdAfterSeq(runId, 0, 100);
     expect(rows.map((r) => r.seq)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it("slims large tool-call rows for replay before frame construction", () => {
+    const huge = "x".repeat(300_000);
+    events.appendCanonicalEvent({
+      runId,
+      agentId,
+      sdkType: "tool_call",
+      kind: "tool_call.completed",
+      callId: "call-large",
+      status: "completed",
+      payload: {
+        call_id: "call-large",
+        name: "read_file",
+        status: "completed",
+        args: { path: "big.txt", huge },
+        result: { huge },
+        timing: {
+          started_at: "2026-05-23T00:00:00.000Z",
+          completed_at: "2026-05-23T00:00:01.000Z",
+          duration_ms: 1000,
+        },
+      },
+      raw: { huge },
+      occurredAt: "2026-05-23T00:00:01.000Z",
+    });
+
+    const replayRows = events.getReplayByRunIdAfterSeq(runId, 0, 10);
+    expect(replayRows).toHaveLength(1);
+    const replay = replayRows[0]!;
+    expect(JSON.stringify(replay.payload).length).toBeLessThan(500);
+
+    const frame = buildServerFrame(replay, { replayed: true });
+    expect(frame?.type).toBe("sdk.tool_call");
+    if (frame?.type !== "sdk.tool_call") throw new Error("expected sdk.tool_call frame");
+    expect(frame.event.payload.args).toBeUndefined();
+    expect(frame.event.payload.result).toBeUndefined();
+    expect(frame.event.payload.large_payload_refs?.args_event_url).toBe(
+      `/api/events/${replay.id}/large-payload/args`,
+    );
+    expect(frame.event.payload.large_payload_refs?.result_event_url).toBe(
+      `/api/events/${replay.id}/large-payload/result`,
+    );
+    expect(frame.event.payload.large_payload_refs?.raw_event_url).toBe(
+      `/api/events/${replay.id}/large-payload/raw`,
+    );
   });
 
   it("advances the text-buffer only after the insert commits", () => {

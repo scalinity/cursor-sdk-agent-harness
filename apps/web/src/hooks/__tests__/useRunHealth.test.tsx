@@ -18,6 +18,7 @@ function Probe(props: {
 const RUN_ID = "run-health-test";
 
 function seedRunWithRunningToolCall(receivedAtMs: number): void {
+  const timestamp = new Date(receivedAtMs).toISOString();
   useRunStore.setState((s) => ({
     ...s,
     byId: {
@@ -25,7 +26,7 @@ function seedRunWithRunningToolCall(receivedAtMs: number): void {
         id: RUN_ID,
         agentId: "agent",
         status: "RUNNING",
-        startedAt: new Date(receivedAtMs).toISOString(),
+        startedAt: timestamp,
         finishedAt: null,
         finalText: null,
         interruptedReason: null,
@@ -37,58 +38,29 @@ function seedRunWithRunningToolCall(receivedAtMs: number): void {
         lastTurnOutputTokens: null,
       },
     },
-    eventsByRunId: {
-      [RUN_ID]: {
-        seqList: [1],
-        bySeq: new Map([
-          [
-            1,
-            {
-              event_id: "ev-1",
-              schema_version: 1 as const,
-              seq: 1,
-              agent_id: "agent",
-              run_id: RUN_ID,
-              occurred_at: new Date(receivedAtMs).toISOString(),
-              received_at: new Date(receivedAtMs).toISOString(),
-              sdk_type: "tool_call" as const,
-              kind: "tool_call.running",
-              payload: {
-                call_id: "call-1",
-                name: "shell",
-                status: "running",
-                timing: { started_at: new Date(receivedAtMs).toISOString() },
-              },
-            },
-          ],
-        ]),
-        events: [
-          {
-            event_id: "ev-1",
-            schema_version: 1 as const,
-            seq: 1,
-            agent_id: "agent",
-            run_id: RUN_ID,
-            occurred_at: new Date(receivedAtMs).toISOString(),
-            received_at: new Date(receivedAtMs).toISOString(),
-            sdk_type: "tool_call" as const,
-            kind: "tool_call.running",
-            payload: {
-              call_id: "call-1",
-              name: "shell",
-              status: "running",
-              timing: { started_at: new Date(receivedAtMs).toISOString() },
-            },
-          },
-        ],
-        lastSeq: 1,
-        assistantText: "",
-        thinkingText: "",
-        toolCallCount: 1,
-        approvalsByRequestId: {},
+  }));
+  useRunStore.getState().ingestServerFrame({
+    id: "frame-1",
+    type: "sdk.tool_call",
+    sent_at: timestamp,
+    event: {
+      event_id: "00000000-0000-0000-0000-000000000001",
+      schema_version: 1,
+      seq: 1,
+      agent_id: "agent",
+      run_id: RUN_ID,
+      occurred_at: timestamp,
+      received_at: timestamp,
+      sdk_type: "tool_call",
+      kind: "tool_call.running",
+      payload: {
+        call_id: "call-1",
+        name: "shell",
+        status: "running",
+        timing: { started_at: timestamp },
       },
     },
-  }));
+  });
 }
 
 describe("useRunHealth", () => {

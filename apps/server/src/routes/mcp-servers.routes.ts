@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   createMcpServerRequestSchema,
   listMcpServersResponseSchema,
@@ -17,9 +18,15 @@ import {
   type McpValidationResult,
   type McpValidatorOptions,
 } from "../mcp/mcp-validator.js";
+import {
+  externalizeMcpSecrets,
+  hydrateMcpSecrets,
+} from "../mcp/mcp-secret-config.js";
+import type { McpSecretStore } from "../keychain/mcp-secret-store.js";
 
 export interface McpServersRoutesDeps {
   mcpServers: McpServersRepo;
+  mcpSecretStore?: McpSecretStore | undefined;
   /**
    * Optional probe timeout — tests inject a low value so the integration
    * suite doesn't pay 3s per probe. Defaults to env `MCP_PROBE_TIMEOUT_MS`,
@@ -136,6 +143,21 @@ async function runProbe(
   }
 }
 
+async function configForStorage(
+  config: McpServerRow["config"],
+  serverId: string,
+  store: McpSecretStore | undefined,
+): Promise<McpServerRow["config"]> {
+  return store ? externalizeMcpSecrets(config, serverId, store) : config;
+}
+
+async function configForUse(
+  config: McpServerRow["config"],
+  store: McpSecretStore | undefined,
+): Promise<McpServerRow["config"]> {
+  return store ? hydrateMcpSecrets(config, store) : config;
+}
+
 export async function registerMcpServersRoutes(
   app: FastifyInstance,
   deps: McpServersRoutesDeps,
@@ -202,12 +224,16 @@ export async function registerMcpServersRoutes(
         message: `An MCP server named "${parsed.data.name}" already exists.`,
       });
     }
+    const id = randomUUID();
+    const storedConfig = await configForStorage(parsed.data.config, id, deps.mcpSecretStore);
     const row = deps.mcpServers.create({
+      id,
       name: parsed.data.name,
       enabled: parsed.data.enabled,
-      config: parsed.data.config,
+      config: storedConfig,
     });
-    const probe = await runProbe(validate, parsed.data.config, probeOptions);
+    const probeConfig = await configForUse(storedConfig, deps.mcpSecretStore);
+    const probe = await runProbe(validate, probeConfig, probeOptions);
     const outcome = probeOutcomeFromResult(probe);
     const updated = deps.mcpServers.update(row.id, {
       validationStatus: outcome.status,
@@ -243,12 +269,17 @@ export async function registerMcpServersRoutes(
           message: `An MCP server named "${parsed.data.name}" already exists.`,
         });
       }
+      const configForStorageResult = await configForStorage(
+        parsed.data.config,
+        req.params.id,
+        deps.mcpSecretStore,
+      );
       const configChanged =
-        JSON.stringify(parsed.data.config) !== JSON.stringify(existing.config);
+        JSON.stringify(configForStorageResult) !== JSON.stringify(existing.config);
       const baseUpdate = {
         name: parsed.data.name,
         enabled: parsed.data.enabled,
-        config: parsed.data.config,
+        config: configForStorageResult,
       };
       if (!configChanged) {
         const row = deps.mcpServers.update(req.params.id, baseUpdate);
@@ -272,7 +303,8 @@ export async function registerMcpServersRoutes(
           validationStatus: "unknown",
           validationMessage: null,
         });
-        const probe = await runProbe(validate, parsed.data.config, probeOptions);
+        const probeConfig = await configForUse(configForStorageResult, deps.mcpSecretStore);
+        const probe = await runProbe(validate, probeConfig, probeOptions);
         const outcome = probeOutcomeFromResult(probe);
         const row = deps.mcpServers.update(req.params.id, {
           validationStatus: outcome.status,
@@ -332,6 +364,7 @@ export async function registerMcpServersRoutes(
       const existing = deps.mcpServers.getById(req.params.id);
       if (!existing) return reply.code(404).send({ code: "NOT_FOUND" });
       deps.mcpServers.delete(req.params.id);
+      await deps.mcpSecretStore?.deleteServer(req.params.id);
       return reply.code(204).send();
     },
   );
@@ -358,7 +391,8 @@ export async function registerMcpServersRoutes(
           validationStatus: "unknown",
           validationMessage: null,
         });
-        const probe = await runProbe(validate, existing.config, probeOptions);
+        const probeConfig = await configForUse(existing.config, deps.mcpSecretStore);
+        const probe = await runProbe(validate, probeConfig, probeOptions);
         const outcome = probeOutcomeFromResult(probe);
         const row = deps.mcpServers.update(req.params.id, {
           validationStatus: outcome.status,
@@ -408,7 +442,7 @@ export async function registerMcpServersRoutes(
       return mcpServerRevealResponseSchema.parse({
         id: row.id,
         name: row.name,
-        config: row.config,
+        config: await configForUse(row.config, deps.mcpSecretStore),
       });
     },
   );

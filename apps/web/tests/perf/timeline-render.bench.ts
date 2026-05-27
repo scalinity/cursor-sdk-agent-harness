@@ -37,10 +37,20 @@ const RUN_ID = "run-bench-timeline";
 const AGENT_ID = "agent-bench";
 const TIMESTAMP = "2026-05-23T00:00:00.000Z";
 const TOTAL = 10_000;
+const EVENT_CHUNK_SIZE = 256;
+
+function chunkEvents(events: CanonicalRunEvent[]): CanonicalRunEvent[][] {
+  const chunks: CanonicalRunEvent[][] = [];
+  for (let i = 0; i < events.length; i += EVENT_CHUNK_SIZE) {
+    chunks.push(events.slice(i, i + EVENT_CHUNK_SIZE));
+  }
+  return chunks;
+}
 
 function buildSeededEventState(total: number): RunEventState {
   const events: CanonicalRunEvent[] = [];
   const bySeq = new Map<number, CanonicalRunEvent>();
+  const byEventId = new Map<string, CanonicalRunEvent>();
   const seqList: number[] = [];
   let assistantText = "";
   for (let seq = 1; seq <= total; seq += 1) {
@@ -65,16 +75,27 @@ function buildSeededEventState(total: number): RunEventState {
     };
     events.push(ev);
     bySeq.set(seq, ev);
+    byEventId.set(ev.event_id, ev);
     seqList.push(seq);
   }
   return {
     seqList,
     bySeq,
-    events,
+    byEventId,
+    eventChunks: chunkEvents(events),
+    eventsVersion: total,
     lastSeq: total,
+    lastReceivedAt: TIMESTAMP,
     assistantText,
     thinkingText: "",
+    thinkingDurationMs: null,
     toolCallCount: 0,
+    toolCallProjections: [],
+    toolCallGroups: [],
+    codeEditEvents: [],
+    codeEditEventBySourceCallId: {},
+    subagentLifecycleEvents: [],
+    approvalToolCallIdByRequestId: {},
     approvalsByRequestId: {},
   };
 }
@@ -108,6 +129,9 @@ describe("EventTimeline render perf", () => {
           usage: null,
           usageSource: null,
           durationMs: null,
+          modelId: null,
+          lastTurnInputTokens: null,
+          lastTurnOutputTokens: null,
         },
       },
       eventsByRunId: {

@@ -1,5 +1,7 @@
 import Fastify from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { McpSecretStore } from "../../keychain/mcp-secret-store.js";
+import { createInMemoryKeychainDriver, setKeychainDriver } from "../../keychain/testing.js";
 import { openTestDb } from "../../db/__tests__/helpers.js";
 import { createRepositories } from "../../db/repositories/index.js";
 import { registerMcpServersRoutes } from "../mcp-servers.routes.js";
@@ -19,6 +21,86 @@ describe("/api/mcp-servers", () => {
   });
   afterEach(async () => {
     for (const fn of cleanup.reverse()) await fn();
+  });
+
+  it("stores token-bearing config values in Keychain references instead of SQLite", async () => {
+    const { db, repos, app } = setup();
+    const keychain = createInMemoryKeychainDriver();
+    setKeychainDriver(keychain);
+    const mcpSecretStore = new McpSecretStore({ service: "test-service" });
+    cleanup.push(() => app.close(), () => db.close());
+    let probedConfig: unknown = null;
+
+    await registerMcpServersRoutes(app, {
+      mcpServers: repos.mcpServers,
+      mcpSecretStore,
+      validatorOverride: async (config): Promise<McpValidationResult> => {
+        probedConfig = config;
+        return { status: "valid", transport: "stdio", details: "ok" };
+      },
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/mcp-servers",
+      payload: {
+        name: "secret-stdio",
+        enabled: true,
+        config: {
+          command: "/usr/bin/env",
+          env: { GITHUB_TOKEN: "fake-github-token", NORMAL_FLAG: "1" },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const id = res.json().id;
+
+    const raw = db.raw
+      .prepare("SELECT config_json FROM mcp_servers WHERE id = ?")
+      .get(id) as { config_json: string };
+    expect(raw.config_json).not.toContain("fake-github-token");
+    expect(raw.config_json).toContain("keychain:mcp-secret");
+    expect(probedConfig).toMatchObject({
+      env: { GITHUB_TOKEN: "fake-github-token", NORMAL_FLAG: "1" },
+    });
+
+    const reveal = await app.inject({ method: "POST", url: `/api/mcp-servers/${id}/reveal` });
+    expect(reveal.statusCode).toBe(200);
+    expect(reveal.json().config.env.GITHUB_TOKEN).toBe("fake-github-token");
+  });
+
+  it("deletes Keychain MCP secret entries when an MCP server is deleted", async () => {
+    const { db, repos, app } = setup();
+    const keychain = createInMemoryKeychainDriver();
+    setKeychainDriver(keychain);
+    const mcpSecretStore = new McpSecretStore({ service: "test-service" });
+    cleanup.push(() => app.close(), () => db.close());
+
+    await registerMcpServersRoutes(app, {
+      mcpServers: repos.mcpServers,
+      mcpSecretStore,
+      validatorOverride: async () => ({ status: "valid" as const, transport: "http" as const }),
+    });
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/mcp-servers",
+      payload: {
+        name: "secret-http",
+        enabled: true,
+        config: {
+          url: "https://example.test",
+          headers: { Authorization: "Bearer abc" },
+          auth: { CLIENT_ID: "id", CLIENT_SECRET: "shh" },
+        },
+      },
+    });
+    const id = created.json().id;
+    expect((await keychain.findCredentials("test-service")).length).toBeGreaterThan(0);
+
+    const deleted = await app.inject({ method: "DELETE", url: `/api/mcp-servers/${id}` });
+    expect(deleted.statusCode).toBe(204);
+    expect(await keychain.findCredentials("test-service")).toEqual([]);
   });
 
   it("creates an MCP server, probes it, and persists the verdict", async () => {
@@ -62,7 +144,7 @@ describe("/api/mcp-servers", () => {
       name: "stdio-srv",
       config: {
         command: "/bin/false",
-        env: { GITHUB_TOKEN: "ghp_secret" },
+        env: { GITHUB_TOKEN: "fake-github-token" },
       },
     });
     repos.mcpServers.create({
@@ -259,7 +341,7 @@ describe("/api/mcp-servers", () => {
       payload: {
         name: "clean",
         enabled: true,
-        config: { command: "/usr/bin/echo", env: { GITHUB_TOKEN: "ghp_real" } },
+        config: { command: "/usr/bin/echo", env: { GITHUB_TOKEN: "fake-real-token" } },
       },
     });
     const id = created.json().id;

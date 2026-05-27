@@ -19,15 +19,18 @@ function isTerminal(status: string | null | undefined): boolean {
   return status === "FINISHED" || status === "ERROR" || status === "CANCELLED" || status === "EXPIRED";
 }
 
-function tokenTotal(usage: TokenUsage): number | null {
-  if (usage.input_tokens === null && usage.output_tokens === null) return null;
-  return (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0);
+function tokenSummary(usage: TokenUsage): { total: number; partial: boolean } | null {
+  if (usage.usage_source === "unavailable" || (usage.input_tokens === null && usage.output_tokens === null)) return null;
+  return {
+    total: (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0),
+    partial: usage.input_tokens === null || usage.output_tokens === null,
+  };
 }
 
 function formatUsage(usage: TokenUsage, active: boolean): string {
   const cost = usage.cost_usd_micros === null ? null : currency.format(usage.cost_usd_micros / 1_000_000);
-  const tokens = tokenTotal(usage);
-  const tokenText = tokens === null ? null : `${integer.format(tokens)} tok`;
+  const tokens = tokenSummary(usage);
+  const tokenText = tokens === null ? null : `${tokens.partial ? "partial " : ""}${integer.format(tokens.total)} tok`;
   if (cost && tokenText) return `${active ? "~" : ""}${cost} · ${tokenText}`;
   if (cost) return `${active ? "~" : ""}${cost}`;
   if (tokenText) return `${active ? "~" : ""}${tokenText}`;
@@ -35,7 +38,11 @@ function formatUsage(usage: TokenUsage, active: boolean): string {
 }
 
 function hasTokenUsage(usage: TokenUsage): boolean {
-  return tokenTotal(usage) !== null;
+  return tokenSummary(usage) !== null;
+}
+
+function hasPartialTokenUsage(usage: TokenUsage): boolean {
+  return tokenSummary(usage)?.partial ?? false;
 }
 
 function pricingStale(lastVerifiedAt: string | null | undefined): boolean {
@@ -63,7 +70,9 @@ export function CostBadge({ runId }: CostBadgeProps) {
     label = "Usage unavailable";
     muted = true;
   } else if (!active && usage?.cost_usd_micros === null && hasTokenUsage(usage)) {
-    label = "Tokens recorded, pricing not configured";
+    label = hasPartialTokenUsage(usage)
+      ? "Partial tokens recorded, cost unavailable"
+      : "Tokens recorded, cost unavailable";
     muted = true;
   } else if (usage) {
     label = formatUsage(usage, active);

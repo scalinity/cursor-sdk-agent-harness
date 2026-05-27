@@ -231,15 +231,18 @@ interface CostInputs {
 function computeCostMicros(input: CostInputs): number | null {
   const rates = pricingForModel(input.modelId, input.pricing);
   if (rates === null) return null;
-  const inputTokens = input.inputTokens ?? 0;
-  const outputTokens = input.outputTokens ?? 0;
+  if (input.inputTokens === null || input.outputTokens === null || input.cachedInputTokens === null) {
+    return null;
+  }
+  const inputTokens = input.inputTokens;
+  const outputTokens = input.outputTokens;
   // Clamp cachedInputTokens to inputTokens. The SDK occasionally reports
   // cumulative cache reads larger than the prompt's input tokens (e.g.
   // when the cached prefix is larger than the just-sent message). Before
   // clamping, `Math.max(inputTokens - cachedInputTokens, 0)` zeroed
   // fresh-input but still charged for the full reported cached count —
   // asymmetric. Clamp first so cached ≤ input always holds.
-  const cachedInputTokens = Math.min(input.cachedInputTokens ?? 0, inputTokens);
+  const cachedInputTokens = Math.min(input.cachedInputTokens, inputTokens);
   // Pricing for the chosen model must be configured; per spec, missing rates
   // (all-zero) leave cost null because we have no idea what the price is.
   if (
@@ -283,12 +286,13 @@ export function accumulateTurnEndedUsage(
 ): ParsedTurnEndedUsage | null {
   const parsed = turnEndedUsageShape.safeParse(next);
   if (!parsed.success) return current;
+  if (current === null) return parsed.data;
   const sum: ParsedTurnEndedUsage = {
-    inputTokens: addOpt(current?.inputTokens, parsed.data.inputTokens),
-    outputTokens: addOpt(current?.outputTokens, parsed.data.outputTokens),
-    cacheReadTokens: addOpt(current?.cacheReadTokens, parsed.data.cacheReadTokens),
-    cacheWriteTokens: addOpt(current?.cacheWriteTokens, parsed.data.cacheWriteTokens),
-    reasoningTokens: addOpt(current?.reasoningTokens, parsed.data.reasoningTokens),
+    inputTokens: addObserved(current.inputTokens, parsed.data.inputTokens),
+    outputTokens: addObserved(current.outputTokens, parsed.data.outputTokens),
+    cacheReadTokens: addObserved(current.cacheReadTokens, parsed.data.cacheReadTokens),
+    cacheWriteTokens: addObserved(current.cacheWriteTokens, parsed.data.cacheWriteTokens),
+    reasoningTokens: addObserved(current.reasoningTokens, parsed.data.reasoningTokens),
   };
   return sum;
 }
@@ -307,9 +311,9 @@ export function parseTurnEndedUsage(next: unknown): ParsedTurnEndedUsage | null 
   return parsed.success ? parsed.data : null;
 }
 
-function addOpt(a: number | undefined, b: number | undefined): number | undefined {
-  if (a === undefined && b === undefined) return undefined;
-  return (a ?? 0) + (b ?? 0);
+function addObserved(a: number | undefined, b: number | undefined): number | undefined {
+  if (a === undefined || b === undefined) return undefined;
+  return a + b;
 }
 
 // Re-export pricing helpers so callers don't need to thread `PricingSettings`

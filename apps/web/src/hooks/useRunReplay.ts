@@ -81,7 +81,6 @@ export function useRunReplay(input: RunReplayInput): RunReplayState {
   const resetRun = useRunStore((s) => s.resetRun);
   const ingestServerFrame = useRunStore((s) => s.ingestServerFrame);
   const visibleChunks = useRunStore((s) => s.eventsByRunId[input.runId]?.eventChunks ?? EMPTY_CHUNKS);
-  const visibleVersion = useRunStore((s) => s.eventsByRunId[input.runId]?.eventsVersion ?? 0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -144,7 +143,7 @@ export function useRunReplay(input: RunReplayInput): RunReplayState {
   );
   const visibleEvents = useMemo(
     () => flattenEventChunks(visibleChunks),
-    [visibleChunks, visibleVersion],
+    [visibleChunks],
   );
   const finalSeq = allEvents.at(-1)?.seq ?? 0;
 

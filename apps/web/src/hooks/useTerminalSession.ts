@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { wsUrl } from "../lib/api-base.js";
@@ -18,6 +18,8 @@ export type TerminalConnectionStatus = "connecting" | "connected" | "exited" | "
 export interface UseTerminalSessionResult {
   hostRef: RefObject<HTMLDivElement | null>;
   status: TerminalConnectionStatus;
+  insertText: (text: string) => void;
+  runText: (text: string) => void;
 }
 
 /** Delay before re-dialing after a close or shell exit (fresh shell respawn). */
@@ -52,6 +54,7 @@ export function useTerminalSession(): UseTerminalSessionResult {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const sendRef = useRef<(payload: string) => void>(() => undefined);
   const { resolvedTheme } = useThemeValue();
   const csrf = useCsrfToken();
   const [status, setStatus] = useState<TerminalConnectionStatus>("connecting");
@@ -91,6 +94,7 @@ export function useTerminalSession(): UseTerminalSessionResult {
     const send = (payload: string): void => {
       if (socket && socket.readyState === WebSocket.OPEN) socket.send(payload);
     };
+    sendRef.current = send;
 
     const dataDisposable = term.onData((data) => send(serializeTerminalInput(data)));
     const resizeDisposable = term.onResize(({ cols, rows }) =>
@@ -222,6 +226,7 @@ export function useTerminalSession(): UseTerminalSessionResult {
       term.dispose();
       terminalRef.current = null;
       fitRef.current = null;
+      sendRef.current = () => undefined;
     };
   });
 
@@ -238,7 +243,15 @@ export function useTerminalSession(): UseTerminalSessionResult {
     if (fit) safeFit(fit);
   }, [resolvedTheme]);
 
-  return { hostRef, status };
+  const insertText = useCallback((text: string): void => {
+    sendRef.current(serializeTerminalInput(text));
+  }, []);
+
+  const runText = useCallback((text: string): void => {
+    sendRef.current(serializeTerminalInput(`${text}\r`));
+  }, []);
+
+  return { hostRef, status, insertText, runText };
 }
 
 function safeFit(fit: FitAddon): void {

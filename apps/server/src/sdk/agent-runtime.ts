@@ -20,6 +20,7 @@ import type { McpServersRepo } from "../db/repositories/mcp-servers.repo.js";
 import type { RunsRepo } from "../db/repositories/runs.repo.js";
 import type { SubagentDefinitionsRepo } from "../db/repositories/subagents.repo.js";
 import type { CursorApiKeyStore } from "../keychain/cursor-api-key.js";
+import type { McpSecretStore } from "../keychain/mcp-secret-store.js";
 import type { WorkspaceAllowlistRepo } from "../db/repositories/workspace-allowlist.repo.js";
 import type { WorkspacePolicy } from "../security/workspace-policy.js";
 import { getSettingsSnapshot } from "../services/settings.service.js";
@@ -37,6 +38,7 @@ import {
 import { RunController, newRunId } from "./run-controller.js";
 import type { SDKAgent, SdkAdapter } from "./sdk-adapter.js";
 import { ACTIVE_WORKSPACE_SETTING_KEY } from "../config/settings-keys.js";
+import { hydrateMcpSecrets } from "../mcp/mcp-secret-config.js";
 
 const ASK_MODE_PREFIX =
   "IMPORTANT: You are in Ask Mode. Answer the user's question about the codebase. " +
@@ -75,6 +77,7 @@ export interface AgentRuntimeDeps {
   settingsRepo: SettingsRepo;
   workspacePolicy: WorkspacePolicy;
   apiKeyStore: CursorApiKeyStore;
+  mcpSecretStore?: McpSecretStore | undefined;
   sdk: SdkAdapter;
   logger: FastifyBaseLogger;
   /**
@@ -128,6 +131,17 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
   // See ./live-agents.ts for eviction policy.
   const liveAgents = new LiveAgents({ logger: deps.logger });
 
+  async function listMcpServersForSdk() {
+    const servers = deps.mcpRepo.list();
+    if (!deps.mcpSecretStore) return servers;
+    return Promise.all(
+      servers.map(async (server) => ({
+        ...server,
+        config: await hydrateMcpSecrets(server.config, deps.mcpSecretStore!),
+      })),
+    );
+  }
+
   async function loadActiveAgent(row: AgentRow): Promise<SDKAgent> {
     const cached = liveAgents.get(row.id);
     if (cached) return cached;
@@ -135,7 +149,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
     const opts = await buildAgentOptions({
       agent: row,
       apiKey,
-      mcpServers: deps.mcpRepo.list(),
+      mcpServers: await listMcpServersForSdk(),
       subagents: deps.subagentsRepo.list(),
       workspacePolicy: deps.workspacePolicy,
     });
@@ -255,7 +269,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
         options = await buildAgentOptions({
           agent: initialRow,
           apiKey,
-          mcpServers: deps.mcpRepo.list(),
+          mcpServers: await listMcpServersForSdk(),
           subagents: deps.subagentsRepo.list(),
           workspacePolicy: deps.workspacePolicy,
         });
@@ -591,7 +605,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
         await buildAgentOptions({
           agent: effectiveRow,
           apiKey: await mustApiKey(),
-          mcpServers: deps.mcpRepo.list(),
+          mcpServers: await listMcpServersForSdk(),
           subagents: deps.subagentsRepo.list(),
           workspacePolicy: deps.workspacePolicy,
         });

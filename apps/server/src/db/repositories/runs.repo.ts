@@ -1012,6 +1012,24 @@ export class RunsRepo {
     }));
   }
 
+  hasNonTerminalInTree(id: string): boolean {
+    const row = this.raw
+      .prepare(
+        `WITH RECURSIVE tree(id, status) AS (
+           SELECT id, status FROM runs WHERE id = ?
+           UNION ALL
+           SELECT r.id, r.status
+             FROM runs r
+             INNER JOIN tree t ON r.parent_run_id = t.id
+         )
+         SELECT COUNT(*) AS count
+           FROM tree
+          WHERE status NOT IN ('FINISHED', 'ERROR', 'CANCELLED', 'EXPIRED')`,
+      )
+      .get(id) as { count: number };
+    return row.count > 0;
+  }
+
   delete(id: string): void {
     this.raw.transaction(() => {
       this.raw

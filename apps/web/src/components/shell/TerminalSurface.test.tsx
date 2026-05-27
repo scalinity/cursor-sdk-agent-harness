@@ -24,21 +24,24 @@ describe("TerminalSurface", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the embedded terminal surface without the AI command affordance", () => {
+  it("renders the embedded terminal surface with the AI command helper closed", () => {
     render(<TerminalSurface />);
 
     expect(screen.getByTestId("terminal-surface")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /AI Command/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /AI Command/i })).toBeTruthy();
     expect(screen.queryByPlaceholderText("show disk usage")).toBeNull();
   });
 
-  it("does not open a command generator or call the route on Cmd+K", () => {
+  it("opens the command generator on Cmd+K without calling the route before submit", () => {
     render(<TerminalSurface />);
 
     fireEvent.keyDown(screen.getByTestId("terminal-surface"), { key: "k", metaKey: true });
 
-    expect(screen.queryByPlaceholderText("show disk usage")).toBeNull();
-    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText("show disk usage")).toBeTruthy();
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      "/api/terminal/generate-command",
+      expect.any(Object),
+    );
   });
 
   it("shows reconnecting status while disconnected", () => {

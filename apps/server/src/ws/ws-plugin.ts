@@ -597,7 +597,7 @@ async function runReplay(
   // last page is exhausted or the connection closes.
   for (;;) {
     if (state.closed) return;
-    const rows = opts.events.getByRunIdAfterSeq(runId, cursor, REPLAY_PAGE_SIZE);
+    const rows = opts.events.getReplayByRunIdAfterSeq(runId, cursor, REPLAY_PAGE_SIZE);
     if (rows.length === 0) return;
     for (const row of rows) {
       deliverEvent(state, row, true, perf);

@@ -7,6 +7,7 @@ import type {
   EventSdkType,
 } from "@harness/shared";
 import { isoNow, parseJsonOrNull, stringifyOrNull } from "./mapping.js";
+import { LARGE_PAYLOAD_THRESHOLD_BYTES } from "@harness/shared";
 
 // AppendableEvent — the input shape callers hand to appendCanonicalEvent.
 // `seq` is intentionally omitted; the repository allocates it atomically from
@@ -54,7 +55,35 @@ interface EventDbRow {
   created_at: string;
 }
 
-function rowToDomain(row: EventDbRow): EventRow {
+interface ReplayEventDbRow extends EventDbRow {
+  replay_call_id: string | null;
+  replay_name: string | null;
+  replay_status: string | null;
+  replay_truncated_json: string | null;
+  replay_timing_json: string | null;
+  replay_has_args: 0 | 1 | null;
+  replay_has_result: 0 | 1 | null;
+}
+
+interface ToolCallReplayPayload {
+  call_id: string;
+  name: string;
+  status: "running" | "completed" | "error";
+  args?: unknown;
+  result?: unknown;
+  truncated?: { args?: boolean; result?: boolean };
+  timing?: { started_at?: string; completed_at?: string; duration_ms?: number };
+}
+
+function parseReplayJsonObject<T extends object>(json: string | null): T | undefined {
+  if (json === null) return undefined;
+  const parsed = JSON.parse(json) as unknown;
+  return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+    ? (parsed as T)
+    : undefined;
+}
+
+function rowMetadata(row: EventDbRow): Omit<EventRow, "payload" | "raw"> {
   return {
     id: row.id,
     runId: row.run_id,
@@ -66,13 +95,57 @@ function rowToDomain(row: EventDbRow): EventRow {
     callId: row.call_id,
     requestId: row.request_id,
     status: row.status,
-    payload: JSON.parse(row.payload_json),
-    raw: parseJsonOrNull(row.raw_json),
     payloadBytes: row.payload_bytes,
     rawBytes: row.raw_bytes,
     occurredAt: row.occurred_at,
     receivedAt: row.received_at,
     createdAt: row.created_at,
+  };
+}
+
+function rowToDomain(row: EventDbRow): EventRow {
+  return {
+    ...rowMetadata(row),
+    payload: JSON.parse(row.payload_json),
+    raw: parseJsonOrNull(row.raw_json),
+  };
+}
+
+function rowToReplayDomain(row: ReplayEventDbRow): EventRow {
+  const shouldSlim =
+    row.sdk_type === "tool_call" &&
+    row.payload_bytes > LARGE_PAYLOAD_THRESHOLD_BYTES;
+  if (!shouldSlim) return rowToDomain(row);
+
+  const status = row.replay_status;
+  if (
+    typeof row.replay_call_id !== "string" ||
+    typeof row.replay_name !== "string" ||
+    (status !== "running" && status !== "completed" && status !== "error")
+  ) {
+    return rowToDomain(row);
+  }
+
+  const payload: ToolCallReplayPayload = {
+    call_id: row.replay_call_id,
+    name: row.replay_name,
+    status,
+  };
+  if (row.replay_has_args === 1) payload.args = null;
+  if (row.replay_has_result === 1) payload.result = null;
+  const truncated = parseReplayJsonObject<ToolCallReplayPayload["truncated"] & object>(
+    row.replay_truncated_json,
+  );
+  if (truncated !== undefined) payload.truncated = truncated;
+  const timing = parseReplayJsonObject<ToolCallReplayPayload["timing"] & object>(
+    row.replay_timing_json,
+  );
+  if (timing !== undefined) payload.timing = timing;
+
+  return {
+    ...rowMetadata(row),
+    payload,
+    raw: row.raw_bytes > 0 ? {} : null,
   };
 }
 
@@ -216,6 +289,30 @@ export class EventsRepo {
       )
       .all(runId, afterSeq, limit) as EventDbRow[];
     return rows.map(rowToDomain);
+  }
+
+  getReplayByRunIdAfterSeq(
+    runId: string,
+    afterSeq: number,
+    limit = 500,
+  ): EventRow[] {
+    const rows = this.raw
+      .prepare(
+        `SELECT *,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.call_id') END AS replay_call_id,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.name') END AS replay_name,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.status') END AS replay_status,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.truncated') END AS replay_truncated_json,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.timing') END AS replay_timing_json,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold AND json_type(payload_json, '$.args') IS NOT NULL THEN 1 ELSE 0 END AS replay_has_args,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold AND json_type(payload_json, '$.result') IS NOT NULL THEN 1 ELSE 0 END AS replay_has_result
+           FROM events
+          WHERE run_id = @runId AND seq > @afterSeq
+          ORDER BY seq ASC
+          LIMIT @limit`,
+      )
+      .all({ runId, afterSeq, limit, threshold: LARGE_PAYLOAD_THRESHOLD_BYTES }) as ReplayEventDbRow[];
+    return rows.map(rowToReplayDomain);
   }
 
   countByRunId(runId: string, afterSeq = 0): number {

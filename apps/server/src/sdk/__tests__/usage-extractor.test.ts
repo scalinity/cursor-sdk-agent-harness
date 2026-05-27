@@ -94,6 +94,32 @@ describe("extractUsage", () => {
     expect(out.cached_input_tokens).toBe(100_000);
   });
 
+  it("returns cost null when output tokens are missing", () => {
+    const out = extractUsage({
+      rawUsage: { inputTokens: 500, cacheReadTokens: 0 },
+      modelId: "composer-2-5-fast",
+      pricing,
+    });
+    expect(out.usage_source).toBe("sdk_final_result");
+    expect(out.input_tokens).toBe(500);
+    expect(out.output_tokens).toBeNull();
+    expect(out.cached_input_tokens).toBe(0);
+    expect(out.cost_usd_micros).toBeNull();
+  });
+
+  it("returns cost null when the cached-input split is missing", () => {
+    const out = extractUsage({
+      rawUsage: { inputTokens: 500, outputTokens: 25 },
+      modelId: "composer-2-5-fast",
+      pricing,
+    });
+    expect(out.usage_source).toBe("sdk_final_result");
+    expect(out.input_tokens).toBe(500);
+    expect(out.output_tokens).toBe(25);
+    expect(out.cached_input_tokens).toBeNull();
+    expect(out.cost_usd_micros).toBeNull();
+  });
+
   it("returns cost null when pricing for the model is all-zero", () => {
     const zeroPricing: SettingsSnapshot["pricing"] = {
       composer25Fast: {
@@ -161,6 +187,47 @@ describe("accumulateTurnEndedUsage", () => {
     });
     expect(acc?.inputTokens).toBe(180);
     expect(acc?.outputTokens).toBe(70);
+  });
+
+  it("keeps aggregate token fields incomplete when any turn omits them", () => {
+    let acc = accumulateTurnEndedUsage(null, {
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadTokens: 0,
+    });
+    acc = accumulateTurnEndedUsage(acc, {
+      inputTokens: 80,
+      cacheReadTokens: 0,
+    });
+    expect(acc?.inputTokens).toBe(180);
+    expect(acc?.outputTokens).toBeUndefined();
+    expect(acc?.cacheReadTokens).toBe(0);
+
+    const out = extractUsage({ rawUsage: acc, modelId: "composer-2-5-fast", pricing });
+    expect(out.input_tokens).toBe(180);
+    expect(out.output_tokens).toBeNull();
+    expect(out.cost_usd_micros).toBeNull();
+  });
+
+  it("keeps aggregate cached-input split incomplete when any turn omits it", () => {
+    let acc = accumulateTurnEndedUsage(null, {
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadTokens: 0,
+    });
+    acc = accumulateTurnEndedUsage(acc, {
+      inputTokens: 80,
+      outputTokens: 20,
+    });
+    expect(acc?.inputTokens).toBe(180);
+    expect(acc?.outputTokens).toBe(70);
+    expect(acc?.cacheReadTokens).toBeUndefined();
+
+    const out = extractUsage({ rawUsage: acc, modelId: "composer-2-5-fast", pricing });
+    expect(out.input_tokens).toBe(180);
+    expect(out.output_tokens).toBe(70);
+    expect(out.cached_input_tokens).toBeNull();
+    expect(out.cost_usd_micros).toBeNull();
   });
 
   it("ignores updates that fail Zod parse", () => {

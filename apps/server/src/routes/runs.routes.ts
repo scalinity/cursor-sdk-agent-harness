@@ -383,6 +383,12 @@ export async function registerRunsRoutes(
         message: "Only terminal runs can be deleted.",
       });
     }
+    if (deps.runsRepo.hasNonTerminalInTree(req.params.runId)) {
+      return reply.code(409).send({
+        code: "RUN_TREE_NOT_TERMINAL",
+        message: "Every child run must be terminal before deleting this run.",
+      });
+    }
     deps.runsRepo.delete(req.params.runId);
     return reply.code(204).send();
   });
