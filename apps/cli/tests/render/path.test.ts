@@ -26,6 +26,11 @@ describe("normalizePath", () => {
     expect(normalizePath("~/proj/src/a.ts", cwd, { home })).toBe("src/a.ts");
   });
 
+  it("leaves a ~user (no-slash) home reference untouched", () => {
+    expect(normalizePath("~bob", cwd, { home })).toBe("~bob");
+    expect(normalizePath("~bob/notes.md", cwd, { home })).toBe("~bob/notes.md");
+  });
+
   it("treats already-relative input as cwd-relative and leaves it untouched", () => {
     expect(normalizePath("src/already.ts", cwd, { home })).toBe("src/already.ts");
   });

@@ -27,9 +27,13 @@ export function normalizePath(targetPath: string, cwd: string, options: Normaliz
 
 function toDisplayPath(targetPath: string, cwd: string, home: string): string {
   if (!targetPath) return targetPath;
+  // Expand only the current-user home forms: "~" exactly or "~/…". Leave
+  // "~user" (other-user home) untouched — we can't resolve it and shouldn't
+  // mangle it into "~/user".
+  const isHomeTilde = targetPath === "~" || targetPath.startsWith("~/");
   // Already-relative input is treated as cwd-relative and left as-is.
-  if (!path.isAbsolute(targetPath) && !targetPath.startsWith("~")) return targetPath;
-  const abs = targetPath.startsWith("~") ? path.join(home, targetPath.slice(1)) : targetPath;
+  if (!path.isAbsolute(targetPath) && !isHomeTilde) return targetPath;
+  const abs = isHomeTilde ? path.join(home, targetPath.slice(1)) : targetPath;
   if (isInside(cwd, abs)) {
     const rel = path.relative(cwd, abs);
     return rel === "" ? "." : rel;
