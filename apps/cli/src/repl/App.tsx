@@ -208,7 +208,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
       setAgentTurnActive(true);
       setStreamStatus("connected");
       const subscription = stream.subscribeToRun(run.runId, (frame: ServerFrame) => {
-        setBuffer((current) => ingestStreamFrame(current, frame));
+        setBuffer((current) => ingestStreamFrame(current, frame, workspace));
         if (frame.type === "sdk.request") setPendingApproval({ runId: run.runId, requestId: frame.event.payload.request_id });
         if (isRunStatusTerminalFrame(frame)) {
           setAgentTurnActive(false);

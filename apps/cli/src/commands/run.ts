@@ -50,7 +50,7 @@ export async function runPrompt(options: RunCommandOptions, deps: CommandDeps): 
           options.approve ? "approved by --approve" : "denied by default in one-shot mode",
         );
       }
-      buffer = ingestStreamFrame(buffer, frame);
+      buffer = ingestStreamFrame(buffer, frame, options.workspace);
       if (options.json) {
         writeJsonLine(deps.write, frame);
         return;
@@ -70,7 +70,7 @@ export async function runPrompt(options: RunCommandOptions, deps: CommandDeps): 
         },
       );
     } else {
-      buffer = await waitForRunViaRest(run.runId, timeoutMs, deps);
+      buffer = await waitForRunViaRest(run.runId, timeoutMs, deps, options.workspace);
     }
 
     if (options.noStream && !options.json) {
@@ -119,7 +119,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout:
   }
 }
 
-async function waitForRunViaRest(runId: string, timeoutMs: number, deps: CommandDeps) {
+async function waitForRunViaRest(runId: string, timeoutMs: number, deps: CommandDeps, cwd?: string) {
   const started = Date.now();
   for (;;) {
     const run: RunSummary = await deps.http.getRun(runId);
@@ -133,7 +133,7 @@ async function waitForRunViaRest(runId: string, timeoutMs: number, deps: Command
   for (;;) {
     const page = await deps.http.getRunEvents(runId, { afterSeq, limit: 500, direction: "asc" });
     for (const frame of page.items) {
-      buffer = ingestStreamFrame(buffer, frame);
+      buffer = ingestStreamFrame(buffer, frame, cwd);
       const seq = "event" in frame ? frame.event.seq : afterSeq;
       afterSeq = Math.max(afterSeq, seq);
     }

@@ -127,8 +127,7 @@ describe("StreamView helpers", () => {
     } satisfies ServerFrame);
 
     const output = renderStreamItems(buffer.items);
-    expect(output).toContain("read_file");
-    expect(output).toContain("auth.ts");
+    expect(output).toContain("read auth.ts");
     expect(output).toContain("Approval required");
     expect(output).toContain("30 tokens");
     expect(output).toContain("$0.0025");

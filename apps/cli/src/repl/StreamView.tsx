@@ -6,6 +6,7 @@ import { sanitizeTerminalText } from "../output/sanitize.js";
 import { formatMicros } from "../output/table.js";
 import { renderDiff } from "../render/diff.js";
 import { renderMarkdown } from "../render/markdown.js";
+import { formatToolCall } from "../render/tool-call.js";
 import { formatToolCallLine } from "./ToolCallLine.js";
 import { createTuiTheme, fg, hardWrapText, truncateMiddle, type TuiTheme } from "./theme.js";
 
@@ -16,7 +17,7 @@ const MAX_TEXT_BYTES = 512 * 1024;
 export type StreamItem =
   | { type: "assistant"; text: string }
   | { type: "thinking"; text: string; collapsed?: boolean }
-  | { type: "tool"; callId: string; name: string; status: "running" | "completed" | "error"; summary?: string; durationMs?: number; error?: string }
+  | { type: "tool"; callId: string; name: string; status: "running" | "completed" | "error"; verb: string; primaryArg: string; secondaryDetail?: string; durationMs?: number; error?: string }
   | { type: "diff"; path: string; diff: string }
   | { type: "approval"; requestId: string; description: string }
   | { type: "summary"; status: string; tokens: number | null; costMicros: number | null; durationMs: number | null }
@@ -30,7 +31,7 @@ export function createStreamBuffer(): StreamBuffer {
   return { items: [] };
 }
 
-export function ingestStreamFrame(buffer: StreamBuffer, frame: ServerFrame): StreamBuffer {
+export function ingestStreamFrame(buffer: StreamBuffer, frame: ServerFrame, cwd: string = process.cwd()): StreamBuffer {
   const items = [...buffer.items];
   switch (frame.type) {
     case "sdk.assistant": {
@@ -55,14 +56,16 @@ export function ingestStreamFrame(buffer: StreamBuffer, frame: ServerFrame): Str
     }
     case "sdk.tool_call": {
       const payload = frame.event.payload;
-      const summary = summarizeUnknown(payload.args);
+      const summary = formatToolCall(payload.name, payload.args, cwd);
       const existingIndex = items.findIndex((item) => item.type === "tool" && item.callId === payload.call_id);
       const next: StreamItem = {
         type: "tool",
         callId: payload.call_id,
         name: payload.name,
         status: payload.status,
-        ...(summary ? { summary } : {}),
+        verb: summary.verb,
+        primaryArg: summary.primaryArg,
+        ...(summary.secondaryDetail ? { secondaryDetail: summary.secondaryDetail } : {}),
         ...(payload.timing?.duration_ms !== undefined ? { durationMs: payload.timing.duration_ms } : {}),
         ...(payload.status === "error" ? { error: summarizeUnknown(payload.result) } : {}),
       };
