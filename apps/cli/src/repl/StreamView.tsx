@@ -4,7 +4,7 @@ import { styles } from "../render/styles.js";
 import type { ServerFrame } from "@harness/shared";
 import { sanitizeTerminalText } from "../output/sanitize.js";
 import { formatMicros } from "../output/table.js";
-import { renderDiff } from "../render/diff.js";
+import { renderFileEdit } from "../render/diff.js";
 import { renderMarkdown } from "../render/markdown.js";
 import { formatToolCall } from "../render/tool-call.js";
 import { formatToolCallLine } from "./ToolCallLine.js";
@@ -19,7 +19,7 @@ export type StreamItem =
   | { type: "assistant"; text: string }
   | { type: "thinking"; text: string; collapsed?: boolean }
   | { type: "tool"; callId: string; name: string; status: "running" | "completed" | "error"; verb: string; primaryArg: string; secondaryDetail?: string; durationMs?: number; error?: string }
-  | { type: "diff"; path: string; diff: string }
+  | { type: "diff"; path: string; language?: string; before?: string; after?: string; unifiedDiff?: string }
   | { type: "approval"; requestId: string; description: string }
   | { type: "summary"; status: string; tokens: number | null; costMicros: number | null; durationMs: number | null }
   | { type: "system"; text: string }
@@ -77,7 +77,14 @@ export function ingestStreamFrame(buffer: StreamBuffer, frame: ServerFrame, cwd:
     }
     case "derived.code_edit": {
       for (const edit of frame.event.payload.edits) {
-        items.push({ type: "diff", path: edit.path, diff: edit.unifiedDiff ?? buildFallbackDiff(edit.before, edit.after) });
+        items.push({
+          type: "diff",
+          path: edit.path,
+          ...(edit.language ? { language: edit.language } : {}),
+          ...(edit.before !== undefined ? { before: edit.before } : {}),
+          ...(edit.after !== undefined ? { after: edit.after } : {}),
+          ...(edit.unifiedDiff !== undefined ? { unifiedDiff: edit.unifiedDiff } : {}),
+        });
       }
       break;
     }
@@ -199,7 +206,7 @@ function renderStreamItem(item: StreamItem, width: number): string {
     case "tool":
       return formatToolCallLine(item);
     case "diff":
-      return `${styles.frame(`┌─ ${sanitizeTerminalText(item.path)} ─`)}\n${renderDiff(item.diff)}\n${styles.frame("└────────")}`;
+      return renderFileEdit(item);
     case "approval":
       return styles.approval(`⚠ Approval required: ${sanitizeTerminalText(item.description)} [y]es / [n]o / [a]lways`);
     case "summary":
@@ -227,11 +234,6 @@ function summarizeUnknown(value: unknown): string {
   const text = sanitizeTerminalText(typeof value === "string" ? value : JSON.stringify(value));
   if (!text) return "";
   return text.length > 60 ? `${text.slice(0, 59)}…` : text;
-}
-
-function buildFallbackDiff(before: string | undefined, after: string | undefined): string {
-  if (before === undefined && after === undefined) return "";
-  return [`-${before ?? ""}`, `+${after ?? ""}`].join("\n");
 }
 
 function sumTokens(input: number | null, output: number | null): number | null {
