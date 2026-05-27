@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import { normalizePath } from "../render/path.js";
 import { sanitizeTerminalText } from "../output/sanitize.js";
 import type { CliMode } from "../types.js";
 import { statusColor, truncateMiddle, fg, bg, type TuiTheme } from "./theme.js";
@@ -19,7 +20,7 @@ export interface HeaderBarProps {
 export function HeaderBar({ width, workspace, mode, modelId, connection, activeRunId, queuedPrompts, spinner, theme }: HeaderBarProps) {
   const leftWidth = Math.max(18, Math.floor(width * 0.56));
   const rightWidth = Math.max(12, width - leftWidth - 4);
-  const cwdLabel = truncateMiddle(sanitizeTerminalText(workspace), leftWidth);
+  const cwdLabel = sanitizeTerminalText(normalizePath(workspace, process.cwd(), { maxWidth: leftWidth }));
   const title = width < 84 ? "HARNESS" : "Cursor Harness";
   const activity = activeRunId ? `${spinner} running ${activeRunId.slice(0, 8)}` : queuedPrompts > 0 ? `${queuedPrompts} queued` : "ready";
   const modelLabel = truncateMiddle(`${mode} · ${sanitizeTerminalText(modelId)}`, rightWidth);
