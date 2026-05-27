@@ -199,3 +199,18 @@ Per `CLAUDE.md`: a change is green only when `pnpm typecheck && pnpm lint && pnp
 - Dead code: `ToolCallLine` React component, `ThinkingBlock`/`formatThinking`, unused `theme.cyan`, unused `ink-text-input` dep.
 - ANSI-loss-on-wrap in `hardWrapText` (cross-cutting; may surface during 1.5).
 - Palette is hex in CLI vs OKLCH convention elsewhere (Tier 3 color decision).
+
+## Drift since Tier 1
+
+Phase 0-light for Tier 2 re-verified the audit on 2026-05-27. The cited chrome components still exist at `apps/cli/src/repl/HeaderBar.tsx`, `apps/cli/src/repl/StatusBar.tsx`, and `apps/cli/src/repl/InputBar.tsx`, but the audit's "no path normalization" / "no style token" findings are stale after Tier 1 implementation.
+
+Current Tier 1 state:
+
+- `apps/cli/src/render/styles.ts` defines named render tokens (`styles.tool`, `styles.system`, `styles.error`, `styles.diffAdd`, etc.) and migrated scrollback render call-sites through that token module.
+- `apps/cli/src/render/path.ts` defines `normalizePath(absPath, cwd)` with home-relative and cwd-relative display rules.
+- `apps/cli/src/render/tool-call.ts` formats semantic tool summaries and normalizes path-like tool arguments.
+- `apps/cli/src/repl/StreamView.tsx` now accepts `cwd` in `ingestStreamFrame`, normalizes `derived.code_edit` paths, renders user/assistant turn boundaries, suppresses running tools into the active overlay, and labels final turn cost as `turn $...` in the scrollback footer.
+- `apps/cli/src/repl/HeaderBar.tsx` still renders the raw workspace string instead of `normalizePath`; Tier 2.1 should move top-header cwd display onto `normalizePath(workspace, process.cwd())`.
+- `apps/cli/src/repl/StatusBar.tsx` still duplicates cwd/model/mode/run-state/connection with header chrome and still exposes websocket jargon (`ws ...`); this remains Tier 2 scope.
+- There is no active account/profile field in CLI preferences (`~/.harness-cli/config.json` currently stores `lastAgentId`, `preferredMode`, and `preferredModel` only). Tier 2.2 should flag account/profile as an assumption or use an explicit fallback label without building multi-account support.
+- Live streaming frames expose token/cost usage only at `run.final_result`; `sdk.assistant`, `sdk.status`, and tool frames do not carry usage deltas. Tier 2.4 should not ship a fake live counter without backend instrumentation or an explicitly accepted heuristic.
