@@ -9,6 +9,9 @@ export interface ToolCallSummary {
 
 const PATH_KEYS = ["path", "file_path", "filePath", "file", "target_file", "absolute_path", "filename"];
 const COMMAND_KEYS = ["command", "cmd", "script", "command_line"];
+// `query` is intentionally in PATTERN_KEYS so glob/grep treat a `query` arg as
+// the pattern (searchTool checks PATTERN_KEYS before falling back). Keep this
+// ahead of QUERY_KEYS for search tools — reordering would regress that.
 const PATTERN_KEYS = ["pattern", "regex", "query", "glob"];
 const QUERY_KEYS = ["query", "q", "search", "search_term", "searchTerm", "prompt"];
 const URL_KEYS = ["url", "uri", "href"];
@@ -86,6 +89,9 @@ function genericTool(toolName: string, rec: Record<string, unknown> | null, args
 }
 
 function maybePath(value: string, cwd: string): string {
+  // Only normalize values that look unambiguously path-like (leading ~, /, ./,
+  // or ../). Bare relative paths like "src/index.ts" are left as-is — an
+  // accepted, invisible degradation for the generic extractor.
   return /^[~/]|^\.\.?\//.test(value) ? normalizePath(value, cwd) : value;
 }
 

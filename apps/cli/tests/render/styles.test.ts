@@ -13,6 +13,9 @@ describe("createStyles", () => {
   });
 
   it("preserves the wrapped text when colors are enabled", () => {
+    // Smoke-only: chalk auto-disables color in the non-TTY test env, so these
+    // assert the colored branch returns the text intact, not that it adds ANSI.
+    // The NO_COLOR identity branch above is the one meaningfully tested (.toBe).
     const s = createStyles({
       noColor: false,
       text: "#eef2f7",
