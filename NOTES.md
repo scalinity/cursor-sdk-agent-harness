@@ -52,6 +52,14 @@ deliberately **not** fixed in this tier. Tier numbers refer to the 3-tier plan
   active-tool overlay shows spinner + summary + elapsed instead. Revisit if the
   server starts emitting partial tool output.
 
+## From Tier 2 implementation
+
+- **Multi-account/profile source is not implemented.** The CLI preferences file
+  (`~/.harness-cli/config.json`) stores `lastAgentId`, `preferredMode`, and
+  `preferredModel`, but no account or profile name. The Tier 2 chrome therefore
+  labels the current single-user context as `local`. Add a real account/profile
+  field only as part of a multi-account design, not as a chrome-only patch.
+
 ## From the /review-2 pass (2026-05-27) — deferred suggestions
 
 - **S5 — parallel running tools lose overlay attribution.** `toolStartRef`

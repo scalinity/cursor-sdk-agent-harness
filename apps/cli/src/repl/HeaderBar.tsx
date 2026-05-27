@@ -2,38 +2,48 @@ import React from "react";
 import { Box, Text } from "ink";
 import { normalizePath } from "../render/path.js";
 import { sanitizeTerminalText } from "../output/sanitize.js";
-import type { CliMode } from "../types.js";
-import { statusColor, truncateMiddle, fg, bg, type TuiTheme } from "./theme.js";
+import { truncateMiddle, fg, bg, type TuiTheme } from "./theme.js";
+
+export type ChromeState = "ready" | "streaming" | "tool-running" | "disconnected" | "error";
 
 export interface HeaderBarProps {
   width: number;
   workspace: string;
-  mode: CliMode;
   modelId: string;
-  connection: "ready" | "connecting" | "connected" | "reconnecting" | "disconnected";
-  activeRunId: string | null;
+  accountLabel: string;
+  chromeState: ChromeState;
   queuedPrompts: number;
-  spinner: string;
   theme: TuiTheme;
 }
 
-export function HeaderBar({ width, workspace, mode, modelId, connection, activeRunId, queuedPrompts, spinner, theme }: HeaderBarProps) {
+export function HeaderBar({ width, workspace, modelId, accountLabel, chromeState, queuedPrompts, theme }: HeaderBarProps) {
   const leftWidth = Math.max(18, Math.floor(width * 0.56));
   const rightWidth = Math.max(12, width - leftWidth - 4);
   const cwdLabel = sanitizeTerminalText(normalizePath(workspace, process.cwd(), { maxWidth: leftWidth }));
   const title = width < 84 ? "HARNESS" : "Cursor Harness";
-  const activity = activeRunId ? `${spinner} running ${activeRunId.slice(0, 8)}` : queuedPrompts > 0 ? `${queuedPrompts} queued` : "ready";
-  const modelLabel = truncateMiddle(`${mode} · ${sanitizeTerminalText(modelId)}`, rightWidth);
+  const queuedLabel = queuedPrompts > 0 ? `${queuedPrompts} queued` : "";
+  const modelLabel = truncateMiddle(formatChromeIndicator(modelId, accountLabel, chromeState), rightWidth);
   return (
     <Box flexDirection="column" width={width} paddingX={1} paddingTop={0} {...bg(theme.background)}>
       <Box width={Math.max(1, width - 2)} justifyContent="space-between">
         <Text {...fg(theme.accentWarm)} bold>▌ {title}</Text>
-        <Text {...fg(theme.muted)}>{modelLabel}</Text>
+        <Text {...fg(chromeStateColor(theme, chromeState))}>{modelLabel}</Text>
       </Box>
       <Box width={Math.max(1, width - 2)} justifyContent="space-between">
         <Text {...fg(theme.muted)}>cwd {cwdLabel}</Text>
-        <Text {...fg(statusColor(theme, connection))}>{activity}</Text>
+        <Text {...fg(theme.muted)}>{queuedLabel}</Text>
       </Box>
     </Box>
   );
+}
+
+export function formatChromeIndicator(modelId: string, accountLabel: string, state: ChromeState): string {
+  return `${sanitizeTerminalText(modelId)} · ${sanitizeTerminalText(accountLabel)} · ${state} ●`;
+}
+
+function chromeStateColor(theme: TuiTheme, state: ChromeState): string | undefined {
+  if (state === "ready") return theme.success;
+  if (state === "streaming") return theme.accent;
+  if (state === "tool-running") return theme.warning;
+  return theme.danger;
 }

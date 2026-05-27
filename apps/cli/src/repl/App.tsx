@@ -5,7 +5,7 @@ import { isRunStatusTerminalFrame, isTerminalFrame } from "../client/ws.js";
 import { appendPromptHistory, writePreferences } from "../config.js";
 import { renderTable, shortId } from "../output/table.js";
 import type { CliAgentSummary, CliHttpPort, CliMode, CliStreamPort } from "../types.js";
-import { HeaderBar } from "./HeaderBar.js";
+import { HeaderBar, type ChromeState } from "./HeaderBar.js";
 import { InputBar, parseSlashCommand, PromptHistory, type MentionTrigger } from "./InputBar.js";
 import { computeTuiLayout, countInputLines, MAX_INPUT_VISIBLE_LINES } from "./layout.js";
 import { MentionPopup, flattenMentionResults, MAX_MENTION_ITEMS, moveMentionSelection } from "./MentionPopup.js";
@@ -81,6 +81,12 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
   const turnActive = isStartingRun || agentTurnActive;
   const spinner = useSpinnerFrame(turnActive);
   const runningTool = toolStartRef.current ? findRunningTool(buffer.items, toolStartRef.current.callId) : undefined;
+  const lastItem = buffer.items.at(-1);
+  const chromeState = deriveChromeState({ streamStatus, turnActive, toolRunning: runningTool !== undefined, lastItemType: lastItem?.type });
+  // ASSUMPTION: The CLI is single-user until a multi-account config exists; label
+  // the active context as "local" rather than inventing account support here.
+  // Flag if wrong.
+  const accountLabel = "local";
   const activeLabel = turnActive
     ? (runningTool && toolStartRef.current
         ? truncateMiddle(formatActiveToolLine(spinner, runningTool, Date.now() - toolStartRef.current.startMs), streamWidth)
@@ -298,12 +304,10 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
       <HeaderBar
         width={layout.columns}
         workspace={workspace}
-        mode={mode}
         modelId={modelId}
-        connection={streamStatus}
-        activeRunId={visibleActiveRunId}
+        accountLabel={accountLabel}
+        chromeState={chromeState}
         queuedPrompts={queuedPrompts.length}
-        spinner={spinner}
         theme={theme}
       />
       <Box flexDirection="column" height={layout.scrollHeight} borderStyle="round" {...border(scrollOffset > 0 ? theme.accent : theme.border)} paddingX={1} {...bg(theme.panel)}>
@@ -505,4 +509,12 @@ function cliAgentFromSummary(agent: Pick<AgentSummary, "id" | "name" | "modelId"
     modelId: agent.modelId,
     executionMode: agent.executionMode === "ask" ? "ask" : "agent",
   };
+}
+
+function deriveChromeState(input: { streamStatus: StreamConnectionStatus; turnActive: boolean; toolRunning: boolean; lastItemType?: StreamItem["type"] | undefined }): ChromeState {
+  if (input.streamStatus === "disconnected") return "disconnected";
+  if (!input.turnActive && input.lastItemType === "error") return "error";
+  if (input.toolRunning) return "tool-running";
+  if (input.turnActive) return "streaming";
+  return "ready";
 }
