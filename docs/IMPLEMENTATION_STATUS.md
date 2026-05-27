@@ -4364,3 +4364,20 @@ Finished the remaining CLI visual identity refinements on the current dirty tree
 ### Follow-up
 
 The wider checkout still contains unrelated dirty counter/server/web/shared work from before this visual pass. Stage only the intended CLI visual identity files if committing this pass separately.
+
+## 2026-05-27 — Review debate merge-comment hook
+
+Added a small repo script to standardize review debate handoff comments and guarantee Codex gets tagged in the final handoff line.
+
+### Files modified
+
+- `scripts/review-debate-hook.mjs` — new helper that emits a markdown merge comment with reviewer position, Codex position, and `<@U0B6G38BPNV>` handoff.
+- `package.json` — adds `review:debate:hook` script entry.
+
+### Verification
+
+- `node scripts/review-debate-hook.mjs --reviewer "Looks good" --codex "Consider edge cases"` — pass.
+
+### Next
+
+Continue with the active phase prompt; this utility is non-invasive and does not alter runtime behavior.
