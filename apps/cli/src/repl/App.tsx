@@ -11,7 +11,7 @@ import { computeTuiLayout, countInputLines, MAX_INPUT_VISIBLE_LINES } from "./la
 import { MentionPopup, flattenMentionResults, MAX_MENTION_ITEMS, moveMentionSelection } from "./MentionPopup.js";
 import { filterSlashCommands, SlashPalette } from "./SlashPalette.js";
 import { clampStreamScrollOffset, createStreamBuffer, ingestStreamFrame, StreamView, type StreamBuffer, type StreamItem } from "./StreamView.js";
-import { StatusBar } from "./StatusBar.js";
+import { StatusBar, type LiveTurnUsage } from "./StatusBar.js";
 import { formatActiveToolLine } from "./ToolCallLine.js";
 import { createTuiTheme, bg, border, fg, truncateMiddle, MIN_COLUMNS, MIN_ROWS } from "./theme.js";
 import { useSpinnerFrame } from "./useSpinnerFrame.js";
@@ -63,6 +63,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
   const [queuedPrompts, setQueuedPrompts] = useState<PromptRequest[]>([]);
   const [streamStatus, setStreamStatus] = useState<StreamConnectionStatus>("ready");
   const [sessionCostMicros, setSessionCostMicros] = useState(0);
+  const [turnUsage, setTurnUsage] = useState<LiveTurnUsage | null>(null);
   const [pendingApproval, setPendingApproval] = useState<{ runId: string; requestId: string } | null>(null);
   const [history] = useState(() => new PromptHistory(historyEntries));
   const queueRef = useRef<PromptRequest[]>([]);
@@ -209,6 +210,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         toolStartRef.current = null;
         setActiveRunId(null);
         setAgentTurnActive(false);
+        setTurnUsage(null);
         setPendingApproval(null);
         setStreamStatus("ready");
         const next = queueRef.current[0];
@@ -221,6 +223,9 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
       setIsStartingRun(false);
       setActiveRunId(run.runId);
       setAgentTurnActive(true);
+      // ASSUMPTION: live usage is unavailable until the server protocol emits
+      // token/cost deltas before run.final_result. Flag if wrong.
+      setTurnUsage({ status: "unavailable" });
       setStreamStatus("connected");
       const subscription = stream.subscribeToRun(run.runId, (frame: ServerFrame) => {
         trackToolStart(frame, toolStartRef);
@@ -243,6 +248,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         setIsStartingRun(false);
         setActiveRunId(null);
         setAgentTurnActive(false);
+        setTurnUsage(null);
         setPendingApproval(null);
         setStreamStatus("disconnected");
         appendError(error instanceof Error ? error.message : String(error));
@@ -257,6 +263,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
       setIsStartingRun(false);
       setActiveRunId(null);
       setAgentTurnActive(false);
+      setTurnUsage(null);
       setStreamStatus("disconnected");
       appendError(error instanceof Error ? error.message : String(error));
     });
@@ -346,6 +353,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         modelId={modelId}
         mode={mode}
         sessionCostMicros={sessionCostMicros}
+        turnUsage={turnActive ? turnUsage : null}
         connection={streamStatus}
         queuedPrompts={queuedPrompts.length}
         activeRunId={visibleActiveRunId}

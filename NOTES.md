@@ -60,6 +60,13 @@ deliberately **not** fixed in this tier. Tier numbers refer to the 3-tier plan
   labels the current single-user context as `local`. Add a real account/profile
   field only as part of a multi-account design, not as a chrome-only patch.
 
+- **Live token/cost deltas are not exposed by the stream.** `sdk.assistant`,
+  `sdk.status`, and tool frames do not carry token or cost deltas; usage arrives
+  only on `run.final_result`. The CLI status bar surfaces this as live usage
+  unavailable instead of estimating from character count. To get a real live
+  counter, add backend instrumentation that persists/broadcasts turn usage
+  deltas, or explicitly approve an estimated heuristic with an `est` label.
+
 ## From the /review-2 pass (2026-05-27) — deferred suggestions
 
 - **S5 — parallel running tools lose overlay attribution.** `toolStartRef`
