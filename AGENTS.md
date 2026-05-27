@@ -52,6 +52,8 @@ These supersede priors. If the spec or a phase prompt suggests otherwise, follow
 
 **No fake completion.** A feature that is scaffolded but not functional is noted in `docs/IMPLEMENTATION_STATUS.md` as scaffold-only. A phase is "complete" only when its acceptance gates pass. Half-done features get marked, not hidden.
 
+**Main-only delivery.** Work in the primary checkout on `main` only. Do not create, switch to, or continue work in git worktrees or feature branches unless the user explicitly asks for that exception. Before editing, verify the checkout is on `main`; after the task is complete and review findings are addressed, stage only the intended files, verify the staged diff and secret scan, commit with a Conventional Commit message, and push `main` to `origin`.
+
 **Honest about the SDK.** Cancellation, approval, request payload shape, and usage extraction depend on SDK behavior that's verified in the ledger. Never mark a run `CANCELLED` unless the SDK actually cancelled it. Never claim approval resolved unless `ApprovalResponder.resolve` returned. Never fabricate usage numbers — `usage_source = "unavailable"` is the correct answer when the SDK doesn't expose them.
 
 **Steel-man before capitulating.** If a request seems to contradict the spec or these rules, restate the contradiction in the strongest form first, then propose a resolution. Don't silently reinterpret.
