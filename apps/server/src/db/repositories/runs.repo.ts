@@ -105,6 +105,9 @@ export interface UsageSummaryAggregate {
   totalCost: number;
   totalTokens: number;
   unavailableCount: number;
+  costUnavailableCount: number;
+  tokenUnavailableCount: number;
+  cacheUnavailableCount: number;
   totalInputTokens: number;
   totalOutputTokens: number;
   totalCachedInputTokens: number;
@@ -117,6 +120,8 @@ export interface UsageDailyAggregate {
   date: string;
   cost: number;
   tokens: number;
+  costUnavailableCount: number;
+  tokenUnavailableCount: number;
 }
 
 export interface UsageBreakdownAggregate {
@@ -125,6 +130,8 @@ export interface UsageBreakdownAggregate {
   runs: number;
   cost: number;
   tokens: number;
+  costUnavailableCount: number;
+  tokenUnavailableCount: number;
 }
 
 export interface SubagentRunListItem {
@@ -134,6 +141,7 @@ export interface SubagentRunListItem {
   startedAt: string;
   completedAt: string | null;
   tokenCount: number;
+  tokenCountPartial: boolean;
   costMicros: number | null;
 }
 
@@ -187,6 +195,18 @@ function rowToUsageTokens(row: {
   return rowNumber(row.total_input) + rowNumber(row.total_output);
 }
 
+function costUnavailableSql(alias = "r"): string {
+  return `CASE WHEN ${alias}.usage_source IS NULL OR ${alias}.usage_source = 'unavailable' OR ${alias}.cost_usd_micros IS NULL THEN 1 ELSE 0 END`;
+}
+
+function tokenUnavailableSql(alias = "r"): string {
+  return `CASE WHEN ${alias}.usage_source IS NULL OR ${alias}.usage_source = 'unavailable' OR ${alias}.input_tokens IS NULL OR ${alias}.output_tokens IS NULL THEN 1 ELSE 0 END`;
+}
+
+function cacheUnavailableSql(alias = "r"): string {
+  return `CASE WHEN ${alias}.usage_source IS NULL OR ${alias}.usage_source = 'unavailable' OR ${alias}.input_tokens IS NULL OR ${alias}.cached_input_tokens IS NULL THEN 1 ELSE 0 END`;
+}
+
 function orderByForRunHistory(sort: NonNullable<RunHistoryListOptions["sort"]>, alias = "r"): string {
   switch (sort) {
     case "started_asc":
@@ -230,7 +250,7 @@ function buildRunHistoryWhere(opts: RunHistoryListOptions): { clause: string; pa
   if (opts.hasCost === "available") {
     parts.push("r.cost_usd_micros IS NOT NULL AND r.usage_source != 'unavailable'");
   } else if (opts.hasCost === "unavailable") {
-    parts.push("r.usage_source = 'unavailable'");
+    parts.push("(r.usage_source = 'unavailable' OR (r.cost_usd_micros IS NULL AND r.usage_source IS NOT NULL))");
   } else if (opts.hasCost === "none") {
     parts.push("r.cost_usd_micros IS NULL AND r.usage_source IS NULL");
   }
@@ -410,6 +430,7 @@ export class RunsRepo {
       startedAt: row.started_at,
       completedAt: row.finished_at,
       tokenCount: rowNumber(row.input_tokens) + rowNumber(row.output_tokens),
+      tokenCountPartial: row.usage_source === null || row.usage_source === "unavailable" || row.input_tokens === null || row.output_tokens === null,
       costMicros: row.cost_usd_micros,
     }));
   }
@@ -501,7 +522,10 @@ export class RunsRepo {
                 COALESCE(SUM(output_tokens), 0) AS total_output,
                 COALESCE(SUM(cached_input_tokens), 0) AS total_cached,
                 COALESCE(SUM(reasoning_tokens), 0) AS total_reasoning,
-                SUM(CASE WHEN usage_source = 'unavailable' THEN 1 ELSE 0 END) AS unavailable_count
+                SUM(CASE WHEN usage_source = 'unavailable' THEN 1 ELSE 0 END) AS unavailable_count,
+                SUM(${costUnavailableSql()}) AS cost_unavailable_count,
+                SUM(${tokenUnavailableSql()}) AS token_unavailable_count,
+                SUM(${cacheUnavailableSql()}) AS cache_unavailable_count
            FROM runs r
           ${where.clause}`,
       )
@@ -513,6 +537,9 @@ export class RunsRepo {
       total_cached: number | null;
       total_reasoning: number | null;
       unavailable_count: number | null;
+      cost_unavailable_count: number | null;
+      token_unavailable_count: number | null;
+      cache_unavailable_count: number | null;
     };
     const sourceRows = this.raw
       .prepare(
@@ -535,6 +562,9 @@ export class RunsRepo {
       totalCost: rowNumber(row.total_cost),
       totalTokens: rowToUsageTokens(row),
       unavailableCount: rowNumber(row.unavailable_count),
+      costUnavailableCount: rowNumber(row.cost_unavailable_count),
+      tokenUnavailableCount: rowNumber(row.token_unavailable_count),
+      cacheUnavailableCount: rowNumber(row.cache_unavailable_count),
       totalInputTokens: rowNumber(row.total_input),
       totalOutputTokens: rowNumber(row.total_output),
       totalCachedInputTokens: rowNumber(row.total_cached),
@@ -553,7 +583,9 @@ export class RunsRepo {
                 COALESCE(SUM(r.input_tokens), 0) AS total_input,
                 COALESCE(SUM(r.output_tokens), 0) AS total_output,
                 COALESCE(SUM(r.cached_input_tokens), 0) AS total_cached,
-                COALESCE(SUM(r.reasoning_tokens), 0) AS total_reasoning
+                COALESCE(SUM(r.reasoning_tokens), 0) AS total_reasoning,
+                SUM(${costUnavailableSql()}) AS cost_unavailable_count,
+                SUM(${tokenUnavailableSql()}) AS token_unavailable_count
            FROM runs r
           ${where.clause}
           GROUP BY substr(r.started_at, 1, 10)
@@ -566,11 +598,15 @@ export class RunsRepo {
       total_output: number | null;
       total_cached: number | null;
       total_reasoning: number | null;
+      cost_unavailable_count: number | null;
+      token_unavailable_count: number | null;
     }>;
     return rows.map((row) => ({
       date: row.day,
       cost: rowNumber(row.total_cost),
       tokens: rowToUsageTokens(row),
+      costUnavailableCount: rowNumber(row.cost_unavailable_count),
+      tokenUnavailableCount: rowNumber(row.token_unavailable_count),
     }));
   }
 
@@ -585,7 +621,9 @@ export class RunsRepo {
                 COALESCE(SUM(r.input_tokens), 0) AS total_input,
                 COALESCE(SUM(r.output_tokens), 0) AS total_output,
                 COALESCE(SUM(r.cached_input_tokens), 0) AS total_cached,
-                COALESCE(SUM(r.reasoning_tokens), 0) AS total_reasoning
+                COALESCE(SUM(r.reasoning_tokens), 0) AS total_reasoning,
+                SUM(${costUnavailableSql()}) AS cost_unavailable_count,
+                SUM(${tokenUnavailableSql()}) AS token_unavailable_count
            FROM runs r
           ${where.clause}
           GROUP BY COALESCE(r.model_id, 'unknown')
@@ -600,6 +638,8 @@ export class RunsRepo {
       total_output: number | null;
       total_cached: number | null;
       total_reasoning: number | null;
+      cost_unavailable_count: number | null;
+      token_unavailable_count: number | null;
     }>;
     return rows.map((row) => ({
       id: row.id,
@@ -607,6 +647,8 @@ export class RunsRepo {
       runs: rowNumber(row.runs),
       cost: rowNumber(row.total_cost),
       tokens: rowToUsageTokens(row),
+      costUnavailableCount: rowNumber(row.cost_unavailable_count),
+      tokenUnavailableCount: rowNumber(row.token_unavailable_count),
     }));
   }
 
@@ -621,7 +663,9 @@ export class RunsRepo {
                 COALESCE(SUM(r.input_tokens), 0) AS total_input,
                 COALESCE(SUM(r.output_tokens), 0) AS total_output,
                 COALESCE(SUM(r.cached_input_tokens), 0) AS total_cached,
-                COALESCE(SUM(r.reasoning_tokens), 0) AS total_reasoning
+                COALESCE(SUM(r.reasoning_tokens), 0) AS total_reasoning,
+                SUM(${costUnavailableSql()}) AS cost_unavailable_count,
+                SUM(${tokenUnavailableSql()}) AS token_unavailable_count
            FROM runs r
            LEFT JOIN agents a ON a.id = r.agent_id
           ${where.clause}
@@ -637,6 +681,8 @@ export class RunsRepo {
       total_output: number | null;
       total_cached: number | null;
       total_reasoning: number | null;
+      cost_unavailable_count: number | null;
+      token_unavailable_count: number | null;
     }>;
     return rows.map((row) => ({
       id: row.id,
@@ -644,6 +690,8 @@ export class RunsRepo {
       runs: rowNumber(row.runs),
       cost: rowNumber(row.total_cost),
       tokens: rowToUsageTokens(row),
+      costUnavailableCount: rowNumber(row.cost_unavailable_count),
+      tokenUnavailableCount: rowNumber(row.token_unavailable_count),
     }));
   }
 

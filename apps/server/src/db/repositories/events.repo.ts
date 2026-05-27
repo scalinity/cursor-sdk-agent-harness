@@ -420,6 +420,39 @@ export class EventsRepo {
     return rows.map(rowToDomain);
   }
 
+  getReplayByRunIdRange(
+    runId: string,
+    options: { fromSeq?: number; toSeq?: number; limit?: number; direction?: "asc" | "desc" } = {},
+  ): EventRow[] {
+    const fromSeq = options.fromSeq ?? 0;
+    const toSeq = options.toSeq ?? Number.MAX_SAFE_INTEGER;
+    const limit = options.limit ?? 500;
+    const direction = options.direction === "desc" ? "DESC" : "ASC";
+    const rows = this.raw
+      .prepare(
+        `SELECT *,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.call_id') END AS replay_call_id,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.name') END AS replay_name,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.status') END AS replay_status,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.truncated') END AS replay_truncated_json,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.timing') END AS replay_timing_json,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold AND json_type(payload_json, '$.args') IS NOT NULL THEN 1 ELSE 0 END AS replay_has_args,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold AND json_type(payload_json, '$.result') IS NOT NULL THEN 1 ELSE 0 END AS replay_has_result
+           FROM events
+          WHERE run_id = @runId AND seq >= @fromSeq AND seq <= @toSeq
+          ORDER BY seq ${direction}
+          LIMIT @limit`,
+      )
+      .all({
+        runId,
+        fromSeq,
+        toSeq,
+        limit,
+        threshold: LARGE_PAYLOAD_THRESHOLD_BYTES,
+      }) as ReplayEventDbRow[];
+    return rows.map(rowToReplayDomain);
+  }
+
   canonicalEventBaseFor(row: EventRow): CanonicalEventBase {
     return {
       event_id: row.id,

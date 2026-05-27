@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import type { Database as BetterSqlite3Database } from "better-sqlite3";
 import {
+  LARGE_PAYLOAD_THRESHOLD_BYTES,
   getRunEventsResponseSchema,
   listRunsResponseSchema,
   transcriptResponseSchema,
@@ -212,6 +213,64 @@ describe("Phase 11 run history, replay events, and transcript routes", () => {
     db.close();
   });
 
+  it("slims large tool-call payloads in REST replay event frames", async () => {
+    const db = openTestDb({ skipSeed: true });
+    const repos = createRepositories(db.raw);
+    const agent = createAgent(repos, "Large Replay Agent");
+    const runId = createRunFixture(db.raw, repos, {
+      agentId: agent.id,
+      status: "FINISHED",
+      promptPreview: "Replay a large event",
+      modelId: "composer-2-5-fast",
+      startedAt: iso(11),
+      durationMs: 1000,
+      inputTokens: null,
+      outputTokens: null,
+      cachedInputTokens: null,
+      costUsdMicros: null,
+      usageSource: "unavailable",
+    });
+    const largeValue = "x".repeat(LARGE_PAYLOAD_THRESHOLD_BYTES + 1);
+    repos.events.appendCanonicalEvent({
+      runId,
+      agentId: agent.id,
+      sdkType: "tool_call",
+      kind: "tool_call.completed",
+      payload: {
+        call_id: "call-large",
+        name: "read_big_file",
+        status: "completed",
+        args: { path: largeValue },
+        result: { content: largeValue },
+      },
+      raw: { result: largeValue },
+      occurredAt: iso(11),
+    });
+
+    const app = await buildRunsApp(repos);
+    const res = await app.inject({ method: "GET", url: `/api/runs/${runId}/events?limit=10` });
+
+    expect(res.statusCode).toBe(200);
+    const body = getRunEventsResponseSchema.parse(res.json());
+    const eventFrame = body.items.find(
+      (frame): frame is Extract<typeof frame, { event: unknown }> => "event" in frame,
+    );
+    expect(eventFrame?.event.payload).toMatchObject({
+      call_id: "call-large",
+      name: "read_big_file",
+      status: "completed",
+      large_payload_refs: {
+        args_event_url: expect.stringContaining("/large-payload/args"),
+        result_event_url: expect.stringContaining("/large-payload/result"),
+        raw_event_url: expect.stringContaining("/large-payload/raw"),
+      },
+    });
+    expect(JSON.stringify(eventFrame?.event.payload)).not.toContain(largeValue);
+
+    await app.close();
+    db.close();
+  });
+
   it("exports transcript JSON and markdown from canonical events", async () => {
     const db = openTestDb({ skipSeed: true });
     const repos = createRepositories(db.raw);
@@ -291,6 +350,48 @@ describe("Phase 11 run history, replay events, and transcript routes", () => {
     await app.close();
     db.close();
   });
+
+  it("includes partial-cost rows in the hasCost=unavailable history filter", async () => {
+    const db = openTestDb({ skipSeed: true });
+    const repos = createRepositories(db.raw);
+    const agent = createAgent(repos, "History Agent");
+    createRunFixture(db.raw, repos, {
+      agentId: agent.id,
+      status: "FINISHED",
+      promptPreview: "Exact cost",
+      modelId: "composer-2-5-fast",
+      startedAt: iso(7),
+      durationMs: 1000,
+      inputTokens: 10,
+      outputTokens: 5,
+      cachedInputTokens: 0,
+      costUsdMicros: 123,
+      usageSource: "sdk_final_result",
+    });
+    const partialRunId = createRunFixture(db.raw, repos, {
+      agentId: agent.id,
+      status: "FINISHED",
+      promptPreview: "Partial cost",
+      modelId: "composer-2-5-fast",
+      startedAt: iso(8),
+      durationMs: 1000,
+      inputTokens: 10,
+      outputTokens: null,
+      cachedInputTokens: 0,
+      costUsdMicros: null,
+      usageSource: "sdk_final_result",
+    });
+
+    const app = await buildRunsApp(repos);
+    const res = await app.inject({ method: "GET", url: "/api/runs?hasCost=unavailable" });
+
+    expect(res.statusCode).toBe(200);
+    const body = listRunsResponseSchema.parse(res.json());
+    expect(body.items.map((run) => run.id)).toEqual([partialRunId]);
+
+    await app.close();
+    db.close();
+  });
 });
 
 describe("Phase 11 usage routes", () => {
@@ -324,6 +425,19 @@ describe("Phase 11 usage routes", () => {
       costUsdMicros: null,
       usageSource: "unavailable",
     });
+    createRunFixture(db.raw, repos, {
+      agentId: agent.id,
+      status: "FINISHED",
+      promptPreview: "Partial",
+      modelId: "composer-2-5-fast",
+      startedAt: iso(10),
+      durationMs: 1000,
+      inputTokens: 50,
+      outputTokens: null,
+      cachedInputTokens: 0,
+      costUsdMicros: null,
+      usageSource: "sdk_final_result",
+    });
 
     const app = Fastify({ logger: false });
     await registerUsageRoutes(app, { runsRepo: repos.runs, settingsRepo: repos.settings });
@@ -333,27 +447,30 @@ describe("Phase 11 usage routes", () => {
       (await app.inject({ method: "GET", url: `/api/usage/summary?${query}` })).json(),
     );
     expect(summary).toMatchObject({
-      totalRuns: 2,
+      totalRuns: 3,
       totalCost: 4567,
-      totalTokens: 300,
+      totalTokens: 350,
       unavailableCount: 1,
+      costUnavailableCount: 2,
+      tokenUnavailableCount: 2,
+      cacheUnavailableCount: 1,
     });
     expect(summary.pricingFreshness.staleness).toBe("fresh");
 
     const daily = usageDailyResponseSchema.parse(
       (await app.inject({ method: "GET", url: `/api/usage/daily?${query}` })).json(),
     );
-    expect(daily).toEqual([{ date: "2026-05-20", cost: 4567, tokens: 300 }]);
+    expect(daily).toEqual([{ date: "2026-05-20", cost: 4567, tokens: 350, costUnavailableCount: 2, tokenUnavailableCount: 2 }]);
 
     const byModel = usageBreakdownResponseSchema.parse(
       (await app.inject({ method: "GET", url: `/api/usage/by-model?${query}` })).json(),
     );
-    expect(byModel.items[0]).toMatchObject({ name: "composer-2-5-fast", runs: 2, cost: 4567, tokens: 300 });
+    expect(byModel.items[0]).toMatchObject({ name: "composer-2-5-fast", runs: 3, cost: 4567, tokens: 350, costUnavailableCount: 2, tokenUnavailableCount: 2 });
 
     const byAgent = usageBreakdownResponseSchema.parse(
       (await app.inject({ method: "GET", url: `/api/usage/by-agent?${query}` })).json(),
     );
-    expect(byAgent.items[0]).toMatchObject({ id: agent.id, name: "Usage Agent", runs: 2, cost: 4567, tokens: 300 });
+    expect(byAgent.items[0]).toMatchObject({ id: agent.id, name: "Usage Agent", runs: 3, cost: 4567, tokens: 350, costUnavailableCount: 2, tokenUnavailableCount: 2 });
 
     await app.close();
     db.close();

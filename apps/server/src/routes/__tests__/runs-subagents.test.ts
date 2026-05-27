@@ -163,6 +163,7 @@ describe("GET /api/runs/:runId/subagents", () => {
     expect(parsed.activeCount).toBe(1);
     expect(parsed.completedCount).toBe(1);
     expect(parsed.totalTokens).toBe(165);
+    expect(parsed.totalTokensPartial).toBe(true);
     expect(parsed.totalCostMicros).toBeNull();
     expect(parsed.subagents).toEqual([
       expect.objectContaining({
@@ -171,6 +172,7 @@ describe("GET /api/runs/:runId/subagents", () => {
         status: "RUNNING",
         completedAt: null,
         tokenCount: 0,
+        tokenCountPartial: true,
         costMicros: null,
       }),
       expect.objectContaining({
@@ -178,6 +180,7 @@ describe("GET /api/runs/:runId/subagents", () => {
         name: "Reviewer B",
         status: "FINISHED",
         tokenCount: 165,
+        tokenCountPartial: false,
         costMicros: 900,
         lastEvents: [
           {

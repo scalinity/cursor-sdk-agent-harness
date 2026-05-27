@@ -277,6 +277,7 @@ export async function registerRunsRoutes(
       const activeCount = subagents.filter((subagent) => isActiveSubagentStatus(subagent.status)).length;
       const completedCount = subagents.length - activeCount;
       const totalTokens = subagents.reduce((sum, subagent) => sum + subagent.tokenCount, 0);
+      const totalTokensPartial = subagents.some((subagent) => subagent.tokenCountPartial);
       const totalCostMicros = subagents.length > 0 && subagents.every((subagent) => subagent.costMicros !== null)
         ? subagents.reduce((sum, subagent) => sum + (subagent.costMicros ?? 0), 0)
         : null;
@@ -288,6 +289,7 @@ export async function registerRunsRoutes(
         activeCount,
         completedCount,
         totalTokens,
+        totalTokensPartial,
         totalCostMicros,
       });
     },
@@ -318,7 +320,7 @@ export async function registerRunsRoutes(
       if (!run) return reply.code(404).send({ code: "RUN_NOT_FOUND" });
       const parsed = getRunEventsQuerySchema.safeParse(req.query);
       if (!parsed.success) return send422(reply, parsed.error);
-      const rows = deps.eventsRepo.getByRunIdRange(req.params.runId, {
+      const rows = deps.eventsRepo.getReplayByRunIdRange(req.params.runId, {
         fromSeq: parsed.data.after_seq + 1,
         limit: parsed.data.limit,
         direction: parsed.data.direction,

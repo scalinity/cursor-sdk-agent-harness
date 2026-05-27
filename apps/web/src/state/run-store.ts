@@ -317,6 +317,27 @@ function statusFromInterruptedReason(reason: string): SdkRunStatus | null {
   return null;
 }
 
+function usageFromRunSummary(summary: RunSummary): TokenUsage | null {
+  if (
+    summary.inputTokens === null &&
+    summary.outputTokens === null &&
+    summary.cachedInputTokens === null &&
+    summary.reasoningTokens === null &&
+    summary.costUsdMicros === null &&
+    summary.usageSource === null
+  ) {
+    return null;
+  }
+  return {
+    input_tokens: summary.inputTokens,
+    output_tokens: summary.outputTokens,
+    cached_input_tokens: summary.cachedInputTokens,
+    reasoning_tokens: summary.reasoningTokens,
+    cost_usd_micros: summary.costUsdMicros,
+    usage_source: summary.usageSource ?? "unavailable",
+  };
+}
+
 export const useRunStore = create<RunState>((set) => ({
   byId: {},
   eventsByRunId: {},
@@ -572,17 +593,7 @@ export const useRunStore = create<RunState>((set) => ({
         finalText: existing?.finalText ?? null,
         interruptedReason: existing?.interruptedReason ?? null,
         durationMs: summary.durationMs,
-        usage:
-          summary.inputTokens !== null
-            ? {
-                input_tokens: summary.inputTokens,
-                output_tokens: summary.outputTokens,
-                cached_input_tokens: summary.cachedInputTokens,
-                reasoning_tokens: summary.reasoningTokens,
-                cost_usd_micros: summary.costUsdMicros,
-                usage_source: summary.usageSource ?? "unavailable",
-              }
-            : null,
+        usage: usageFromRunSummary(summary),
         usageSource: summary.usageSource,
         modelId: summary.modelId,
         lastTurnInputTokens: summary.lastTurnInputTokens,

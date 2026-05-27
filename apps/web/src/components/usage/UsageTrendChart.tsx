@@ -3,6 +3,7 @@ import { formatMicros } from "../../lib/format.js";
 
 export function UsageTrendChart({ points }: { points: UsageDailyPoint[] }) {
   const maxCost = Math.max(1, ...points.map((point) => point.cost));
+  const hasPartialCost = points.some((point) => point.costUnavailableCount > 0);
   if (points.length === 0) {
     return <div className="border border-border-subtle bg-surface-1 p-4 text-sm text-text-tertiary">No usage recorded yet.</div>;
   }
@@ -10,7 +11,7 @@ export function UsageTrendChart({ points }: { points: UsageDailyPoint[] }) {
     <div className="border border-border-subtle bg-surface-1 p-3">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-md font-semibold">Daily cost</h2>
-        <span className="mono text-xs text-text-tertiary">{formatMicros(maxCost)} peak</span>
+        <span className="mono text-xs text-text-tertiary">{hasPartialCost ? "partial " : ""}{formatMicros(maxCost)} peak</span>
       </div>
       <svg className="h-40 w-full" role="img" aria-label="Daily cost trend" viewBox="0 0 720 160" preserveAspectRatio="none">
         {points.map((point, index) => {

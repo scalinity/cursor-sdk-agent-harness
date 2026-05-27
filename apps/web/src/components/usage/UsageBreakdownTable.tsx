@@ -2,6 +2,10 @@ import { useState } from "react";
 import type { UsageBreakdownRow } from "@harness/shared";
 import { formatMicros, formatTokens } from "../../lib/format.js";
 
+function partialLabel(value: string, unavailableCount: number): string {
+  return unavailableCount > 0 ? `partial ${value}` : value;
+}
+
 export function UsageBreakdownTable({
   byModel,
   byAgent,
@@ -49,10 +53,10 @@ export function UsageBreakdownTable({
               <tr key={row.id} className="border-t border-border-subtle">
                 <td className="p-2 text-text-primary">{row.name}</td>
                 <td className="mono p-2 text-text-secondary">{formatTokens(row.runs)}</td>
-                <td className="mono p-2 text-text-secondary">{formatTokens(row.tokens)}</td>
-                <td className="mono p-2 text-text-secondary">{formatMicros(row.cost)}</td>
-                <td className="mono p-2 text-text-secondary">{formatMicros(avg)}</td>
-                <td className="mono p-2 text-text-secondary">{share}%</td>
+                <td className="mono p-2 text-text-secondary">{partialLabel(formatTokens(row.tokens), row.tokenUnavailableCount)}</td>
+                <td className="mono p-2 text-text-secondary">{partialLabel(formatMicros(row.cost), row.costUnavailableCount)}</td>
+                <td className="mono p-2 text-text-secondary">{partialLabel(formatMicros(avg), row.costUnavailableCount)}</td>
+                <td className="mono p-2 text-text-secondary">{partialLabel(`${share}%`, row.costUnavailableCount)}</td>
               </tr>
             );
           })}

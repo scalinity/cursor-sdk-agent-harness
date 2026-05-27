@@ -19,8 +19,10 @@ import {
   type McpValidatorOptions,
 } from "../mcp/mcp-validator.js";
 import {
+  collectMcpSecretRefPaths,
   externalizeMcpSecrets,
   hydrateMcpSecrets,
+  type ExternalizedMcpSecrets,
 } from "../mcp/mcp-secret-config.js";
 import type { McpSecretStore } from "../keychain/mcp-secret-store.js";
 
@@ -147,15 +149,39 @@ async function configForStorage(
   config: McpServerRow["config"],
   serverId: string,
   store: McpSecretStore | undefined,
-): Promise<McpServerRow["config"]> {
-  return store ? externalizeMcpSecrets(config, serverId, store) : config;
+): Promise<ExternalizedMcpSecrets> {
+  return store
+    ? externalizeMcpSecrets(config, serverId, store)
+    : { config, wroteSecrets: false };
 }
 
 async function configForUse(
   config: McpServerRow["config"],
+  serverId: string,
   store: McpSecretStore | undefined,
 ): Promise<McpServerRow["config"]> {
-  return store ? hydrateMcpSecrets(config, store) : config;
+  return store ? hydrateMcpSecrets(config, serverId, store) : config;
+}
+
+function pathKey(path: readonly string[]): string {
+  return JSON.stringify(path);
+}
+
+async function deleteStaleSecretPaths(
+  store: McpSecretStore | undefined,
+  serverId: string,
+  previousConfig: McpServerRow["config"],
+  nextConfig: McpServerRow["config"],
+): Promise<void> {
+  if (!store) return;
+  const nextPaths = new Set(
+    collectMcpSecretRefPaths(nextConfig, serverId).map((path) => pathKey(path)),
+  );
+  await Promise.all(
+    collectMcpSecretRefPaths(previousConfig, serverId)
+      .filter((path) => !nextPaths.has(pathKey(path)))
+      .map((path) => store.delete(serverId, path)),
+  );
 }
 
 export async function registerMcpServersRoutes(
@@ -225,14 +251,14 @@ export async function registerMcpServersRoutes(
       });
     }
     const id = randomUUID();
-    const storedConfig = await configForStorage(parsed.data.config, id, deps.mcpSecretStore);
+    const storageResult = await configForStorage(parsed.data.config, id, deps.mcpSecretStore);
     const row = deps.mcpServers.create({
       id,
       name: parsed.data.name,
       enabled: parsed.data.enabled,
-      config: storedConfig,
+      config: storageResult.config,
     });
-    const probeConfig = await configForUse(storedConfig, deps.mcpSecretStore);
+    const probeConfig = await configForUse(row.config, row.id, deps.mcpSecretStore);
     const probe = await runProbe(validate, probeConfig, probeOptions);
     const outcome = probeOutcomeFromResult(probe);
     const updated = deps.mcpServers.update(row.id, {
@@ -269,17 +295,18 @@ export async function registerMcpServersRoutes(
           message: `An MCP server named "${parsed.data.name}" already exists.`,
         });
       }
-      const configForStorageResult = await configForStorage(
+      const storageResult = await configForStorage(
         parsed.data.config,
         req.params.id,
         deps.mcpSecretStore,
       );
       const configChanged =
-        JSON.stringify(configForStorageResult) !== JSON.stringify(existing.config);
+        storageResult.wroteSecrets ||
+        JSON.stringify(storageResult.config) !== JSON.stringify(existing.config);
       const baseUpdate = {
         name: parsed.data.name,
         enabled: parsed.data.enabled,
-        config: configForStorageResult,
+        config: storageResult.config,
       };
       if (!configChanged) {
         const row = deps.mcpServers.update(req.params.id, baseUpdate);
@@ -303,7 +330,11 @@ export async function registerMcpServersRoutes(
           validationStatus: "unknown",
           validationMessage: null,
         });
-        const probeConfig = await configForUse(configForStorageResult, deps.mcpSecretStore);
+        const probeConfig = await configForUse(
+          storageResult.config,
+          req.params.id,
+          deps.mcpSecretStore,
+        );
         const probe = await runProbe(validate, probeConfig, probeOptions);
         const outcome = probeOutcomeFromResult(probe);
         const row = deps.mcpServers.update(req.params.id, {
@@ -312,6 +343,12 @@ export async function registerMcpServersRoutes(
           lastStatus: outcome.lastStatus,
           lastCheckedAt: new Date().toISOString(),
         });
+        await deleteStaleSecretPaths(
+          deps.mcpSecretStore,
+          req.params.id,
+          existing.config,
+          row.config,
+        );
         return mcpServerSummarySchema.parse(toSummary(row));
       } finally {
         probeInFlight.delete(req.params.id);
@@ -391,7 +428,11 @@ export async function registerMcpServersRoutes(
           validationStatus: "unknown",
           validationMessage: null,
         });
-        const probeConfig = await configForUse(existing.config, deps.mcpSecretStore);
+        const probeConfig = await configForUse(
+          existing.config,
+          existing.id,
+          deps.mcpSecretStore,
+        );
         const probe = await runProbe(validate, probeConfig, probeOptions);
         const outcome = probeOutcomeFromResult(probe);
         const row = deps.mcpServers.update(req.params.id, {
@@ -442,7 +483,7 @@ export async function registerMcpServersRoutes(
       return mcpServerRevealResponseSchema.parse({
         id: row.id,
         name: row.name,
-        config: await configForUse(row.config, deps.mcpSecretStore),
+        config: await configForUse(row.config, row.id, deps.mcpSecretStore),
       });
     },
   );

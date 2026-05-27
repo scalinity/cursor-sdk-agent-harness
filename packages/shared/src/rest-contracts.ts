@@ -244,6 +244,7 @@ export const subagentListItemSchema = z.object({
   startedAt: isoDateTimeSchema,
   completedAt: isoDateTimeSchema.nullable(),
   tokenCount: z.number().int().nonnegative(),
+  tokenCountPartial: z.boolean(),
   costMicros: z.number().int().nonnegative().nullable(),
   lastEvents: z.array(z.object({
     seq: z.number().int().nonnegative().optional(),
@@ -259,6 +260,7 @@ export const subagentListResponseSchema = z.object({
   activeCount: z.number().int().nonnegative(),
   completedCount: z.number().int().nonnegative(),
   totalTokens: z.number().int().nonnegative(),
+  totalTokensPartial: z.boolean(),
   totalCostMicros: z.number().int().nonnegative().nullable(),
 });
 export type SubagentListResponse = z.infer<typeof subagentListResponseSchema>;
@@ -442,6 +444,9 @@ export const usageSummaryResponseSchema = z.object({
   totalCost: z.number().int().nonnegative(),
   totalTokens: z.number().int().nonnegative(),
   unavailableCount: z.number().int().nonnegative(),
+  costUnavailableCount: z.number().int().nonnegative(),
+  tokenUnavailableCount: z.number().int().nonnegative(),
+  cacheUnavailableCount: z.number().int().nonnegative(),
   totalInputTokens: z.number().int().nonnegative(),
   totalOutputTokens: z.number().int().nonnegative(),
   totalCachedInputTokens: z.number().int().nonnegative(),
@@ -456,6 +461,8 @@ export const usageDailyPointSchema = z.object({
   date: z.string(),
   cost: z.number().int().nonnegative(),
   tokens: z.number().int().nonnegative(),
+  costUnavailableCount: z.number().int().nonnegative(),
+  tokenUnavailableCount: z.number().int().nonnegative(),
 });
 export const usageDailyResponseSchema = z.array(usageDailyPointSchema);
 export type UsageDailyPoint = z.infer<typeof usageDailyPointSchema>;
@@ -466,6 +473,8 @@ export const usageBreakdownRowSchema = z.object({
   runs: z.number().int().nonnegative(),
   cost: z.number().int().nonnegative(),
   tokens: z.number().int().nonnegative(),
+  costUnavailableCount: z.number().int().nonnegative(),
+  tokenUnavailableCount: z.number().int().nonnegative(),
 });
 export const usageBreakdownResponseSchema = z.object({
   items: z.array(usageBreakdownRowSchema),

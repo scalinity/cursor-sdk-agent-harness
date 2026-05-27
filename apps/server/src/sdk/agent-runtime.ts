@@ -131,13 +131,18 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
   // See ./live-agents.ts for eviction policy.
   const liveAgents = new LiveAgents({ logger: deps.logger });
 
-  async function listMcpServersForSdk() {
-    const servers = deps.mcpRepo.list();
+  async function listMcpServersForSdk(agent: AgentRow) {
+    const selectedMcpIds = new Set(agent.mcpServerIds);
+    const servers = deps.mcpRepo.list().filter((server) => selectedMcpIds.has(server.id));
     if (!deps.mcpSecretStore) return servers;
     return Promise.all(
       servers.map(async (server) => ({
         ...server,
-        config: await hydrateMcpSecrets(server.config, deps.mcpSecretStore!),
+        config: await hydrateMcpSecrets(
+          server.config,
+          server.id,
+          deps.mcpSecretStore!,
+        ),
       })),
     );
   }
@@ -149,7 +154,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
     const opts = await buildAgentOptions({
       agent: row,
       apiKey,
-      mcpServers: await listMcpServersForSdk(),
+      mcpServers: await listMcpServersForSdk(row),
       subagents: deps.subagentsRepo.list(),
       workspacePolicy: deps.workspacePolicy,
     });
@@ -269,7 +274,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
         options = await buildAgentOptions({
           agent: initialRow,
           apiKey,
-          mcpServers: await listMcpServersForSdk(),
+          mcpServers: await listMcpServersForSdk(initialRow),
           subagents: deps.subagentsRepo.list(),
           workspacePolicy: deps.workspacePolicy,
         });
@@ -605,7 +610,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
         await buildAgentOptions({
           agent: effectiveRow,
           apiKey: await mustApiKey(),
-          mcpServers: await listMcpServersForSdk(),
+          mcpServers: await listMcpServersForSdk(effectiveRow),
           subagents: deps.subagentsRepo.list(),
           workspacePolicy: deps.workspacePolicy,
         });

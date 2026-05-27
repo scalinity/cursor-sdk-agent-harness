@@ -2,22 +2,35 @@ import type { UsageSummary } from "@harness/shared";
 import { formatMicros, formatTokens } from "../../lib/format.js";
 
 function cacheHitRate(summary: UsageSummary): string {
+  if (summary.cacheUnavailableCount > 0 && summary.totalInputTokens === 0) return "unavailable";
   if (summary.totalInputTokens === 0) return "--";
   const pct = (100 * summary.totalCachedInputTokens) / summary.totalInputTokens;
-  return `${pct.toFixed(1)}%`;
+  return `${summary.cacheUnavailableCount > 0 ? "partial " : ""}${pct.toFixed(1)}%`;
 }
 
 function cacheSavings(summary: UsageSummary): string {
   if (summary.totalInputTokens === 0) return "";
   const freshInputTokens = summary.totalInputTokens - summary.totalCachedInputTokens;
-  return `${formatTokens(freshInputTokens)} fresh · ${formatTokens(summary.totalCachedInputTokens)} cached`;
+  return `${summary.cacheUnavailableCount > 0 ? "partial " : ""}${formatTokens(freshInputTokens)} fresh · ${formatTokens(summary.totalCachedInputTokens)} cached`;
+}
+
+function formatPartialTokens(value: number, unavailableCount: number): string {
+  if (unavailableCount === 0) return formatTokens(value);
+  if (value === 0) return "unavailable";
+  return `partial ${formatTokens(value)}`;
+}
+
+function formatPartialMicros(value: number, unavailableCount: number): string {
+  if (unavailableCount === 0) return formatMicros(value);
+  if (value === 0) return "unavailable";
+  return `partial ${formatMicros(value)}`;
 }
 
 export function UsageSummaryCards({ summary }: { summary: UsageSummary | null }) {
   const cards = [
     { label: "Runs", value: summary ? formatTokens(summary.totalRuns) : "--", detail: null },
-    { label: "Cost", value: summary ? formatMicros(summary.totalCost) : "--", detail: null },
-    { label: "Tokens", value: summary ? formatTokens(summary.totalTokens) : "--", detail: null },
+    { label: "Cost", value: summary ? formatPartialMicros(summary.totalCost, summary.costUnavailableCount) : "--", detail: null },
+    { label: "Tokens", value: summary ? formatPartialTokens(summary.totalTokens, summary.tokenUnavailableCount) : "--", detail: null },
     { label: "Cache hit rate", value: summary ? cacheHitRate(summary) : "--", detail: summary ? cacheSavings(summary) : null },
   ];
   return (

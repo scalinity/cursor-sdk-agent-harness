@@ -123,6 +123,39 @@ describe("run-store", () => {
     expect(useRunStore.getState().byId["run-1"]?.status).toBe("FINISHED");
   });
 
+  it("preserves partial usage from run summaries when input tokens are missing", () => {
+    useRunStore.getState().upsertRunSummary({
+      id: "run-partial",
+      agentId: "agent-1",
+      agentName: "Agent",
+      name: null,
+      status: "FINISHED",
+      executionMode: "agent",
+      promptPreview: "partial usage",
+      modelId: "composer-2-5-fast",
+      workspaceId: null,
+      startedAt: "2026-05-23T00:00:00.000Z",
+      finishedAt: "2026-05-23T00:00:01.000Z",
+      durationMs: 1000,
+      inputTokens: null,
+      outputTokens: 42,
+      cachedInputTokens: null,
+      reasoningTokens: null,
+      costUsdMicros: null,
+      usageSource: "sdk_final_result",
+      lastTurnInputTokens: null,
+      lastTurnOutputTokens: 42,
+      toolCallCount: 0,
+      errorToolCallCount: 0,
+    });
+
+    expect(useRunStore.getState().byId["run-partial"]?.usage).toMatchObject({
+      input_tokens: null,
+      output_tokens: 42,
+      usage_source: "sdk_final_result",
+    });
+  });
+
   it("resetRun clears the per-run buffer", () => {
     useRunStore.getState().ingestServerFrame(assistantFrame(1, "x"));
     useRunStore.getState().resetRun("run-1");

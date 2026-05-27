@@ -69,6 +69,201 @@ describe("/api/mcp-servers", () => {
     expect(reveal.json().config.env.GITHUB_TOKEN).toBe("fake-github-token");
   });
 
+  it("does not hydrate client-supplied MCP secret refs from another server", async () => {
+    const { db, repos, app } = setup();
+    const keychain = createInMemoryKeychainDriver();
+    setKeychainDriver(keychain);
+    const mcpSecretStore = new McpSecretStore({ service: "test-service" });
+    cleanup.push(() => app.close(), () => db.close());
+    const probedConfigs: unknown[] = [];
+
+    await registerMcpServersRoutes(app, {
+      mcpServers: repos.mcpServers,
+      mcpSecretStore,
+      validatorOverride: async (config): Promise<McpValidationResult> => {
+        probedConfigs.push(config);
+        return { status: "valid", transport: "http", details: "ok" };
+      },
+    });
+
+    const victim = await app.inject({
+      method: "POST",
+      url: "/api/mcp-servers",
+      payload: {
+        name: "victim",
+        enabled: true,
+        config: {
+          url: "https://victim.example.test",
+          headers: { Authorization: "Bearer victim-secret" },
+        },
+      },
+    });
+    expect(victim.statusCode).toBe(201);
+    const victimRef = mcpSecretStore.refFor(victim.json().id, [
+      "headers",
+      "Authorization",
+    ]);
+
+    const attacker = await app.inject({
+      method: "POST",
+      url: "/api/mcp-servers",
+      payload: {
+        name: "attacker",
+        enabled: true,
+        config: {
+          url: "https://attacker.example.test",
+          headers: { Authorization: victimRef, "X-Trace": victimRef },
+        },
+      },
+    });
+    expect(attacker.statusCode).toBe(201);
+    const attackerProbe = probedConfigs.at(-1);
+    expect(JSON.stringify(attackerProbe)).not.toContain("Bearer victim-secret");
+    expect(attackerProbe).toMatchObject({
+      headers: { Authorization: victimRef, "X-Trace": victimRef },
+    });
+  });
+
+  it("treats malformed MCP secret refs as literal secret values", async () => {
+    const { db, repos, app } = setup();
+    const keychain = createInMemoryKeychainDriver();
+    setKeychainDriver(keychain);
+    const mcpSecretStore = new McpSecretStore({ service: "test-service" });
+    cleanup.push(() => app.close(), () => db.close());
+    let probedConfig: unknown = null;
+
+    await registerMcpServersRoutes(app, {
+      mcpServers: repos.mcpServers,
+      mcpSecretStore,
+      validatorOverride: async (config): Promise<McpValidationResult> => {
+        probedConfig = config;
+        return { status: "valid", transport: "http", details: "ok" };
+      },
+    });
+
+    const malformed = "keychain:mcp-secret:not-a-valid-ref";
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/mcp-servers",
+      payload: {
+        name: "malformed-ref",
+        enabled: true,
+        config: {
+          url: "https://example.test",
+          headers: { Authorization: malformed },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(probedConfig).toMatchObject({ headers: { Authorization: malformed } });
+  });
+
+  it("re-probes when only a Keychain-backed MCP secret value changes", async () => {
+    const { db, repos, app } = setup();
+    const keychain = createInMemoryKeychainDriver();
+    setKeychainDriver(keychain);
+    const mcpSecretStore = new McpSecretStore({ service: "test-service" });
+    cleanup.push(() => app.close(), () => db.close());
+    const probedConfigs: unknown[] = [];
+
+    await registerMcpServersRoutes(app, {
+      mcpServers: repos.mcpServers,
+      mcpSecretStore,
+      validatorOverride: async (config): Promise<McpValidationResult> => {
+        probedConfigs.push(config);
+        return { status: "valid", transport: "http", details: "ok" };
+      },
+    });
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/mcp-servers",
+      payload: {
+        name: "secret-update",
+        enabled: true,
+        config: {
+          url: "https://example.test",
+          headers: { Authorization: "Bearer first" },
+        },
+      },
+    });
+    const id = created.json().id;
+    expect(probedConfigs).toHaveLength(1);
+
+    const updated = await app.inject({
+      method: "PUT",
+      url: `/api/mcp-servers/${id}`,
+      payload: {
+        name: "secret-update",
+        enabled: true,
+        config: {
+          url: "https://example.test",
+          headers: { Authorization: "Bearer second" },
+        },
+      },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(probedConfigs).toHaveLength(2);
+    expect(probedConfigs.at(-1)).toMatchObject({
+      headers: { Authorization: "Bearer second" },
+    });
+  });
+
+  it("deletes stale Keychain MCP secret entries after config replacement", async () => {
+    const { db, repos, app } = setup();
+    const keychain = createInMemoryKeychainDriver();
+    setKeychainDriver(keychain);
+    const mcpSecretStore = new McpSecretStore({ service: "test-service" });
+    cleanup.push(() => app.close(), () => db.close());
+
+    await registerMcpServersRoutes(app, {
+      mcpServers: repos.mcpServers,
+      mcpSecretStore,
+      validatorOverride: async () => ({ status: "valid" as const, transport: "http" as const }),
+    });
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/mcp-servers",
+      payload: {
+        name: "stale-cleanup",
+        enabled: true,
+        config: {
+          url: "https://example.test",
+          headers: { Authorization: "Bearer abc" },
+          auth: { CLIENT_ID: "id", CLIENT_SECRET: "old-secret" },
+        },
+      },
+    });
+    const id = created.json().id;
+    expect(
+      await keychain.getPassword(
+        "test-service",
+        mcpSecretStore.accountFor(id, ["auth", "CLIENT_SECRET"]),
+      ),
+    ).toBe("old-secret");
+
+    const updated = await app.inject({
+      method: "PUT",
+      url: `/api/mcp-servers/${id}`,
+      payload: {
+        name: "stale-cleanup",
+        enabled: true,
+        config: {
+          url: "https://example.test",
+          headers: { Authorization: "Bearer abc" },
+        },
+      },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(
+      await keychain.getPassword(
+        "test-service",
+        mcpSecretStore.accountFor(id, ["auth", "CLIENT_SECRET"]),
+      ),
+    ).toBeNull();
+  });
+
   it("deletes Keychain MCP secret entries when an MCP server is deleted", async () => {
     const { db, repos, app } = setup();
     const keychain = createInMemoryKeychainDriver();

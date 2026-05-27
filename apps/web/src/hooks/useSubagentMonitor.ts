@@ -12,6 +12,7 @@ export interface UseSubagentMonitorResult {
   activeCount: number;
   completedCount: number;
   totalTokens: number;
+  totalTokensPartial: boolean;
   totalCostMicros: number | null;
   hasSubagents: boolean;
   loading: boolean;
@@ -24,6 +25,7 @@ interface SubagentSnapshot {
   activeCount: number;
   completedCount: number;
   totalTokens: number;
+  totalTokensPartial: boolean;
   totalCostMicros: number | null;
 }
 
@@ -32,6 +34,7 @@ const EMPTY_SNAPSHOT: SubagentSnapshot = {
   activeCount: 0,
   completedCount: 0,
   totalTokens: 0,
+  totalTokensPartial: false,
   totalCostMicros: null,
 };
 
@@ -186,6 +189,7 @@ export function useSubagentMonitor(parentRunId: string | null): UseSubagentMonit
     activeCount: snapshot.activeCount,
     completedCount: snapshot.completedCount,
     totalTokens: snapshot.totalTokens,
+    totalTokensPartial: snapshot.totalTokensPartial,
     totalCostMicros: snapshot.totalCostMicros,
     hasSubagents: snapshot.subagents.length > 0,
     loading,

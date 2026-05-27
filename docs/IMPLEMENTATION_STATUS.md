@@ -4257,3 +4257,64 @@ Addressed the remaining harness and chat-streaming review report items. Client r
 ### Next phase
 
 No remaining review-report blockers identified for the harness/chat-streaming address pass. Commit and push `main`.
+
+---
+
+## Counter Accuracy Aggregate Pass — 2026-05-27
+
+### Summary
+
+Continued the counter accuracy review beyond individual run footers. Usage aggregates now carry explicit missing-data counts for cost, token, and cache subtotals, so the Usage page labels known subtotals as `partial` instead of presenting them as exact totals. Run-history `hasCost=unavailable` now includes partial-cost rows where usage was observed but cost could not be computed. Sub-agent list responses now include token partial flags at both child and total levels, and the dashboard renders partial token summaries instead of treating missing child usage as an exact zero.
+
+### Files modified
+
+- `packages/shared/src/rest-contracts.ts` — add missing-data metadata to usage summary/daily/breakdown and sub-agent list contracts.
+- `apps/server/src/db/repositories/runs.repo.ts`, `routes/runs.routes.ts`, and route tests — compute partial counters in SQL, include partial-cost rows in unavailable-cost history filters, and surface sub-agent token partialness.
+- `apps/web/src/components/usage/*` and `usage-components.test.tsx` — label partial aggregate cost, token, cache, trend, and breakdown counters.
+- `apps/web/src/components/SubagentDashboard.tsx`, `useSubagentMonitor.ts`, and related tests — thread and render sub-agent token partialness.
+- `apps/web/src/state/run-store.ts` and `run-store.test.ts` — preserve partial run-summary usage even when input tokens are missing but output tokens are present.
+- `docs/IMPLEMENTATION_STATUS.md` — recorded this follow-up pass and verification evidence.
+
+### Verification
+
+- `pnpm -F @harness/server test src/routes/__tests__/history-usage-transcript.routes.test.ts src/routes/__tests__/runs-subagents.test.ts` — pass, 9 tests before the final hasCost filter regression; final full suite includes 10 tests across those files.
+- `pnpm -F @harness/web test src/components/SubagentDashboard.test.tsx src/hooks/__tests__/useSubagentMonitor.test.tsx src/components/usage/usage-components.test.tsx src/state/__tests__/run-store.test.ts src/components/streaming/streaming-surfaces.test.tsx` — pass, 30 tests.
+- `pnpm typecheck && pnpm lint && pnpm test` — pass: shared 39, eslint-plugin 6, web 158, server 483 passing / 1 skipped, CLI 155, desktop 0 test files, scripts 11.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass; rebuilt web/server/desktop, packaged macOS app, rebuilt native bindings, and produced the DMG/blockmap.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` — pass, installed timestamp May 27 04:43 2026.
+
+### Next phase
+
+Review the remaining dirty-tree boundaries and commit/push `main` when the mixed MCP/keychain/browser/counter changes are ready to ship together or split into safe commits.
+
+---
+
+## Review-2 Address Pass — 2026-05-27
+
+### Summary
+
+Ran `review-2` against the load-bearing app changes and addressed the actionable findings. MCP Keychain secret refs are now treated as scoped internal capabilities: only refs for the same server id and exact secret field path are preserved or hydrated, malformed ref-shaped strings are handled as literal values, secret-only updates force revalidation, and replaced configs clean up stale Keychain paths. Agent runtime now filters to the selected MCP servers before hydrating secrets so an unrelated broken server cannot block a run. REST replay/history now uses the same slim large-tool-payload projection as WebSocket replay. Terminal AI one-click Run clears the current shell input line before submitting the generated command.
+
+### Files modified
+
+- `apps/server/src/keychain/mcp-secret-store.ts` and `apps/server/src/mcp/mcp-secret-config.ts` — non-throwing ref parsing, server/path-bound ref preservation and hydration, secret-write metadata, and stale-ref path collection.
+- `apps/server/src/routes/mcp-servers.routes.ts` and `apps/server/src/routes/__tests__/mcp-servers.routes.test.ts` — regression coverage for cross-server ref injection, malformed refs, secret-only reprobes, stale Keychain cleanup, and route-side use of scoped hydration.
+- `apps/server/src/sdk/agent-runtime.ts` — hydrate only agent-selected MCP servers before building SDK options.
+- `apps/server/src/db/repositories/events.repo.ts`, `apps/server/src/routes/runs.routes.ts`, and `apps/server/src/routes/__tests__/history-usage-transcript.routes.test.ts` — REST replay uses replay-safe rows and proves large args/result/raw payloads are exposed through refs instead of inlined.
+- `apps/web/src/hooks/useTerminalSession.ts` — generated command Run clears any pending terminal input before sending the command plus carriage return.
+- `docs/IMPLEMENTATION_STATUS.md` — recorded this review/address pass and verification evidence.
+
+### Verification
+
+- `review-2` — completed with one critical MCP secret-ref finding and warnings; all accepted actionable findings addressed.
+- `pnpm -F @harness/server exec vitest run src/routes/__tests__/mcp-servers.routes.test.ts src/routes/__tests__/history-usage-transcript.routes.test.ts` — pass, 24 tests.
+- `pnpm -F @harness/web exec vitest run src/components/shell/__tests__/TerminalSurface.test.tsx` — pass, 2 tests.
+- `pnpm typecheck` — pass.
+- `pnpm lint` — pass.
+- `pnpm test` — pass: shared 39, eslint-plugin 6, web 158, server 483 passing / 1 skipped, CLI 155, desktop 0 test files, scripts 11.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass; rebuilt web/server/desktop, packaged macOS app, rebuilt native bindings, and produced the DMG/blockmap.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` — pass, installed timestamp May 27 04:47:09 2026.
+
+### Next phase
+
+Commit and push `main` after staged-diff and secret-scan review.

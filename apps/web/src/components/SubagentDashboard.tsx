@@ -14,6 +14,7 @@ export interface SubagentDashboardProps {
   activeCount: number;
   completedCount: number;
   totalTokens?: number;
+  totalTokensPartial?: boolean;
   totalCostMicros?: number | null;
   loading?: boolean;
   error?: string | null;
@@ -61,11 +62,18 @@ function eventLines(item: SubagentDashboardItem): string[] {
   return item.eventPreview?.slice(-5) ?? [];
 }
 
+function formatTokenCounter(value: number, partial: boolean): string {
+  if (!partial) return formatTokens(value);
+  if (value === 0) return "unavailable";
+  return `partial ${formatTokens(value)}`;
+}
+
 export function SubagentDashboard({
   subagents,
   activeCount,
   completedCount,
   totalTokens: totalTokensProp,
+  totalTokensPartial: totalTokensPartialProp,
   totalCostMicros: totalCostMicrosProp,
   loading = false,
   error = null,
@@ -79,6 +87,10 @@ export function SubagentDashboard({
     () => totalTokensProp ?? subagents.reduce((sum, item) => sum + item.tokenCount, 0),
     [subagents, totalTokensProp],
   );
+  const totalTokensPartial = useMemo(
+    () => totalTokensPartialProp ?? subagents.some((item) => item.tokenCountPartial),
+    [subagents, totalTokensPartialProp],
+  );
   const totalCostMicros = useMemo(() => {
     if (totalCostMicrosProp !== undefined) return totalCostMicrosProp;
     const costs = subagents
@@ -86,14 +98,14 @@ export function SubagentDashboard({
       .filter((cost): cost is number => cost !== null);
     return costs.length > 0 ? costs.reduce((sum, cost) => sum + cost, 0) : null;
   }, [subagents, totalCostMicrosProp]);
-  const summary = `${formatTokens(activeCount)} running, ${formatTokens(completedCount)} completed — ${formatTokens(totalTokens)} tokens`;
+  const summary = `${formatTokens(activeCount)} running, ${formatTokens(completedCount)} completed — ${formatTokenCounter(totalTokens, totalTokensPartial)} tokens`;
   const autoCollapsed = !loading && !error && activeCount === 0 && completedCount > 0 && subagents.length > 0;
   const collapsed = manualCollapsed || (autoCollapsed && !manualExpanded);
   const visibleSubagents = subagents.slice(0, 12);
   const overflowCount = Math.max(0, subagents.length - visibleSubagents.length);
   const collapsedSummary = activeCount > 0
     ? summary
-    : `${subagentLabel(completedCount)} completed (${formatTokens(totalTokens)} tokens)`;
+    : `${subagentLabel(completedCount)} completed (${formatTokenCounter(totalTokens, totalTokensPartial)} tokens)`;
 
   if (collapsed) {
     return (
@@ -204,7 +216,7 @@ export function SubagentDashboard({
                 </div>
                 <div>
                   <div className="uppercase tracking-uppercase text-text-tertiary">Tokens</div>
-                  <div className="mono mt-1 text-text-primary">{formatTokens(item.tokenCount)}</div>
+                  <div className="mono mt-1 text-text-primary">{formatTokenCounter(item.tokenCount, item.tokenCountPartial)}</div>
                 </div>
                 <div>
                   <div className="uppercase tracking-uppercase text-text-tertiary">Cost</div>

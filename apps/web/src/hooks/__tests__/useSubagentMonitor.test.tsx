@@ -25,6 +25,7 @@ describe("useSubagentMonitor", () => {
             startedAt: "2026-05-25T12:00:00.000Z",
             completedAt: null,
             tokenCount: 12,
+            tokenCountPartial: true,
             costMicros: null,
             lastEvents: [
               {
@@ -38,6 +39,7 @@ describe("useSubagentMonitor", () => {
         activeCount: 1,
         completedCount: 0,
         totalTokens: 12,
+        totalTokensPartial: true,
         totalCostMicros: null,
       }),
     );
@@ -60,6 +62,7 @@ describe("useSubagentMonitor", () => {
     expect(result.current.activeCount).toBe(1);
     expect(result.current.completedCount).toBe(0);
     expect(result.current.totalTokens).toBe(12);
+    expect(result.current.totalTokensPartial).toBe(true);
     expect(result.current.subagents[0]).toMatchObject({
       runId: "subagent-a",
       elapsedMs: 5_000,

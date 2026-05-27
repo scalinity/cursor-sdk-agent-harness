@@ -18,6 +18,7 @@ describe("SubagentDashboard", () => {
             startedAt: "2026-05-25T12:00:00.000Z",
             completedAt: null,
             tokenCount: 128,
+            tokenCountPartial: true,
             costMicros: null,
             lastEvents: [],
             eventPreview: ["task.updated", "tool_call.running"],
@@ -30,6 +31,7 @@ describe("SubagentDashboard", () => {
             startedAt: "2026-05-25T12:01:00.000Z",
             completedAt: "2026-05-25T12:02:00.000Z",
             tokenCount: 256,
+            tokenCountPartial: false,
             costMicros: 1400,
             lastEvents: [],
             eventPreview: ["task.updated", "run.final_result"],
@@ -39,7 +41,7 @@ describe("SubagentDashboard", () => {
       />,
     );
 
-    expect(screen.getByText("1 running, 1 completed — 384 tokens")).not.toBeNull();
+    expect(screen.getByText("1 running, 1 completed — partial 384 tokens")).not.toBeNull();
     expect(screen.getByText("Reviewer A")).not.toBeNull();
     expect(screen.getByText("Reviewer B")).not.toBeNull();
     expect(screen.getByText("RUNNING")).not.toBeNull();
@@ -81,6 +83,7 @@ describe("SubagentDashboard", () => {
             startedAt: "2026-05-25T12:00:00.000Z",
             completedAt: "2026-05-25T12:00:10.000Z",
             tokenCount: 1000,
+            tokenCountPartial: false,
             costMicros: null,
             lastEvents: [],
           },
@@ -91,6 +94,7 @@ describe("SubagentDashboard", () => {
             startedAt: "2026-05-25T12:00:00.000Z",
             completedAt: "2026-05-25T12:00:10.000Z",
             tokenCount: 800,
+            tokenCountPartial: false,
             costMicros: null,
             lastEvents: [],
           },
@@ -101,6 +105,7 @@ describe("SubagentDashboard", () => {
             startedAt: "2026-05-25T12:00:00.000Z",
             completedAt: "2026-05-25T12:00:10.000Z",
             tokenCount: 656,
+            tokenCountPartial: false,
             costMicros: null,
             lastEvents: [],
           },
@@ -127,6 +132,7 @@ describe("SubagentDashboard", () => {
           startedAt: "2026-05-25T12:00:00.000Z",
           completedAt: null,
           tokenCount: 1,
+          tokenCountPartial: true,
           costMicros: null,
           lastEvents: [],
         }))}
@@ -151,6 +157,7 @@ describe("SubagentDashboard", () => {
             startedAt: "2026-05-25T12:00:00.000Z",
             completedAt: null,
             tokenCount: 42,
+            tokenCountPartial: true,
             costMicros: null,
             lastEvents: [],
           },
@@ -159,7 +166,7 @@ describe("SubagentDashboard", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /collapse sub-agent dashboard/i }));
-    expect(screen.getByText("1 running, 0 completed — 42 tokens")).not.toBeNull();
+    expect(screen.getByText("1 running, 0 completed — partial 42 tokens")).not.toBeNull();
   });
 
   it("expands to REST-backed last events when no live child event stream is present", () => {
@@ -175,6 +182,7 @@ describe("SubagentDashboard", () => {
             startedAt: "2026-05-25T12:00:00.000Z",
             completedAt: null,
             tokenCount: 1,
+            tokenCountPartial: true,
             costMicros: null,
             lastEvents: [
               {
@@ -208,6 +216,7 @@ describe("SubagentDashboard", () => {
             completedAt: null,
             elapsedMs: 12_300,
             tokenCount: 1,
+            tokenCountPartial: true,
             costMicros: null,
             lastEvents: [],
           },

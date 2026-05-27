@@ -248,7 +248,7 @@ export function useTerminalSession(): UseTerminalSessionResult {
   }, []);
 
   const runText = useCallback((text: string): void => {
-    sendRef.current(serializeTerminalInput(`${text}\r`));
+    sendRef.current(serializeTerminalInput(`\u0015${text}\r`));
   }, []);
 
   return { hostRef, status, insertText, runText };
