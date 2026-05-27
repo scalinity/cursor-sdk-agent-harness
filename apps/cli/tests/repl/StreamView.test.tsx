@@ -130,9 +130,10 @@ describe("StreamView helpers", () => {
     const summary = buffer.items.find((item): item is Extract<StreamItem, { type: "summary" }> => item.type === "summary");
     expect(output).toContain("read auth.ts");
     expect(output).toContain("Approval required");
-    expect(output).not.toContain("30 tokens");
-    expect(output).not.toContain("$0.0025");
-    expect(summary).toMatchObject({ status: "FINISHED", tokens: 30, costMicros: 2500 });
+    expect(output).toContain("30 tok");
+    expect(output).toContain("turn $0.0025");
+    expect(output).toContain("1.2s");
+    expect(summary).toMatchObject({ status: "FINISHED", tokens: 30, tokensPartial: false, costMicros: 2500, costUnavailable: false });
   });
 
   it("renders turn boundaries for user, assistant, and system items", () => {
@@ -179,6 +180,91 @@ describe("StreamView helpers", () => {
     for (const task of tasks) {
       expect(output).toContain(`task ${task}`);
     }
+  });
+
+  it("renders subagent lifecycle frames with child identity and terminal status", () => {
+    let buffer = createStreamBuffer();
+    buffer = ingestStreamFrame(buffer, {
+      ...base,
+      id: "frame-subagent-spawned",
+      type: "subagent_spawned",
+      event: {
+        event_id: "00000000-0000-4000-8000-000000000311",
+        schema_version: 1,
+        seq: 1,
+        agent_id: "agent-1",
+        run_id: "run-1",
+        occurred_at: base.sent_at,
+        received_at: base.sent_at,
+        sdk_type: "task",
+        kind: "subagent.spawned",
+        call_id: "task-review-scroll",
+        status: "running",
+        payload: {
+          parent_run_id: "run-1",
+          child_run_id: "subagent-scroll-review-1234567890abcdef",
+          subagent_name: "scroll reviewer",
+          source_call_id: "task-review-scroll",
+          status: "RUNNING",
+        },
+      },
+    } satisfies ServerFrame);
+    buffer = ingestStreamFrame(buffer, {
+      ...base,
+      id: "frame-subagent-completed",
+      type: "subagent_completed",
+      event: {
+        event_id: "00000000-0000-4000-8000-000000000312",
+        schema_version: 1,
+        seq: 2,
+        agent_id: "agent-1",
+        run_id: "run-1",
+        occurred_at: base.sent_at,
+        received_at: base.sent_at,
+        sdk_type: "task",
+        kind: "subagent.completed",
+        call_id: "task-review-scroll",
+        status: "completed",
+        payload: {
+          parent_run_id: "run-1",
+          child_run_id: "subagent-scroll-review-1234567890abcdef",
+          subagent_name: "scroll reviewer",
+          source_call_id: "task-review-scroll",
+          status: "FINISHED",
+        },
+      },
+    } satisfies ServerFrame);
+
+    const output = renderStreamItems(buffer.items);
+    expect(output).toContain("subagent scroll reviewer spawned");
+    expect(output).toContain("subagent-scroll-review-1234567890abcdef");
+    expect(output).toContain("subagent scroll reviewer finished");
+  });
+
+  it("renders sdk.task progress text instead of dropping it", () => {
+    let buffer = createStreamBuffer();
+    buffer = ingestStreamFrame(buffer, {
+      ...base,
+      id: "frame-task-progress",
+      type: "sdk.task",
+      event: {
+        event_id: "00000000-0000-4000-8000-000000000321",
+        schema_version: 1,
+        seq: 1,
+        agent_id: "agent-1",
+        run_id: "run-1",
+        occurred_at: base.sent_at,
+        received_at: base.sent_at,
+        sdk_type: "task",
+        kind: "task.updated",
+        status: "running",
+        payload: { status: "running", text: "review agent is reading StreamView.tsx" },
+      },
+    } satisfies ServerFrame);
+
+    const output = renderStreamItems(buffer.items);
+    expect(output).toContain("task running");
+    expect(output).toContain("review agent is reading StreamView.tsx");
   });
 
   it("renders running tools and marks them cancelled on interruption", () => {
@@ -325,5 +411,33 @@ describe("StreamView helpers", () => {
     const out = renderStreamItems(buffer.items);
     expect(out).toContain("src/x.ts");
     expect(out).not.toContain("/work/proj/src/x.ts");
+  });
+
+  it("renders partial or unavailable finished-turn usage without exact-looking counters", () => {
+    let buffer = createStreamBuffer();
+    buffer = ingestStreamFrame(buffer, {
+      ...base,
+      id: "frame-partial-usage",
+      type: "run.final_result",
+      event: {
+        event_id: "00000000-0000-4000-8000-000000000007",
+        schema_version: 1,
+        seq: 7,
+        agent_id: "agent-1",
+        run_id: "run-1",
+        occurred_at: base.sent_at,
+        received_at: base.sent_at,
+        sdk_type: "status",
+        kind: "run.final_result",
+        status: "FINISHED",
+        payload: { text: "done", duration_ms: 900, usage: { input_tokens: 10, output_tokens: null, cached_input_tokens: null, reasoning_tokens: null, cost_usd_micros: null, usage_source: "sdk_final_result" } },
+      },
+    } satisfies ServerFrame);
+
+    const output = renderStreamItems(buffer.items);
+    const summary = buffer.items.find((item): item is Extract<StreamItem, { type: "summary" }> => item.type === "summary");
+    expect(output).toContain("partial 10 tok");
+    expect(output).toContain("turn cost unavailable");
+    expect(summary).toMatchObject({ tokens: 10, tokensPartial: true, costMicros: null, costUnavailable: true });
   });
 });

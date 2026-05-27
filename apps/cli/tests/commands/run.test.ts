@@ -55,7 +55,8 @@ describe("runPrompt", () => {
     expect(http.createRun).toHaveBeenCalledWith({ agentId: "agent-1", prompt: "hello", executionMode: "agent" });
     expect(stream.subscribeToRun).toHaveBeenCalledWith("run-1", expect.any(Function));
     expect(lines.join("\n")).toContain("hi");
-    expect(lines.join("\n")).not.toContain("3 tokens");
+    expect(lines.join("\n")).toContain("tokens unavailable");
+    expect(lines.join("\n")).toContain("turn cost unavailable");
   });
 
   it("emits JSONL when requested", async () => {

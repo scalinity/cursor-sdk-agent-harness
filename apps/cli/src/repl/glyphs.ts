@@ -4,7 +4,7 @@ export const glyph = {
   failed: "✗",
   paused: "⏸",
   retry: "↺",
-  thinking: "◐",
+  thinking: "⠋",
   readyDot: "●",
 } as const;
 

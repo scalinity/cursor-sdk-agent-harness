@@ -8,7 +8,7 @@ describe("StatusBar helpers", () => {
       sessionTokens: { tokens: 0, hasUnavailableTurn: false },
     });
 
-    expect(output).toContain("total 0 tok · $0.00");
+    expect(output).toContain("session 0 tok · session $0.00");
     expect(output).not.toContain("ws");
     expect(output).not.toContain("ready");
     expect(output).not.toContain("dir:");
@@ -20,7 +20,7 @@ describe("StatusBar helpers", () => {
       sessionTokens: { tokens: 0, hasUnavailableTurn: false },
     });
 
-    expect(output).toContain("total 0 tok · cost unavailable");
+    expect(output).toContain("session 0 tok · session cost unavailable");
   });
 
   it("marks session cost partial when some completed turns have no cost", () => {
@@ -29,7 +29,7 @@ describe("StatusBar helpers", () => {
       sessionTokens: { tokens: 0, hasUnavailableTurn: false },
     });
 
-    expect(output).toContain("total 0 tok · partial $0.10");
+    expect(output).toContain("session 0 tok · session partial $0.10");
   });
 
   it("shows cumulative token and cost totals without turn usage chrome", () => {
@@ -38,7 +38,7 @@ describe("StatusBar helpers", () => {
       sessionTokens: { tokens: 10_292, hasUnavailableTurn: false },
     });
 
-    expect(output).toContain("total 10,292 tok · $0.0269");
+    expect(output).toContain("session 10,292 tok · session $0.0269");
     expect(output).not.toContain("turn usage");
   });
 
@@ -48,7 +48,7 @@ describe("StatusBar helpers", () => {
       sessionTokens: { tokens: 300, hasUnavailableTurn: true },
     });
 
-    expect(output).toContain("total partial 300 tok · $0.0009");
+    expect(output).toContain("session partial 300 tok · session $0.0009");
   });
 
   it("formats status hints based on scroll mode", () => {
@@ -59,5 +59,25 @@ describe("StatusBar helpers", () => {
     expect(promptHistory).toContain("↑↓ prompt history");
     const compact = formatStatusBar({ sessionCost: { micros: 0, hasUnavailableTurn: false }, sessionTokens: { tokens: 0, hasUnavailableTurn: false }, streamScrollActive: false, width: 80 });
     expect(compact).toContain("↑↓ prompts");
+  });
+
+  it("omits cancel, quit, and clear shortcuts from the rendered status bar", () => {
+    const base = {
+      sessionCost: { micros: 0, hasUnavailableTurn: false },
+      sessionTokens: { tokens: 0, hasUnavailableTurn: false },
+    };
+    const outputs = [
+      formatStatusBar({ ...base, width: 80, streamScrollActive: true }),
+      formatStatusBar({ ...base, width: 80, streamScrollActive: false }),
+      formatStatusBar({ ...base, width: 220, streamScrollActive: true }),
+      formatStatusBar({ ...base, width: 220, streamScrollActive: false }),
+    ];
+
+    for (const output of outputs) {
+      expect(output).not.toContain("^C");
+      expect(output).not.toContain("^D");
+      expect(output).not.toContain("^L");
+      expect(output).not.toMatch(/cancel|quit|clear/i);
+    }
   });
 });

@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import type { AgentSummary, ContextChip, ContextSearchResult, ServerFrame } from "@harness/shared";
+import type { AgentSummary, ContextChip, ContextSearchResult, ServerFrame, TokenUsage } from "@harness/shared";
 import { isRunStatusTerminalFrame, isTerminalFrame } from "../client/ws.js";
 import { appendPromptHistory, writePreferences } from "../config.js";
 import {
@@ -164,6 +164,11 @@ export function App({
       ]
     : undefined;
   const cleanupController = useReplCleanup({ stream, activeRunId, isStartingRun });
+  const streamViewport = useMemo(
+    () => computeStreamViewportState(buffer.items, streamWidth, streamHeight, scrollOffset, activeLabel),
+    [activeLabel, buffer.items, scrollOffset, streamHeight, streamWidth],
+  );
+  const { maxOffset, bodyHeight, effectiveOffset, streamScrollActive } = streamViewport;
   const sessionStateRef = useRef<ReplSessionSnapshotState>({
     workspace,
     agent,
@@ -182,16 +187,11 @@ export function App({
     sessionCost,
     sessionTokens,
     buffer,
-    scrollOffset,
+    scrollOffset: effectiveOffset,
   };
   useSessionSnapshotRegistration(onRegisterSessionSnapshot, sessionStateRef);
   useResumeNotice(resume !== undefined, setBuffer);
   useMentionTimerCleanup(mentionTimerRef, mentionRequestSeqRef);
-  const streamViewport = useMemo(
-    () => computeStreamViewportState(buffer.items, streamWidth, streamHeight, scrollOffset, activeLabel),
-    [activeLabel, buffer.items, scrollOffset, streamHeight, streamWidth],
-  );
-  const { maxOffset, bodyHeight, effectiveOffset, streamScrollActive } = streamViewport;
   const inputFocused = !busy;
   useStreamScrollClamp(scrollOffset, effectiveOffset, setScrollOffset);
 
@@ -408,8 +408,14 @@ export function App({
         if (isTerminalFrame(frame)) {
           if (frame.type === "run.final_result") {
             const usage = frame.event.payload.usage;
-            setSessionCost((current) => addSessionCost(current, usage.cost_usd_micros));
-            setSessionTokens((current) => addSessionTokens(current, sumTokens(usage.input_tokens, usage.output_tokens)));
+            setSessionCost((current) => addSessionCost(current, usage));
+            setSessionTokens((current) => addSessionTokens(current, usage));
+          } else if (frame.type === "run.interrupted") {
+            // ASSUMPTION: Interrupted runs can have unreported billable usage; flag
+            // the session totals as partial rather than displaying exact zeros.
+            // Flag if wrong.
+            setSessionCost(markSessionCostUnavailable);
+            setSessionTokens(markSessionTokensUnavailable);
           }
           finishRun();
         }
@@ -750,19 +756,28 @@ export function deriveChromeState(input: ChromeStateInput): ChromeState {
   return "ready";
 }
 
-function addSessionCost(current: SessionCostState, costMicros: number | null): SessionCostState {
-  if (costMicros === null) return { ...current, hasUnavailableTurn: true };
-  return { ...current, micros: current.micros + costMicros };
+export function addSessionCost(current: SessionCostState, usage: TokenUsage): SessionCostState {
+  if (usage.usage_source === "unavailable" || usage.cost_usd_micros === null) return markSessionCostUnavailable(current);
+  return { ...current, micros: current.micros + usage.cost_usd_micros };
 }
 
-function addSessionTokens(current: SessionTokenState, tokens: number | null): SessionTokenState {
-  if (tokens === null) return { ...current, hasUnavailableTurn: true };
-  return { ...current, tokens: current.tokens + tokens };
+export function markSessionCostUnavailable(current: SessionCostState): SessionCostState {
+  return { ...current, hasUnavailableTurn: true };
 }
 
-function sumTokens(input: number | null, output: number | null): number | null {
-  if (input === null && output === null) return null;
-  return (input ?? 0) + (output ?? 0);
+export function addSessionTokens(current: SessionTokenState, usage: TokenUsage): SessionTokenState {
+  if (usage.usage_source === "unavailable" || (usage.input_tokens === null && usage.output_tokens === null)) {
+    return { ...current, hasUnavailableTurn: true };
+  }
+  const tokens = (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0);
+  return {
+    tokens: current.tokens + tokens,
+    hasUnavailableTurn: current.hasUnavailableTurn || usage.input_tokens === null || usage.output_tokens === null,
+  };
+}
+
+export function markSessionTokensUnavailable(current: SessionTokenState): SessionTokenState {
+  return { ...current, hasUnavailableTurn: true };
 }
 
 function createEmptySessionCost(): SessionCostState {

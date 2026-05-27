@@ -37,6 +37,46 @@ describe("CLI session resume", () => {
     expect(isCliSessionSnapshot({ version: 2 })).toBe(false);
   });
 
+  it("rejects saved sessions with unknown stream item shapes", () => {
+    expect(isCliSessionSnapshot({
+      version: 1,
+      savedAt: "2026-05-27T00:00:00.000Z",
+      workspace: "/tmp/project",
+      agent: { id: "agent-1", name: "CLI", modelId: "composer-2-5-fast", executionMode: "agent" },
+      mode: "agent",
+      modelId: "composer-2-5-fast",
+      sessionCost: { micros: 0, hasUnavailableTurn: false },
+      sessionTokens: { tokens: 0, hasUnavailableTurn: false },
+      buffer: { items: [{ type: "mystery", text: "nope" }] },
+      scrollOffset: 0,
+    })).toBe(false);
+  });
+
+  it("bounds and redacts persisted resume transcript text", () => {
+    const passwordLike = ["pass", "word=topvalue"].join("");
+    const apiKeyLike = ["s", "k-test-value"].join("");
+    const snapshot = createSessionSnapshot({
+      workspace: "/tmp/project",
+      agent: { id: "agent-1", name: "CLI", modelId: "composer-2-5-fast", executionMode: "agent" },
+      mode: "agent",
+      modelId: "composer-2-5-fast",
+      sessionCost: { micros: 0, hasUnavailableTurn: false },
+      sessionTokens: { tokens: 0, hasUnavailableTurn: false },
+      buffer: {
+        items: Array.from({ length: 205 }, (_, index) => ({
+          type: "user" as const,
+          text: index === 204 ? `${passwordLike} ${apiKeyLike}` : `line-${index}`,
+          at: "12:00",
+        })),
+      },
+      scrollOffset: 999999,
+    });
+
+    expect(snapshot.buffer.items).toHaveLength(200);
+    expect(snapshot.scrollOffset).toBe(50000);
+    expect(snapshot.buffer.items.at(-1)).toMatchObject({ text: "[redacted] [redacted]" });
+  });
+
   it("writes and reads the last saved session", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "harness-cli-session-"));
     tempDirs.push(dir);
@@ -83,6 +123,28 @@ describe("CLI session resume", () => {
 
     const loaded = await readLastSession();
     expect(loaded?.sessionTokens).toEqual({ tokens: 30, hasUnavailableTurn: false });
+  });
+
+  it("preserves partial token state when deriving totals from older saved sessions", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "harness-cli-session-"));
+    tempDirs.push(dir);
+    sessionPath = path.join(dir, "last-session.json");
+    process.env.HARNESS_CLI_SESSION_PATH = sessionPath;
+
+    await writeFile(sessionPath, `${JSON.stringify({
+      version: 1,
+      savedAt: "2026-05-27T00:00:00.000Z",
+      workspace: dir,
+      agent: { id: "agent-1", name: "CLI", modelId: "composer-2-5-fast", executionMode: "ask" },
+      mode: "ask",
+      modelId: "composer-2-5-fast",
+      sessionCost: { micros: 0, hasUnavailableTurn: true },
+      buffer: { items: [{ type: "summary", status: "FINISHED", tokens: 10, tokensPartial: true, costMicros: null, costUnavailable: true, durationMs: 900 }] },
+      scrollOffset: 0,
+    })}\n`);
+
+    const loaded = await readLastSession();
+    expect(loaded?.sessionTokens).toEqual({ tokens: 10, hasUnavailableTurn: true });
   });
 
   it("rejects corrupt saved session JSON instead of treating it as missing", async () => {

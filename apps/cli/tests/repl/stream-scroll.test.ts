@@ -64,4 +64,20 @@ describe("stream scroll helpers", () => {
     expect(formatStreamScrollHints(false, false)).toContain("↑↓ prompt history");
     expect(formatStreamScrollHints(false, true)).toContain("↑↓ prompts");
   });
+
+  it("omits cancel, quit, and clear shortcuts from status hints", () => {
+    const modes = [
+      formatStreamScrollHints(true, true),
+      formatStreamScrollHints(false, true),
+      formatStreamScrollHints(true, false),
+      formatStreamScrollHints(false, false),
+    ];
+
+    for (const hints of modes) {
+      expect(hints).not.toContain("^C");
+      expect(hints).not.toContain("^D");
+      expect(hints).not.toContain("^L");
+      expect(hints).not.toMatch(/cancel|quit|clear/i);
+    }
+  });
 });

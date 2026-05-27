@@ -52,17 +52,17 @@ function formatStatusLine(props: StatusBarProps, width: number): string {
 }
 
 function formatSessionTotals(cost: SessionCostState, tokens: SessionTokenState): string {
-  return `total ${formatSessionTokens(tokens)} · ${formatSessionCost(cost)}`;
+  return `${formatSessionTokens(tokens)} · ${formatSessionCost(cost)}`;
 }
 
 function formatSessionTokens(tokens: SessionTokenState): string {
-  if (tokens.hasUnavailableTurn && tokens.tokens === 0) return "tokens unavailable";
-  if (tokens.hasUnavailableTurn) return `partial ${tokens.tokens.toLocaleString("en-US")} tok`;
-  return `${tokens.tokens.toLocaleString("en-US")} tok`;
+  if (tokens.hasUnavailableTurn && tokens.tokens === 0) return "session tokens unavailable";
+  if (tokens.hasUnavailableTurn) return `session partial ${tokens.tokens.toLocaleString("en-US")} tok`;
+  return `session ${tokens.tokens.toLocaleString("en-US")} tok`;
 }
 
 function formatSessionCost(cost: SessionCostState): string {
-  if (cost.hasUnavailableTurn && cost.micros === 0) return "cost unavailable";
-  if (cost.hasUnavailableTurn) return `partial ${formatMicros(cost.micros)}`;
-  return formatMicros(cost.micros);
+  if (cost.hasUnavailableTurn && cost.micros === 0) return "session cost unavailable";
+  if (cost.hasUnavailableTurn) return `session partial ${formatMicros(cost.micros)}`;
+  return `session ${formatMicros(cost.micros)}`;
 }

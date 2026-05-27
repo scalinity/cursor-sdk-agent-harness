@@ -73,11 +73,11 @@ export function shouldUseCtrlForPromptHistory(streamScrollActive: boolean): bool
 export function formatStreamScrollHints(streamScrollActive: boolean, compact: boolean): string {
   if (compact) {
     return streamScrollActive
-      ? "^C cancel · ^D quit · ^L clear · ↑↓ scroll · Ctrl+G latest"
-      : "^C cancel · ^D quit · ^L clear · ↑↓ prompts";
+      ? "↑↓ scroll · Ctrl+G latest"
+      : "↑↓ prompts";
   }
   if (streamScrollActive) {
-    return "Enter submit · Shift+Enter newline · ↑↓ scroll · Shift+↑↓ faster · Ctrl+↑↓ prompt history · PgUp/Dn · Ctrl+G latest · drop image · Esc dismiss · ^C cancel/quit · ^L clear";
+    return "Enter submit · Shift+Enter newline · ↑↓ scroll · Shift+↑↓ faster · Ctrl+↑↓ prompt history · PgUp/Dn · Ctrl+G latest · drop image · Esc dismiss";
   }
-  return "Enter submit · Shift+Enter newline · ↑↓ prompt history · PgUp/Dn scroll · drop image · Esc dismiss · ^C cancel/quit · ^L clear";
+  return "Enter submit · Shift+Enter newline · ↑↓ prompt history · PgUp/Dn scroll · drop image · Esc dismiss";
 }

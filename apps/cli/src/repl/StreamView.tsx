@@ -11,6 +11,7 @@ import { formatToolCall } from "../render/tool-call.js";
 import { formatToolCallLine } from "./ToolCallLine.js";
 import { glyph } from "./glyphs.js";
 import { createTuiTheme, fg, hardWrapText, truncateMiddle, visibleLength, type TuiTheme } from "./theme.js";
+import { formatDuration, formatMicros } from "../output/table.js";
 
 const MAX_BUFFER_ITEMS = 5000;
 const MAX_TEXT_LINES = 5000;
@@ -23,7 +24,9 @@ export type StreamItem =
   | { type: "tool"; callId: string; name: string; status: "running" | "completed" | "error" | "cancelled"; verb: string; primaryArg: string; secondaryDetail?: string; durationMs?: number; error?: string }
   | { type: "diff"; path: string; language?: string; before?: string; after?: string; unifiedDiff?: string }
   | { type: "approval"; requestId: string; description: string }
-  | { type: "summary"; status: string; tokens: number | null; costMicros: number | null; durationMs: number | null }
+  | { type: "summary"; status: string; tokens: number | null; tokensPartial: boolean; costMicros: number | null; costUnavailable: boolean; durationMs: number | null }
+  | { type: "task"; status: string; text: string }
+  | { type: "subagent"; childRunId: string; sourceCallId: string; name: string; phase: "spawned" | "completed"; status: string }
   | { type: "system"; text: string }
   | { type: "error"; message: string };
 
@@ -104,21 +107,54 @@ export function ingestStreamFrame(buffer: StreamBuffer, frame: ServerFrame, cwd:
       }
       break;
     }
+    case "sdk.task": {
+      const status = frame.event.payload.status ?? "updated";
+      const text = frame.event.payload.text ?? "";
+      if (status.length > 0 || text.length > 0) items.push({ type: "task", status, text });
+      break;
+    }
+    case "subagent_spawned": {
+      const payload = frame.event.payload;
+      upsertSubagentItem(items, {
+        type: "subagent",
+        childRunId: payload.child_run_id,
+        sourceCallId: payload.source_call_id,
+        name: payload.subagent_name,
+        phase: "spawned",
+        status: payload.status ?? "RUNNING",
+      });
+      break;
+    }
+    case "subagent_completed": {
+      const payload = frame.event.payload;
+      upsertSubagentItem(items, {
+        type: "subagent",
+        childRunId: payload.child_run_id,
+        sourceCallId: payload.source_call_id,
+        name: payload.subagent_name,
+        phase: "completed",
+        status: payload.status,
+      });
+      break;
+    }
     case "run.final_result": {
       const usage = frame.event.payload.usage;
+      const tokenTotal = summarizeUsageTokens(usage);
       reconcileRunningTools(items, "completed");
       items.push({
         type: "summary",
         status: "FINISHED",
-        tokens: sumTokens(usage.input_tokens, usage.output_tokens),
-        costMicros: usage.cost_usd_micros,
+        tokens: tokenTotal.tokens,
+        tokensPartial: tokenTotal.partial,
+        costMicros: usage.usage_source === "unavailable" ? null : usage.cost_usd_micros,
+        costUnavailable: usage.usage_source === "unavailable" || usage.cost_usd_micros === null,
         durationMs: frame.event.payload.duration_ms ?? null,
       });
       break;
     }
     case "run.interrupted": {
       reconcileRunningTools(items, "cancelled");
-      items.push({ type: "summary", status: "CANCELLED", tokens: null, costMicros: null, durationMs: null });
+      items.push({ type: "summary", status: "CANCELLED", tokens: null, tokensPartial: false, costMicros: null, costUnavailable: true, durationMs: null });
       break;
     }
     case "error": {
@@ -154,7 +190,7 @@ function classifyStreamBlock(item: StreamItem): StreamBlock {
   if (item.type === "user") return "user";
   if (item.type === "assistant") return "assistant";
   if (item.type === "thinking") return "thinking";
-  if (item.type === "tool" || item.type === "diff") return "tool-sequence";
+  if (item.type === "tool" || item.type === "task" || item.type === "subagent" || item.type === "diff") return "tool-sequence";
   return "meta";
 }
 
@@ -325,6 +361,10 @@ function renderStreamItem(item: StreamItem, width: number): string {
       return styles.thinking(`${glyph.thinking} Thinking...\n  ${sanitizeTerminalText(item.text)}`);
     case "tool":
       return formatToolCallLine(item);
+    case "task":
+      return formatTaskLine(item);
+    case "subagent":
+      return formatSubagentLine(item);
     case "diff":
       return renderFileEdit(item);
     case "approval":
@@ -339,8 +379,60 @@ function renderStreamItem(item: StreamItem, width: number): string {
 }
 
 function renderSummary(item: Extract<StreamItem, { type: "summary" }>): string {
-  if (item.status === "FINISHED") return "";
-  return `── ${item.status.toLowerCase()} ──`;
+  if (item.status !== "FINISHED") return `── ${item.status.toLowerCase()} ──`;
+  const parts = [formatTurnTokens(item), formatTurnCost(item)];
+  if (item.durationMs !== null) parts.push(formatDuration(item.durationMs));
+  return `── ${parts.join(" · ")} ──`;
+}
+
+function formatTaskLine(item: Extract<StreamItem, { type: "task" }>): string {
+  const status = cleanInline(item.status) || "updated";
+  const text = cleanInline(item.text);
+  return styles.tool(`task ${status}${text ? ` ${text}` : ""}`);
+}
+
+function formatSubagentLine(item: Extract<StreamItem, { type: "subagent" }>): string {
+  const terminal = item.phase === "spawned" ? "spawned" : formatSubagentStatus(item.status);
+  const icon = item.phase === "spawned" ? styles.glyphRun(glyph.running) : item.status === "ERROR" ? styles.glyphErr(glyph.failed) : styles.glyphOk(glyph.done);
+  const name = cleanInline(item.name) || "unspecified";
+  const childRunId = cleanInline(item.childRunId);
+  return `${icon} ${styles.tool(`subagent ${name} ${terminal}${childRunId ? ` ${childRunId}` : ""}`)}`;
+}
+
+function formatSubagentStatus(status: string): string {
+  switch (status) {
+    case "FINISHED":
+      return "finished";
+    case "ERROR":
+      return "error";
+    case "CANCELLED":
+      return "cancelled";
+    case "EXPIRED":
+      return "expired";
+    default:
+      return cleanInline(status).toLowerCase() || "completed";
+  }
+}
+
+function cleanInline(value: string): string {
+  return sanitizeTerminalText(value).replace(/\s+/g, " ").trim();
+}
+
+function upsertSubagentItem(items: StreamItem[], next: Extract<StreamItem, { type: "subagent" }>): void {
+  const existingIndex = items.findIndex((item) => item.type === "subagent" && item.childRunId === next.childRunId && item.phase === next.phase);
+  if (existingIndex >= 0) items[existingIndex] = next;
+  else items.push(next);
+}
+
+function formatTurnTokens(item: Extract<StreamItem, { type: "summary" }>): string {
+  if (item.tokens === null) return "tokens unavailable";
+  const value = `${item.tokens.toLocaleString("en-US")} tok`;
+  return item.tokensPartial ? `partial ${value}` : value;
+}
+
+function formatTurnCost(item: Extract<StreamItem, { type: "summary" }>): string {
+  if (item.costUnavailable || item.costMicros === null) return "turn cost unavailable";
+  return `turn ${formatMicros(item.costMicros)}`;
 }
 
 function summarizeUnknown(value: unknown): string {
@@ -348,11 +440,6 @@ function summarizeUnknown(value: unknown): string {
   const text = sanitizeTerminalText(typeof value === "string" ? value : JSON.stringify(value));
   if (!text) return "";
   return text.length > 60 ? `${text.slice(0, 59)}…` : text;
-}
-
-function sumTokens(input: number | null, output: number | null): number | null {
-  if (input === null && output === null) return null;
-  return (input ?? 0) + (output ?? 0);
 }
 
 // Running tools stay visible in the transcript so parallel task/subagent launches
@@ -375,4 +462,14 @@ function capStreamText(text: string): string {
   const lines = next.split("\n");
   if (lines.length > MAX_TEXT_LINES) next = lines.slice(lines.length - MAX_TEXT_LINES).join("\n");
   return next;
+}
+
+function summarizeUsageTokens(usage: NonNullable<Extract<ServerFrame, { type: "run.final_result" }>["event"]["payload"]["usage"]>): { tokens: number | null; partial: boolean } {
+  if (usage.usage_source === "unavailable" || (usage.input_tokens === null && usage.output_tokens === null)) {
+    return { tokens: null, partial: true };
+  }
+  return {
+    tokens: (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0),
+    partial: usage.input_tokens === null || usage.output_tokens === null,
+  };
 }

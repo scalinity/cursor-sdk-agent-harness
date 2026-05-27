@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  addSessionCost,
+  addSessionTokens,
   deriveChromeState,
   formatThinkingGradientSegments,
   formatThinkingIndicatorText,
   formatTurnClock,
+  markSessionCostUnavailable,
+  markSessionTokensUnavailable,
   thinkingGradientPeakIndex,
 } from "../../src/repl/App.js";
+import type { TokenUsage } from "@harness/shared";
 import { THINKING_DOT_FRAME_HOLD } from "../../src/repl/useSpinnerFrame.js";
 
 describe("App turn formatting", () => {
@@ -50,6 +55,59 @@ describe("App turn formatting", () => {
       "mid",
       "dim",
     ]);
+  });
+});
+
+describe("session counter accumulation", () => {
+  const fullUsage: TokenUsage = {
+    input_tokens: 10,
+    output_tokens: 20,
+    cached_input_tokens: 0,
+    reasoning_tokens: null,
+    cost_usd_micros: 2500,
+    usage_source: "sdk_final_result",
+  };
+
+  it("adds exact token and cost totals from complete final usage", () => {
+    expect(addSessionTokens({ tokens: 100, hasUnavailableTurn: false }, fullUsage)).toEqual({
+      tokens: 130,
+      hasUnavailableTurn: false,
+    });
+    expect(addSessionCost({ micros: 1000, hasUnavailableTurn: false }, fullUsage)).toEqual({
+      micros: 3500,
+      hasUnavailableTurn: false,
+    });
+  });
+
+  it("marks counters partial when final usage omits part of the token or cost total", () => {
+    const partialUsage: TokenUsage = {
+      input_tokens: 10,
+      output_tokens: null,
+      cached_input_tokens: null,
+      reasoning_tokens: null,
+      cost_usd_micros: null,
+      usage_source: "sdk_final_result",
+    };
+
+    expect(addSessionTokens({ tokens: 100, hasUnavailableTurn: false }, partialUsage)).toEqual({
+      tokens: 110,
+      hasUnavailableTurn: true,
+    });
+    expect(addSessionCost({ micros: 1000, hasUnavailableTurn: false }, partialUsage)).toEqual({
+      micros: 1000,
+      hasUnavailableTurn: true,
+    });
+  });
+
+  it("marks counters partial when a run interrupts before final usage", () => {
+    expect(markSessionTokensUnavailable({ tokens: 100, hasUnavailableTurn: false })).toEqual({
+      tokens: 100,
+      hasUnavailableTurn: true,
+    });
+    expect(markSessionCostUnavailable({ micros: 1000, hasUnavailableTurn: false })).toEqual({
+      micros: 1000,
+      hasUnavailableTurn: true,
+    });
   });
 });
 
