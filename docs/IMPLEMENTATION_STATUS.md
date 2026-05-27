@@ -4390,6 +4390,20 @@ Restored animated thinking/boot/tool spinners after the visual-identity pass fro
 
 ---
 
+## Multi-model review fixes — 2026-05-27
+
+### Summary
+
+Addressed adversarial review findings across MCP secrets, replay slimming, usage/subagent honesty, and agent runtime error handling. Foreign `keychain:mcp-secret:` refs are rejected at storage; missing Keychain entries return `503 MCP_SECRET_MISSING` instead of opaque `500`s; stale secret cleanup runs after hydration verification and before probe; large replay events fail closed when SQL metadata is incomplete; subagent dashboard/API expose `totalCostPartial`; daily usage includes `cacheUnavailableCount`; cache summary cards show `unavailable` when cache data is incomplete.
+
+### Verification
+
+- `pnpm typecheck` — pass.
+- `pnpm lint` — pass.
+- `pnpm test` — pass.
+
+---
+
 ## 2026-05-27 — Review debate merge-comment hook
 
 Added a small repo script to standardize review debate handoff comments and guarantee Codex gets tagged in the final handoff line.

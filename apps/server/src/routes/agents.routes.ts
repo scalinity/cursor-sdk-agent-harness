@@ -42,6 +42,8 @@ function sendRuntimeError(reply: FastifyReply, err: AgentRuntimeError) {
     case "SDK_RESUME_FAILED":
     case "SDK_SEND_FAILED":
       return reply.code(502).send({ code: err.code, message: err.message });
+    case "MCP_SECRET_MISSING":
+      return reply.code(503).send({ code: err.code, message: err.message, details: err.details });
     default: {
       const _exhaustive: never = err.code;
       void _exhaustive;

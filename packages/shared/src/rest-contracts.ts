@@ -262,6 +262,7 @@ export const subagentListResponseSchema = z.object({
   totalTokens: z.number().int().nonnegative(),
   totalTokensPartial: z.boolean(),
   totalCostMicros: z.number().int().nonnegative().nullable(),
+  totalCostPartial: z.boolean(),
 });
 export type SubagentListResponse = z.infer<typeof subagentListResponseSchema>;
 
@@ -463,6 +464,7 @@ export const usageDailyPointSchema = z.object({
   tokens: z.number().int().nonnegative(),
   costUnavailableCount: z.number().int().nonnegative(),
   tokenUnavailableCount: z.number().int().nonnegative(),
+  cacheUnavailableCount: z.number().int().nonnegative(),
 });
 export const usageDailyResponseSchema = z.array(usageDailyPointSchema);
 export type UsageDailyPoint = z.infer<typeof usageDailyPointSchema>;

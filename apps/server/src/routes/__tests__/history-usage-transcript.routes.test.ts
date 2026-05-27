@@ -460,7 +460,16 @@ describe("Phase 11 usage routes", () => {
     const daily = usageDailyResponseSchema.parse(
       (await app.inject({ method: "GET", url: `/api/usage/daily?${query}` })).json(),
     );
-    expect(daily).toEqual([{ date: "2026-05-20", cost: 4567, tokens: 350, costUnavailableCount: 2, tokenUnavailableCount: 2 }]);
+    expect(daily).toEqual([
+      {
+        date: "2026-05-20",
+        cost: 4567,
+        tokens: 350,
+        costUnavailableCount: 2,
+        tokenUnavailableCount: 2,
+        cacheUnavailableCount: 1,
+      },
+    ]);
 
     const byModel = usageBreakdownResponseSchema.parse(
       (await app.inject({ method: "GET", url: `/api/usage/by-model?${query}` })).json(),

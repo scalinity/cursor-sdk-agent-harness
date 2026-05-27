@@ -116,12 +116,48 @@ describe("/api/mcp-servers", () => {
         },
       },
     });
-    expect(attacker.statusCode).toBe(201);
-    const attackerProbe = probedConfigs.at(-1);
-    expect(JSON.stringify(attackerProbe)).not.toContain("Bearer victim-secret");
-    expect(attackerProbe).toMatchObject({
-      headers: { Authorization: victimRef, "X-Trace": victimRef },
+    expect(attacker.statusCode).toBe(422);
+    expect(attacker.json()).toMatchObject({
+      code: "FOREIGN_MCP_SECRET_REF",
+      refServerId: victim.json().id,
     });
+    expect(probedConfigs).toHaveLength(1);
+  });
+
+  it("returns MCP_SECRET_MISSING when Keychain entry is gone", async () => {
+    const { db, repos, app } = setup();
+    const keychain = createInMemoryKeychainDriver();
+    setKeychainDriver(keychain);
+    const mcpSecretStore = new McpSecretStore({ service: "test-service" });
+    cleanup.push(() => app.close(), () => db.close());
+
+    await registerMcpServersRoutes(app, {
+      mcpServers: repos.mcpServers,
+      mcpSecretStore,
+      validatorOverride: async () => ({ status: "valid" as const, transport: "http" as const }),
+    });
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/mcp-servers",
+      payload: {
+        name: "missing-secret",
+        enabled: true,
+        config: {
+          url: "https://example.test",
+          headers: { Authorization: "Bearer secret" },
+        },
+      },
+    });
+    const id = created.json().id;
+    await keychain.deletePassword(
+      "test-service",
+      mcpSecretStore.accountFor(id, ["headers", "Authorization"]),
+    );
+
+    const reveal = await app.inject({ method: "POST", url: `/api/mcp-servers/${id}/reveal` });
+    expect(reveal.statusCode).toBe(503);
+    expect(reveal.json()).toMatchObject({ code: "MCP_SECRET_MISSING", serverId: id });
   });
 
   it("treats malformed MCP secret refs as literal secret values", async () => {

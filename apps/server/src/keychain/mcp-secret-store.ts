@@ -43,6 +43,18 @@ export function isMcpSecretRef(value: string): boolean {
   return parseMcpSecretRef(value) !== null;
 }
 
+export class MissingMcpSecretError extends Error {
+  readonly code = "MCP_SECRET_MISSING" as const;
+
+  constructor(
+    readonly serverId: string,
+    readonly path: readonly string[],
+  ) {
+    super(`Missing MCP secret for server ${serverId} at ${path.join(".")}`);
+    this.name = "MissingMcpSecretError";
+  }
+}
+
 export class McpSecretStore {
   constructor(private readonly opts: McpSecretStoreOptions) {}
 
@@ -74,7 +86,7 @@ export class McpSecretStore {
       this.accountFor(parsed.serverId, parsed.path),
     );
     if (value === null) {
-      throw new Error(`Missing MCP secret for server ${parsed.serverId}`);
+      throw new MissingMcpSecretError(parsed.serverId, parsed.path);
     }
     return value;
   }

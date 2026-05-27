@@ -165,6 +165,7 @@ describe("GET /api/runs/:runId/subagents", () => {
     expect(parsed.totalTokens).toBe(165);
     expect(parsed.totalTokensPartial).toBe(true);
     expect(parsed.totalCostMicros).toBeNull();
+    expect(parsed.totalCostPartial).toBe(true);
     expect(parsed.subagents).toEqual([
       expect.objectContaining({
         runId: running.id,

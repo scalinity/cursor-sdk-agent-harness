@@ -122,6 +122,7 @@ export interface UsageDailyAggregate {
   tokens: number;
   costUnavailableCount: number;
   tokenUnavailableCount: number;
+  cacheUnavailableCount: number;
 }
 
 export interface UsageBreakdownAggregate {
@@ -585,7 +586,8 @@ export class RunsRepo {
                 COALESCE(SUM(r.cached_input_tokens), 0) AS total_cached,
                 COALESCE(SUM(r.reasoning_tokens), 0) AS total_reasoning,
                 SUM(${costUnavailableSql()}) AS cost_unavailable_count,
-                SUM(${tokenUnavailableSql()}) AS token_unavailable_count
+                SUM(${tokenUnavailableSql()}) AS token_unavailable_count,
+                SUM(${cacheUnavailableSql()}) AS cache_unavailable_count
            FROM runs r
           ${where.clause}
           GROUP BY substr(r.started_at, 1, 10)
@@ -600,6 +602,7 @@ export class RunsRepo {
       total_reasoning: number | null;
       cost_unavailable_count: number | null;
       token_unavailable_count: number | null;
+      cache_unavailable_count: number | null;
     }>;
     return rows.map((row) => ({
       date: row.day,
@@ -607,6 +610,7 @@ export class RunsRepo {
       tokens: rowToUsageTokens(row),
       costUnavailableCount: rowNumber(row.cost_unavailable_count),
       tokenUnavailableCount: rowNumber(row.token_unavailable_count),
+      cacheUnavailableCount: rowNumber(row.cache_unavailable_count),
     }));
   }
 

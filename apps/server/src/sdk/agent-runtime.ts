@@ -20,7 +20,7 @@ import type { McpServersRepo } from "../db/repositories/mcp-servers.repo.js";
 import type { RunsRepo } from "../db/repositories/runs.repo.js";
 import type { SubagentDefinitionsRepo } from "../db/repositories/subagents.repo.js";
 import type { CursorApiKeyStore } from "../keychain/cursor-api-key.js";
-import type { McpSecretStore } from "../keychain/mcp-secret-store.js";
+import { MissingMcpSecretError, type McpSecretStore } from "../keychain/mcp-secret-store.js";
 import type { WorkspaceAllowlistRepo } from "../db/repositories/workspace-allowlist.repo.js";
 import type { WorkspacePolicy } from "../security/workspace-policy.js";
 import { getSettingsSnapshot } from "../services/settings.service.js";
@@ -60,7 +60,8 @@ export class AgentRuntimeError extends Error {
       | "AGENT_BUSY"
       | "SDK_CREATE_FAILED"
       | "SDK_RESUME_FAILED"
-      | "SDK_SEND_FAILED",
+      | "SDK_SEND_FAILED"
+      | "MCP_SECRET_MISSING",
     message: string,
     readonly details?: unknown,
   ) {
@@ -133,18 +134,31 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
 
   async function listMcpServersForSdk(agent: AgentRow) {
     const selectedMcpIds = new Set(agent.mcpServerIds);
-    const servers = deps.mcpRepo.list().filter((server) => selectedMcpIds.has(server.id));
+    const servers = deps.mcpRepo
+      .list()
+      .filter((server) => selectedMcpIds.has(server.id) && server.enabled);
     if (!deps.mcpSecretStore) return servers;
-    return Promise.all(
-      servers.map(async (server) => ({
-        ...server,
-        config: await hydrateMcpSecrets(
-          server.config,
-          server.id,
-          deps.mcpSecretStore!,
-        ),
-      })),
-    );
+    try {
+      return await Promise.all(
+        servers.map(async (server) => ({
+          ...server,
+          config: await hydrateMcpSecrets(
+            server.config,
+            server.id,
+            deps.mcpSecretStore!,
+          ),
+        })),
+      );
+    } catch (err) {
+      if (err instanceof MissingMcpSecretError) {
+        throw new AgentRuntimeError(
+          "MCP_SECRET_MISSING",
+          `${err.message}. Re-save MCP server secrets before starting a run.`,
+          { serverId: err.serverId, path: err.path },
+        );
+      }
+      throw err;
+    }
   }
 
   async function loadActiveAgent(row: AgentRow): Promise<SDKAgent> {
