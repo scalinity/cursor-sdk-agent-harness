@@ -7,7 +7,7 @@ import { formatMicros } from "../output/table.js";
 import { renderDiff } from "../render/diff.js";
 import { renderMarkdown } from "../render/markdown.js";
 import { formatToolCallLine } from "./ToolCallLine.js";
-import { createTuiTheme, fg, hardWrapText, type TuiTheme } from "./theme.js";
+import { createTuiTheme, fg, hardWrapText, truncateMiddle, type TuiTheme } from "./theme.js";
 
 const MAX_BUFFER_ITEMS = 5000;
 const MAX_TEXT_LINES = 5000;
@@ -124,10 +124,18 @@ export function renderViewportLines(text: string, width: number, height: number,
 
 export function clampStreamScrollOffset(items: readonly StreamItem[], width: number, height: number, scrollOffset: number, activeLabel?: string | undefined): number {
   const rendered = renderStreamItems(items);
-  const bodyHeight = activeLabel ? Math.max(1, height - 1) : height;
+  const labelHeight = activeLabel ? 1 : 0;
+  const indicatorHeight = scrollOffset > 0 && rendered.length > 0 ? 1 : 0;
+  const bodyHeight = Math.max(1, height - labelHeight - indicatorHeight);
   const wrappedLineCount = rendered.length > 0 ? hardWrapText(rendered, Math.max(12, width)).length : 0;
   const maxOffset = Math.max(0, wrappedLineCount - Math.max(1, bodyHeight));
   return Math.min(Math.max(0, scrollOffset), maxOffset);
+}
+
+export function formatScrollIndicator(scrollOffset: number, width: number): string {
+  const safeWidth = Math.max(12, width);
+  const text = safeWidth >= 48 ? `── ▼ ${scrollOffset} lines below · Shift+↓ PgDn ──` : `▼ ${scrollOffset} below`;
+  return truncateMiddle(text, safeWidth);
 }
 
 export interface StreamViewProps {
@@ -148,13 +156,18 @@ export const StreamView = memo(function StreamView({ items, height, width = proc
       </Box>
     );
   }
-  const bodyHeight = activeLabel ? Math.max(1, height - 1) : height;
-  const lines = useMemo(() => rendered.length > 0 ? renderViewportLines(rendered, Math.max(12, width), bodyHeight, scrollOffset) : [], [bodyHeight, rendered, scrollOffset, width]);
-  // Assuming normal terminal selection of the visible viewport is the supported copy path because Ink does not expose a text-selection API. Flag this if wrong.
+  const labelHeight = activeLabel ? 1 : 0;
+  const showScrollIndicator = scrollOffset > 0 && rendered.length > 0;
+  const indicatorHeight = showScrollIndicator ? 1 : 0;
+  const bodyHeight = Math.max(1, height - labelHeight - indicatorHeight);
+  const safeWidth = Math.max(12, width);
+  const lines = useMemo(() => rendered.length > 0 ? renderViewportLines(rendered, safeWidth, bodyHeight, scrollOffset) : [], [bodyHeight, rendered, scrollOffset, safeWidth]);
+  const indicatorText = formatScrollIndicator(scrollOffset, safeWidth);
   return (
     <Box flexDirection="column" height={height}>
       {lines.length === 0 ? <Text {...fg(theme.muted)}>No messages yet. Start with a prompt, @file, or /command.</Text> : lines.map((line, index) => <Text key={`${index}:${line}`}>{line}</Text>)}
       {activeLabel ? <Text {...fg(theme.accent)}>{activeLabel}</Text> : null}
+      {showScrollIndicator ? <Text {...fg(theme.muted)}>{indicatorText}</Text> : null}
     </Box>
   );
 });

@@ -176,6 +176,8 @@ export function InputBar({
       return;
     }
 
+    if (key.shift && (key.upArrow || key.downArrow)) return;
+
     if (key.ctrl && input === "c" && value.length > 0) {
       setDraft("");
       onClear?.();

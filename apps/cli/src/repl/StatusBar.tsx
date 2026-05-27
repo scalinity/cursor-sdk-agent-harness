@@ -29,7 +29,7 @@ export function StatusBar(props: StatusBarProps) {
   const model = `${props.mode} · ${sanitizeTerminalText(props.modelId)}`;
   const runState = props.activeRunId ? `run ${props.activeRunId.slice(0, 8)}` : props.queuedPrompts ? `${props.queuedPrompts} queued` : "idle";
   const compact = width < 120;
-  const hints = compact ? "^C cancel · ^D quit · ^L clear" : "Enter submit · Shift+Enter newline · ↑↓ history · Esc dismiss · ^C cancel/quit · ^L clear";
+  const hints = compact ? "^C cancel · ^D quit · ^L clear · PgUp/Dn scroll" : "Enter submit · Shift+Enter newline · ↑↓ history · Shift+↑↓ scroll · Esc dismiss · ^C cancel/quit · ^L clear";
   const details = compact ? `${cwd} · ws ${props.connection} · ${formatMicros(props.sessionCostMicros)} · ${hints}` : `${cwd} · ${model} · ${runState} · ws ${props.connection} · ${formatMicros(props.sessionCostMicros)} · ${hints}`;
   const line = truncateMiddle(details, Math.max(1, width - 2));
   return (

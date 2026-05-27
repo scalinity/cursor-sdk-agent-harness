@@ -105,6 +105,14 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
       setScrollOffset(0);
       return;
     }
+    if (key.shift && key.upArrow) {
+      setScrollOffset((current) => clampOffset(current + 1));
+      return;
+    }
+    if (key.shift && key.downArrow) {
+      setScrollOffset((current) => Math.max(0, clampOffset(current) - 1));
+      return;
+    }
     if (key.pageUp) {
       const page = Math.max(3, Math.floor(streamHeight * 0.8));
       setScrollOffset((current) => clampOffset(current + page));
@@ -153,6 +161,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         setMode,
         setModelId,
         setBuffer,
+        setScrollOffset,
       }).catch((error: unknown) => {
         appendError(error instanceof Error ? error.message : String(error));
       });
@@ -287,7 +296,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         spinner={spinner}
         theme={theme}
       />
-      <Box flexDirection="column" height={layout.scrollHeight} borderStyle="round" {...border(theme.border)} paddingX={1} {...bg(theme.panel)}>
+      <Box flexDirection="column" height={layout.scrollHeight} borderStyle="round" {...border(scrollOffset > 0 ? theme.accent : theme.border)} paddingX={1} {...bg(theme.panel)}>
         <StreamView items={buffer.items} height={streamHeight} width={streamWidth} scrollOffset={scrollOffset} activeLabel={activeLabel} theme={theme} />
       </Box>
       {mentionOpen ? <MentionPopup results={mentionResults} selectedIndex={mentionIndex} open={mentionOpen} theme={theme} /> : null}
@@ -356,6 +365,7 @@ interface SlashCommandContext {
   setMode: React.Dispatch<React.SetStateAction<CliMode>>;
   setModelId: React.Dispatch<React.SetStateAction<string>>;
   setBuffer: React.Dispatch<React.SetStateAction<StreamBuffer>>;
+  setScrollOffset: React.Dispatch<React.SetStateAction<number>>;
 }
 
 async function handleSlashCommand(ctx: SlashCommandContext): Promise<void> {
@@ -373,6 +383,7 @@ async function handleSlashCommand(ctx: SlashCommandContext): Promise<void> {
       }
       return;
     case "clear":
+      ctx.setScrollOffset(0);
       ctx.setBuffer(createStreamBuffer());
       return;
     case "exit":

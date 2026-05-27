@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { computeTuiLayout, countInputLines, MAX_INPUT_VISIBLE_LINES } from "../../src/repl/layout.js";
 import { filterSlashCommands } from "../../src/repl/SlashPalette.js";
-import { clampStreamScrollOffset, renderViewportLines } from "../../src/repl/StreamView.js";
+import { clampStreamScrollOffset, formatScrollIndicator, renderViewportLines } from "../../src/repl/StreamView.js";
 import { bg, border, createTuiTheme, fg } from "../../src/repl/theme.js";
 
 describe("fullscreen TUI helpers", () => {
@@ -26,7 +26,23 @@ describe("fullscreen TUI helpers", () => {
     const lines = renderViewportLines("alpha beta gamma delta\nlast", 10, 2, 0);
     expect(lines).toEqual(["delta", "last"]);
     expect(renderViewportLines("one\ntwo\nthree", 20, 2, 1)).toEqual(["one", "two"]);
-    expect(clampStreamScrollOffset([{ type: "assistant", text: "one\ntwo\nthree" }], 20, 2, 99)).toBe(1);
+    // 3 lines, height 2, offset 99 → scrolled up so indicator takes 1 line → bodyHeight=1 → max=2
+    expect(clampStreamScrollOffset([{ type: "assistant", text: "one\ntwo\nthree" }], 20, 2, 99)).toBe(2);
+  });
+
+  it("treats an empty buffer as non-scrollable", () => {
+    // After /clear a stale offset must collapse to 0 so no "lines below" indicator renders.
+    expect(clampStreamScrollOffset([], 40, 5, 99)).toBe(0);
+    expect(clampStreamScrollOffset([{ type: "assistant", text: "" }], 40, 5, 99)).toBe(0);
+  });
+
+  it("keeps the scroll indicator within one row", () => {
+    const wide = formatScrollIndicator(3, 60);
+    expect(wide).toContain("lines below");
+    expect(wide.length).toBeLessThanOrEqual(60);
+    expect(formatScrollIndicator(5, 20)).toBe("▼ 5 below");
+    expect(formatScrollIndicator(99999, 40).length).toBeLessThanOrEqual(40);
+    expect(formatScrollIndicator(999999999, 12).length).toBeLessThanOrEqual(12);
   });
 
   it("omits Ink color props in NO_COLOR mode", () => {
