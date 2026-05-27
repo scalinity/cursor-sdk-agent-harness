@@ -229,4 +229,27 @@ describe("StreamView helpers", () => {
     expect(out).toContain("✓");
     expect(out).toContain("shell sleep 100");
   });
+
+  it("normalizes the edit path in code-edit previews", () => {
+    let buffer = createStreamBuffer();
+    buffer = ingestStreamFrame(buffer, {
+      ...base,
+      type: "derived.code_edit",
+      event: {
+        event_id: "00000000-0000-4000-8000-0000000000c1",
+        schema_version: 1,
+        seq: 1,
+        agent_id: "agent-1",
+        run_id: "run-1",
+        occurred_at: base.sent_at,
+        received_at: base.sent_at,
+        sdk_type: "tool_call",
+        kind: "code_edit.detected",
+        payload: { source_call_id: "c1", confidence: "high", edits: [{ path: "/work/proj/src/x.ts", language: null, after: "const x = 1;\n", operations: [] }] },
+      },
+    } satisfies ServerFrame, "/work/proj");
+    const out = renderStreamItems(buffer.items);
+    expect(out).toContain("src/x.ts");
+    expect(out).not.toContain("/work/proj/src/x.ts");
+  });
 });

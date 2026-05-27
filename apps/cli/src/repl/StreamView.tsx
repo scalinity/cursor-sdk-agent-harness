@@ -5,6 +5,7 @@ import type { ServerFrame } from "@harness/shared";
 import { sanitizeTerminalText } from "../output/sanitize.js";
 import { formatMicros } from "../output/table.js";
 import { renderFileEdit } from "../render/diff.js";
+import { normalizePath } from "../render/path.js";
 import { renderMarkdown } from "../render/markdown.js";
 import { formatToolCall } from "../render/tool-call.js";
 import { formatToolCallLine } from "./ToolCallLine.js";
@@ -79,7 +80,7 @@ export function ingestStreamFrame(buffer: StreamBuffer, frame: ServerFrame, cwd:
       for (const edit of frame.event.payload.edits) {
         items.push({
           type: "diff",
-          path: edit.path,
+          path: normalizePath(edit.path, cwd),
           ...(edit.language ? { language: edit.language } : {}),
           ...(edit.before !== undefined ? { before: edit.before } : {}),
           ...(edit.after !== undefined ? { after: edit.after } : {}),
