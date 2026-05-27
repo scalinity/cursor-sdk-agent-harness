@@ -12,7 +12,9 @@
 function getArg(flag) {
   const index = process.argv.indexOf(flag);
   if (index === -1) return "";
-  return process.argv[index + 1] ?? "";
+  const nextArg = process.argv[index + 1];
+  if (nextArg === undefined || nextArg.startsWith("-")) return "";
+  return nextArg;
 }
 
 const reviewer = getArg("--reviewer").trim();
