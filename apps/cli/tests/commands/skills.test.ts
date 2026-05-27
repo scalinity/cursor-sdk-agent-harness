@@ -76,4 +76,18 @@ description: Demo skill for tests.
     await expect(createSkillCommand({ name: "missing-description" }, { write: vi.fn() }))
       .rejects.toThrow(/description/i);
   });
+
+  it("rejects both inline content and file content", async () => {
+    const workspace = await makeWorkspace();
+    const bodyPath = path.join(workspace, "skill-body.md");
+    await writeFile(bodyPath, "# Body\n");
+
+    await expect(createSkillCommand({
+      name: "confused-source",
+      description: "Reject ambiguous content sources.",
+      content: "# Inline\n",
+      file: bodyPath,
+      workspace,
+    }, { write: vi.fn() })).rejects.toThrow(/either --content or --file/i);
+  });
 });

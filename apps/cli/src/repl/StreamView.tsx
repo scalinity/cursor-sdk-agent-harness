@@ -2,12 +2,14 @@ import React, { memo, useMemo } from "react";
 import { Box, Text } from "ink";
 import { styles } from "../render/styles.js";
 import type { ServerFrame } from "@harness/shared";
+import { isRunStatusTerminalFrame } from "../client/ws.js";
 import { sanitizeTerminalText } from "../output/sanitize.js";
 import { renderFileEdit } from "../render/diff.js";
 import { normalizePath } from "../render/path.js";
 import { renderMarkdown } from "../render/markdown.js";
 import { formatToolCall } from "../render/tool-call.js";
 import { formatToolCallLine } from "./ToolCallLine.js";
+import { glyph } from "./glyphs.js";
 import { createTuiTheme, fg, hardWrapText, truncateMiddle, visibleLength, type TuiTheme } from "./theme.js";
 
 const MAX_BUFFER_ITEMS = 5000;
@@ -96,6 +98,12 @@ export function ingestStreamFrame(buffer: StreamBuffer, frame: ServerFrame, cwd:
       });
       break;
     }
+    case "sdk.status": {
+      if (isRunStatusTerminalFrame(frame)) {
+        reconcileRunningTools(items, frame.event.payload.status === "CANCELLED" ? "cancelled" : "completed");
+      }
+      break;
+    }
     case "run.final_result": {
       const usage = frame.event.payload.usage;
       reconcileRunningTools(items, "completed");
@@ -125,7 +133,33 @@ export function ingestStreamFrame(buffer: StreamBuffer, frame: ServerFrame, cwd:
 }
 
 export function renderStreamItems(items: readonly StreamItem[], width = 80): string {
-  return items.map((item) => renderStreamItem(item, width)).filter((line) => line.length > 0).join("\n");
+  const lines: string[] = [];
+  let previousBlock: StreamBlock | null = null;
+  for (const item of items) {
+    const block = classifyStreamBlock(item);
+    const rendered = renderStreamItem(item, width);
+    if (rendered.length === 0) continue;
+    if (previousBlock !== null && shouldInsertBlockGap(previousBlock, block)) {
+      lines.push("");
+    }
+    lines.push(rendered);
+    previousBlock = block;
+  }
+  return lines.join("\n");
+}
+
+type StreamBlock = "user" | "assistant" | "thinking" | "tool-sequence" | "meta";
+
+function classifyStreamBlock(item: StreamItem): StreamBlock {
+  if (item.type === "user") return "user";
+  if (item.type === "assistant") return "assistant";
+  if (item.type === "thinking") return "thinking";
+  if (item.type === "tool" || item.type === "diff") return "tool-sequence";
+  return "meta";
+}
+
+function shouldInsertBlockGap(current: StreamBlock, next: StreamBlock): boolean {
+  return current !== next && !(current === "tool-sequence" && next === "tool-sequence");
 }
 
 export function renderViewportLines(text: string, width: number, height: number, scrollOffset: number): string[] {
@@ -278,7 +312,7 @@ function renderActiveLabel(label: string, segments: readonly ActiveLabelSegment[
       </Text>
     );
   }
-  return <Text {...fg(theme.brand)}>{label}</Text>;
+  return <Text {...fg(theme.state?.running)}>{label}</Text>;
 }
 
 function renderStreamItem(item: StreamItem, width: number): string {
@@ -286,15 +320,15 @@ function renderStreamItem(item: StreamItem, width: number): string {
     case "user":
       return `${styles.brand(formatTurnHeader("you", width, item.at))}\n${styles.user(sanitizeTerminalText(item.text))}`;
     case "assistant":
-      return `${styles.muted(formatTurnHeader("claude", width))}\n${renderMarkdown(item.text)}`;
+      return `${styles.brand(formatTurnHeader("claude", width))}\n${styles.muted(renderMarkdown(item.text))}`;
     case "thinking":
-      return styles.thinking(`◐ Thinking...\n  ${sanitizeTerminalText(item.text)}`);
+      return styles.thinking(`${glyph.thinking} Thinking...\n  ${sanitizeTerminalText(item.text)}`);
     case "tool":
       return formatToolCallLine(item);
     case "diff":
       return renderFileEdit(item);
     case "approval":
-      return styles.approval(`⚠ Approval required: ${sanitizeTerminalText(item.description)} [y]es / [n]o / [a]lways`);
+      return styles.approval(`Approval required: ${sanitizeTerminalText(item.description)} [y]es / [n]o / [a]lways`);
     case "summary":
       return styles.muted(renderSummary(item));
     case "system":

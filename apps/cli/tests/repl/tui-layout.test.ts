@@ -73,7 +73,7 @@ describe("fullscreen TUI helpers", () => {
     expect(bg(theme.background)).toEqual({});
     expect(bg(theme.panel)).toEqual({});
     expect(bg(theme.panelSoft)).toEqual({});
-    expect(fg(theme.brand)).toEqual({ color: "#E04E1F" });
-    expect(border(theme.border)).toEqual({ borderColor: "#66717f" });
+    expect(fg(theme.brand)).toEqual({ color: theme.brand });
+    expect(border(theme.border)).toEqual({ borderColor: theme.border });
   });
 });

@@ -315,7 +315,7 @@ export function selectImageDropPaths(paths: readonly string[], existingCount: nu
   }
   return {
     selected: unique,
-    skippedCount: Math.max(0, seen.size - MAX_IMAGE_ATTACHMENTS),
+    skippedCount: Math.max(0, seen.size - remainingSlots),
   };
 }
 

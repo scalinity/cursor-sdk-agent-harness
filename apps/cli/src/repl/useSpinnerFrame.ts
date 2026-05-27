@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
-import spinners from "cli-spinners";
-
-const FRAMES = spinners.dots.frames;
+import { glyph } from "./glyphs.js";
 const THINKING_DOT_FRAMES = ["Thinking   ", "Thinking.  ", "Thinking.. ", "Thinking..."] as const;
 export const THINKING_DOT_FRAME_HOLD = 8;
 
@@ -59,12 +57,12 @@ export function useSpinnerFrameState(active: boolean): SpinnerFrameState {
       return;
     }
     const timer = setInterval(() => {
-      setIndex((current) => (current + 1) % FRAMES.length);
-    }, spinners.dots.interval);
+      setIndex((current) => (current + 1) % THINKING_DOT_FRAME_HOLD);
+    }, 90);
     return () => clearInterval(timer);
   }, [active]);
 
-  return { frame: active ? FRAMES[index] ?? "⠋" : "", index };
+  return { frame: active ? glyph.thinking : "", index };
 }
 
 export function useSpinnerFrame(active: boolean): string {

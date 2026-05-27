@@ -52,14 +52,12 @@ export function createStyles(theme: TuiTheme = createTuiTheme()): Styles {
     if (typeof value !== "string") throw new Error(`Missing TUI theme color: ${String(key)}`);
     return value;
   };
+  const state = theme.state ?? fallback.state;
+  if (state === undefined) throw new Error("Missing TUI state color group");
   const c = {
     text: color("text"),
     muted: color("muted"),
     brand: color("brand"),
-    stateWarning: color("stateWarning"),
-    stateDanger: color("stateDanger"),
-    stateSuccess: color("stateSuccess"),
-    stateActive: color("stateActive"),
     code: color("code"),
   };
   return {
@@ -67,13 +65,13 @@ export function createStyles(theme: TuiTheme = createTuiTheme()): Styles {
     user: (s) => chalk.hex(c.text)(s),
     tool: (s) => chalk.hex(c.muted)(s),
     toolResult: (s) => chalk.hex(c.muted).dim(s),
-    glyphOk: (s) => chalk.hex(c.stateSuccess)(s),
-    glyphErr: (s) => chalk.hex(c.stateDanger)(s),
-    glyphRun: (s) => chalk.hex(c.stateActive)(s),
+    glyphOk: (s) => chalk.hex(state.success)(s),
+    glyphErr: (s) => chalk.hex(state.error)(s),
+    glyphRun: (s) => chalk.hex(state.running)(s),
     thinking: (s) => chalk.hex(c.muted).italic(s),
-    system: (s) => chalk.hex(c.brand)(s),
-    error: (s) => chalk.hex(c.stateDanger)(s),
-    approval: (s) => chalk.hex(c.stateWarning)(s),
+    system: (s) => chalk.hex(c.text)(s),
+    error: (s) => chalk.hex(state.error)(s),
+    approval: (s) => chalk.hex(state.running)(s),
     muted: (s) => chalk.hex(c.muted)(s),
     bold: (s) => chalk.bold(s),
     italic: (s) => chalk.italic(s),
@@ -81,9 +79,9 @@ export function createStyles(theme: TuiTheme = createTuiTheme()): Styles {
     link: (s) => chalk.underline(s),
     url: (s) => chalk.hex(c.muted)(s),
     quote: (s) => chalk.hex(c.muted)(s),
-    diffAdd: (s) => chalk.hex(c.stateSuccess)(s),
-    diffDel: (s) => chalk.hex(c.stateDanger)(s),
-    diffMeta: (s) => chalk.hex(c.brand)(s),
+    diffAdd: (s) => chalk.hex(state.success)(s),
+    diffDel: (s) => chalk.hex(state.error)(s),
+    diffMeta: (s) => chalk.hex(c.text)(s),
     diffContext: (s) => chalk.hex(c.muted)(s),
     frame: (s) => chalk.hex(c.muted)(s),
     match: (s) => chalk.inverse(s),

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -72,6 +72,33 @@ describe("skills library", () => {
       description: "Try to leave the skills root.",
       workspace,
     })).rejects.toThrow(/lowercase letters/i);
+  });
+
+  it("writes project skill files without group or world permissions", async () => {
+    const workspace = await makeWorkspace();
+    const created = await createSkill({
+      name: "private-skill",
+      description: "Keep skill instructions private to the user.",
+      workspace,
+    });
+
+    const mode = (await stat(created.filePath)).mode & 0o777;
+    expect(mode & 0o077).toBe(0);
+  });
+
+  it("refuses symlinked skill directories and files", async () => {
+    const workspace = await makeWorkspace();
+    const skillsRoot = path.join(workspace, ".cursor/skills");
+    const outside = await mkdtemp(path.join(os.tmpdir(), "harness-cli-skill-outside-"));
+    tempDirs.push(outside);
+    await mkdir(skillsRoot, { recursive: true });
+    await symlink(outside, path.join(skillsRoot, "linked-skill"));
+    await expect(createSkill({
+      name: "linked-skill",
+      description: "Must not follow symlinked skill directories.",
+      workspace,
+      force: true,
+    })).rejects.toThrow(/symlink/i);
   });
 
   it("refuses to overwrite unless forced", async () => {

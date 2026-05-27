@@ -1,10 +1,11 @@
 import React from "react";
 import { Box, Text } from "ink";
+import { glyph } from "./glyphs.js";
 
 export function formatThinking(text: string, collapsed = false): string {
-  if (collapsed) return `▸ Thinking (${text.split(/\s+/).filter(Boolean).length} tokens)`;
+  if (collapsed) return `${glyph.running} Thinking (${text.split(/\s+/).filter(Boolean).length} tokens)`;
   const body = text.split("\n").map((line) => `  ${line}`).join("\n");
-  return `◐ Thinking...\n${body}`;
+  return `${glyph.thinking} Thinking...\n${body}`;
 }
 
 export function ThinkingBlock({ text, collapsed = false }: { text: string; collapsed?: boolean }) {

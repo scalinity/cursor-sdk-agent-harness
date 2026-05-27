@@ -3,10 +3,12 @@ import { Box, Text, useInput } from "ink";
 import type { ContextChip } from "@harness/shared";
 import { extractImageDropPaths, formatImageChipLabel, shouldTreatAsImageDrop } from "../lib/attachments.js";
 import type { ImageAttachment } from "../lib/attachments.js";
+import { sanitizeTerminalText } from "../output/sanitize.js";
 import type { MentionSelectionItem } from "../types.js";
 import { bg, border, fg, hardWrapText, type TuiTheme } from "./theme.js";
 import { mentionItemToChip } from "./MentionPopup.js";
 import { isKnownSlashCommand, type KnownSlashCommandName, type SlashPaletteItem } from "./SlashPalette.js";
+import { glyph } from "./glyphs.js";
 import { shouldReserveArrowKeysForStreamScroll, shouldUseCtrlForPromptHistory } from "./stream-scroll.js";
 
 export interface MentionTrigger {
@@ -240,14 +242,13 @@ export function InputBar({
 
   const allVisibleLines = value.length > 0 ? value.split("\n").flatMap((line) => hardWrapText(line, Math.max(12, width - 8))) : [""];
   const hiddenLineCount = Math.max(0, allVisibleLines.length - maxVisibleLines);
-  const visibleLines = allVisibleLines.slice(hiddenLineCount);
-  const lastLineIndex = visibleLines.length - 1;
+  const visibleLines = allVisibleLines.slice(hiddenLineCount).map((line) => sanitizeTerminalText(line));
 
   return (
     <Box
       flexDirection="column"
       borderStyle="round"
-      {...border(focused ? theme.stateActive : theme.border)}
+      {...border(focused ? theme.brand : theme.border)}
       paddingX={1}
       {...bg(theme.panel)}
     >
@@ -256,17 +257,16 @@ export function InputBar({
           {index === 0 ? (
             <>
               {chips.map((chip) => (
-                <Text key={chip.id} {...fg(theme.muted)}>[@{chip.mention.displayLabel}] </Text>
+                <Text key={chip.id} {...fg(theme.muted)}>[{sanitizeTerminalText(chip.mention.displayLabel)}] </Text>
               ))}
               {imageAttachments.map((attachment) => (
-                <Text key={attachment.id} {...fg(theme.muted)}>[img:{formatImageChipLabel(attachment.name)}] </Text>
+                <Text key={attachment.id} {...fg(theme.muted)}>[img:{formatImageChipLabel(sanitizeTerminalText(attachment.name))}] </Text>
               ))}
             </>
           ) : null}
-          <Text {...fg(focused ? theme.brand : theme.muted)}>{index === 0 ? "▸ " : "  "}</Text>
-          {hiddenLineCount > 0 && index === 0 ? <Text {...fg(theme.muted)}>… </Text> : null}
+          <Text {...fg(focused ? theme.brand : theme.muted)}>{index === 0 ? `${glyph.running} ` : "  "}</Text>
+          {hiddenLineCount > 0 && index === 0 ? <Text {...fg(theme.muted)}>... </Text> : null}
           {line.length > 0 ? <Text {...fg(theme.text)}>{line}</Text> : null}
-          {index === lastLineIndex ? <Text {...fg(focused ? theme.brand : theme.muted)}>{" "}</Text> : null}
         </Box>
       ))}
     </Box>

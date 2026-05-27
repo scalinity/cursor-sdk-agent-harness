@@ -4024,3 +4024,36 @@ Hardened CLI image attachment handling and cleaned up the REPL component side-ef
 ### Next phase
 
 Continue with the next Tier 3 visual identity subsection when its prompt or subsection scope is provided.
+
+---
+
+## CLI Terminal Theme and Session Hardening — 2026-05-27
+
+### Summary
+
+Finished the terminal-native CLI polish pass after the gray-slab screenshot. The CLI now keeps major surfaces transparent to the host terminal, documents its theme/glyph vocabulary, uses state-specific colors for runtime status, and improves transcript rhythm without filling panes with solid backgrounds. This pass also hardens saved-session restore behavior, startup/cleanup handling, WebSocket early-close behavior, run command usage validation, and dropped-image accounting.
+
+### Files modified
+
+- `.gitignore` — ignores the local `.harness-cli/` session/config directory.
+- `apps/cli/THEME.md` — records the CLI theme, glyph, border, and stream rhythm rules.
+- `apps/cli/package.json` and `pnpm-lock.yaml` — add the CLI lint script and remove the now-unused `cli-spinners` dependency.
+- `apps/cli/src/repl/*`, `apps/cli/src/render/styles.ts`, and `apps/cli/src/lib/attachments.ts` — align the terminal theme/state tokens, transparent surfaces, stream spacing, glyph usage, input sanitization, and dropped-image cap accounting.
+- `apps/cli/src/session.ts`, `apps/cli/src/index.ts`, and `apps/cli/src/client/ws.ts` — validate saved sessions more strictly, preserve session persistence during cleanup, reject empty TTY `run` prompts, and handle pre-open WS closes.
+- `apps/cli/tests/*` — add and update regression coverage for saved-session validation, layout/theme expectations, and attachment skipped counts.
+- `docs/IMPLEMENTATION_STATUS.md` — recorded this status entry.
+
+### Verification
+
+- `pnpm -F @harness/cli typecheck` — pass.
+- `pnpm -F @harness/cli test` — pass, 27 files / 136 tests before final session additions.
+- `pnpm exec eslint apps/cli` — pass.
+- `pnpm typecheck` — pass.
+- `pnpm lint` — pass.
+- `pnpm test` — pass: shared 39, eslint-plugin 6, web 147, server 468 passing / 1 skipped, CLI 141, desktop 0 test files, scripts 11.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass; rebuilt web/server/desktop and packaged macOS app.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` — installed timestamp May 27 03:25:15 2026.
+
+### Next phase
+
+Continue with the next Tier 3 visual identity subsection when its prompt or subsection scope is provided.

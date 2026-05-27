@@ -40,7 +40,7 @@ export function HeaderBar({
   return (
     <Box flexDirection="column" width={width} paddingX={1} paddingTop={0} {...bg(theme.background)}>
       <Box width={Math.max(1, width - 2)} justifyContent="space-between">
-        <Text {...fg(theme.stateActive)} bold>
+        <Text {...fg(theme.state?.ready)} bold>
           {title}
         </Text>
         <Text {...fg(chromeStateColor(theme, chromeState))}>{modelLabel}</Text>
@@ -78,8 +78,8 @@ function sanitizeChromeLine(value: string): string {
 }
 
 function chromeStateColor(theme: TuiTheme, state: ChromeState): string | undefined {
-  if (state === "ready") return theme.stateReady;
-  if (state === "streaming") return theme.stateActive;
-  if (state === "tool-running") return theme.stateWarning;
-  return theme.stateDanger;
+  if (state === "ready") return theme.state?.ready;
+  if (state === "streaming") return theme.state?.running;
+  if (state === "tool-running") return theme.state?.running;
+  return theme.state?.error;
 }

@@ -26,6 +26,7 @@ apps/desktop/dist-electron/
 *.sqlite-wal
 *.sqlite-shm
 data/
+.harness-cli/
 
 # OS
 .DS_Store

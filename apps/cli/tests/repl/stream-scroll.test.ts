@@ -38,6 +38,13 @@ describe("stream scroll helpers", () => {
     expect(resolveStreamScrollDelta({ ctrl: true, upArrow: true }, layout, 0)).toBeNull();
   });
 
+  it("ignores scroll keys when there is no scrollable overflow", () => {
+    const layout = { bodyHeight: 10, maxOffset: 0 };
+    expect(resolveStreamScrollDelta({ upArrow: true }, layout, 0)).toBeNull();
+    expect(resolveStreamScrollDelta({ pageDown: true }, layout, 0)).toBeNull();
+    expect(resolveStreamScrollDelta({ ctrl: true, input: "g" }, layout, 2)).toBe(-2);
+  });
+
   it("applies scroll deltas within bounds", () => {
     expect(applyStreamScrollDelta(2, 5, 10)).toBe(7);
     expect(applyStreamScrollDelta(2, -5, 10)).toBe(0);

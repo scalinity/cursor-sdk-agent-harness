@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { bg, border, fg, type TuiTheme } from "./theme.js";
+import { glyph } from "./glyphs.js";
 
 export interface SlashPaletteItem {
   command: string;
@@ -42,15 +43,15 @@ export interface SlashPaletteProps {
 
 export function SlashPalette({ items, selectedIndex, focused = true, theme }: SlashPaletteProps) {
   if (items.length === 0) return null;
-  const borderColor = focused ? theme.stateActive : theme.border;
+  const borderColor = focused ? theme.state?.ready : theme.border;
   return (
     <Box flexDirection="column" borderStyle="round" {...border(borderColor)} paddingX={1} {...bg(theme.panel)}>
       <Text {...fg(theme.muted)}>COMMAND DECK</Text>
       {items.slice(0, 6).map((item, index) => {
         const selected = index === selectedIndex;
         return (
-          <Text key={item.command} {...fg(selected ? theme.stateActive : theme.text)} bold={selected}>
-            {selected ? "▸ " : "  "} /{item.command}{item.args ? ` ${item.args}` : ""} <Text {...fg(theme.muted)}>· {item.description}</Text>
+          <Text key={item.command} {...fg(selected ? theme.state?.ready : theme.text)} bold={selected}>
+            {selected ? `${glyph.running} ` : "  "} /{item.command}{item.args ? ` ${item.args}` : ""} <Text {...fg(theme.muted)}> - {item.description}</Text>
           </Text>
         );
       })}

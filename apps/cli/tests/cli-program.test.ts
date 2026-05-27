@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { describe, expect, it } from "vitest";
 import { CliHttpError } from "../src/client/http.js";
 import {
+  assertRunPromptInput,
   attachDefaultChatAction,
   normalizeChatCommandOptions,
   shouldCreateFreshAgentForSavedSession,
@@ -115,5 +116,11 @@ describe("CLI root command parsing", () => {
       new CliHttpError("network", 0, "NETWORK_ERROR", null),
     )).toBe(false);
     expect(shouldCreateFreshAgentForSavedSession(new Error("boom"))).toBe(false);
+  });
+
+  it("rejects harness run with no prompt when stdin is a TTY", () => {
+    expect(() => assertRunPromptInput([], true)).toThrow(/harness run <prompt>/i);
+    expect(() => assertRunPromptInput([], false)).not.toThrow();
+    expect(() => assertRunPromptInput(["hello"], true)).not.toThrow();
   });
 });

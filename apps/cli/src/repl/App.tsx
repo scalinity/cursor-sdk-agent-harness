@@ -151,15 +151,15 @@ export function App({
         : truncateMiddle(isStartingRun ? `${spinner} starting run` : thinkingLabelText, streamWidth))
     : undefined;
   const spinnerSegment: ThinkingGradientSegment | undefined = spinner
-    ? (theme.brand ? { text: `${spinner} `, color: theme.brand } : { text: `${spinner} ` })
+    ? (theme.state?.running ? { text: `${spinner} `, color: theme.state.running } : { text: `${spinner} ` })
     : undefined;
   const activeLabelSegments: ThinkingGradientSegment[] | undefined = turnActive && !runningTool && !isStartingRun && activeLabel === thinkingLabelText
     ? [
         ...(spinnerSegment ? [spinnerSegment] : []),
         ...formatThinkingGradientSegments(thinkingText, thinkingGradientPeak, {
           dim: theme.muted,
-          mid: theme.brandWarm,
-          bright: theme.brand,
+          mid: theme.state?.ready,
+          bright: theme.state?.success,
         }),
       ]
     : undefined;
@@ -192,6 +192,7 @@ export function App({
     [activeLabel, buffer.items, scrollOffset, streamHeight, streamWidth],
   );
   const { maxOffset, bodyHeight, effectiveOffset, streamScrollActive } = streamViewport;
+  const inputFocused = !busy;
   useStreamScrollClamp(scrollOffset, effectiveOffset, setScrollOffset);
 
   const appendUser = (text: string) => setBuffer((current) => ({ items: [...current.items, { type: "user", text, at: formatTurnClock() }] }));
@@ -492,11 +493,11 @@ export function App({
         queuedPrompts={queuedPrompts.length}
         theme={theme}
       />
-      <Box flexDirection="column" height={layout.scrollHeight} borderStyle="round" {...border(effectiveOffset > 0 ? theme.brand : theme.border)} paddingX={1} {...bg(theme.panel)}>
+      <Box flexDirection="column" height={layout.scrollHeight} borderStyle="round" {...border(theme.border)} paddingX={1} {...bg(theme.panel)}>
         <StreamView items={buffer.items} height={streamHeight} width={streamWidth} scrollOffset={effectiveOffset} activeLabel={activeLabel} activeLabelSegments={activeLabelSegments} viewportState={streamViewport} theme={theme} />
       </Box>
-      {mentionOpen ? <MentionPopup results={mentionResults} selectedIndex={mentionIndex} open={mentionOpen} theme={theme} /> : null}
-      {!mentionOpen && slashOpen ? <SlashPalette items={slashItems} selectedIndex={slashIndex} theme={theme} /> : null}
+      {mentionOpen ? <MentionPopup results={mentionResults} selectedIndex={mentionIndex} open={mentionOpen} focused={inputFocused} theme={theme} /> : null}
+      {!mentionOpen && slashOpen ? <SlashPalette items={slashItems} selectedIndex={slashIndex} focused={inputFocused} theme={theme} /> : null}
       <InputBar
         chips={chips}
         imageAttachments={imageAttachments}
@@ -515,6 +516,7 @@ export function App({
           setChips(nextChips);
           clearMentionState();
         }}
+        focused={inputFocused}
         onSlashNavigate={(delta) => setSlashIndex((current) => moveMentionSelection(current, delta, slashItems.length))}
         onSlashSelect={() => setSlashDismissed(true)}
         onSubmit={submitPrompt}
@@ -541,8 +543,8 @@ export function App({
 function TooSmallTerminal({ columns, rows, theme }: { columns: number; rows: number; theme: ReturnType<typeof createTuiTheme> }) {
   return (
     <Box flexDirection="column" paddingX={1} {...bg(theme.background)}>
-      <Text {...fg(theme.stateActive)} bold>Cursor Harness</Text>
-      <Text {...fg(theme.stateWarning)}>terminal too small: {columns}x{rows}</Text>
+      <Text {...fg(theme.state?.ready)}>Cursor Harness</Text>
+      <Text {...fg(theme.state?.error)}>terminal too small: {columns}x{rows}</Text>
       <Text {...fg(theme.muted)}>minimum supported size is {MIN_COLUMNS}x{MIN_ROWS}</Text>
     </Box>
   );

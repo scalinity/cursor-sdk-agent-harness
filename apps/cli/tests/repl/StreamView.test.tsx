@@ -221,6 +221,48 @@ describe("StreamView helpers", () => {
     expect(out).toContain("shell sleep 100 (cancelled)");
   });
 
+  it("marks running tools completed on terminal sdk.status fallback", () => {
+    let buffer = createStreamBuffer();
+    buffer = ingestStreamFrame(buffer, {
+      ...base,
+      type: "sdk.tool_call",
+      event: {
+        event_id: "00000000-0000-4000-8000-0000000000c1",
+        schema_version: 1,
+        seq: 1,
+        agent_id: "agent-1",
+        run_id: "run-1",
+        occurred_at: base.sent_at,
+        received_at: base.sent_at,
+        sdk_type: "tool_call",
+        kind: "tool_call.running",
+        payload: { call_id: "c1", name: "bash", status: "running", args: { command: "sleep 100" } },
+      },
+    } satisfies ServerFrame);
+    buffer = ingestStreamFrame(buffer, {
+      ...base,
+      id: "frame-status-finished",
+      type: "sdk.status",
+      event: {
+        event_id: "00000000-0000-4000-8000-0000000000c2",
+        schema_version: 1,
+        seq: 2,
+        agent_id: "agent-1",
+        run_id: "run-1",
+        occurred_at: base.sent_at,
+        received_at: base.sent_at,
+        sdk_type: "status",
+        kind: "status.changed",
+        status: "FINISHED",
+        payload: { status: "FINISHED" },
+      },
+    } satisfies ServerFrame);
+
+    const out = renderStreamItems(buffer.items);
+    expect(out).toContain("✓");
+    expect(out).toContain("shell sleep 100");
+  });
+
   it("keeps a still-running tool visible when the run finishes without a terminal tool frame", () => {
     let buffer = createStreamBuffer();
     buffer = ingestStreamFrame(buffer, {

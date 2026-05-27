@@ -50,9 +50,6 @@ importers:
       chalk:
         specifier: 5.6.2
         version: 5.6.2
-      cli-spinners:
-        specifier: 3.4.0
-        version: 3.4.0
       commander:
         specifier: 14.0.3
         version: 14.0.3
@@ -2399,10 +2396,6 @@ packages:
   cli-spinners@2.9.2:
     resolution: {integrity: sha512-ywqV+5MmyL4E7ybXgKys4DugZbX0FC6LnwrhjuykIjnK9k8OQacQ7axGKnjDXWNhns0xot3bZI5h55H8yo9cJg==}
     engines: {node: '>=6'}
-
-  cli-spinners@3.4.0:
-    resolution: {integrity: sha512-bXfOC4QcT1tKXGorxL3wbJm6XJPDqEnij2gQ2m7ESQuE+/z9YFIWnl/5RpTiKWbMq3EVKR4fRLJGn6DVfu0mpw==}
-    engines: {node: '>=18.20'}
 
   cli-truncate@2.1.0:
     resolution: {integrity: sha512-n8fOixwDD6b/ObinzTrp1ZKFzbgvKZvuz/TvejnLn1aQfC6r52XEx85FmuC+3HI+JM7coBRXUvNqEU2PHVrHpg==}
@@ -7218,8 +7211,6 @@ snapshots:
       restore-cursor: 4.0.0
 
   cli-spinners@2.9.2: {}
-
-  cli-spinners@3.4.0: {}
 
   cli-truncate@2.1.0:
     dependencies:

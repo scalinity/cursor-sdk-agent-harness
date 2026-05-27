@@ -1,11 +1,15 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { CliUsageError } from "./errors.js";
 import type { CliAgentSummary, CliMode } from "./types.js";
 import type { StreamBuffer } from "./repl/StreamView.js";
 import type { SessionCostState, SessionTokenState } from "./repl/StatusBar.js";
 import { CONFIG_DIR } from "./config.js";
 
 export const SESSION_PATH = path.join(CONFIG_DIR, "last-session.json");
+const MAX_SESSION_BYTES = 2 * 1024 * 1024;
+const MAX_SESSION_ITEMS = 5000;
 
 function resolveSessionPath(): string {
   return process.env.HARNESS_CLI_SESSION_PATH ?? SESSION_PATH;
@@ -92,7 +96,70 @@ function isAgentSummary(value: unknown): value is CliAgentSummary {
 function isStreamBuffer(value: unknown): value is StreamBuffer {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const items = (value as StreamBuffer).items;
-  return Array.isArray(items);
+  return Array.isArray(items) && items.length <= MAX_SESSION_ITEMS && items.every(isStreamItem);
+}
+
+function isStreamItem(value: unknown): value is StreamBuffer["items"][number] {
+  if (!isRecord(value) || typeof value.type !== "string") return false;
+  switch (value.type) {
+    case "user":
+      return typeof value.text === "string" && typeof value.at === "string";
+    case "assistant":
+    case "system":
+      return typeof value.text === "string";
+    case "thinking":
+      return typeof value.text === "string" && isOptionalBoolean(value.collapsed);
+    case "error":
+      return typeof value.message === "string";
+    case "approval":
+      return typeof value.requestId === "string" && typeof value.description === "string";
+    case "summary":
+      return typeof value.status === "string"
+        && isNullableFiniteNumber(value.tokens)
+        && isNullableFiniteNumber(value.costMicros)
+        && isNullableFiniteNumber(value.durationMs);
+    case "diff":
+      return typeof value.path === "string"
+        && isOptionalString(value.language)
+        && isOptionalString(value.before)
+        && isOptionalString(value.after)
+        && isOptionalString(value.unifiedDiff);
+    case "tool":
+      return typeof value.callId === "string"
+        && typeof value.name === "string"
+        && isToolStatus(value.status)
+        && typeof value.verb === "string"
+        && typeof value.primaryArg === "string"
+        && isOptionalString(value.secondaryDetail)
+        && isOptionalFiniteNumber(value.durationMs)
+        && isOptionalString(value.error);
+    default:
+      return false;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isOptionalString(value: unknown): boolean {
+  return value === undefined || typeof value === "string";
+}
+
+function isOptionalBoolean(value: unknown): boolean {
+  return value === undefined || typeof value === "boolean";
+}
+
+function isNullableFiniteNumber(value: unknown): boolean {
+  return value === null || (typeof value === "number" && Number.isFinite(value));
+}
+
+function isOptionalFiniteNumber(value: unknown): boolean {
+  return value === undefined || (typeof value === "number" && Number.isFinite(value));
+}
+
+function isToolStatus(value: unknown): boolean {
+  return value === "running" || value === "completed" || value === "error" || value === "cancelled";
 }
 
 function summarizeTokensFromBuffer(buffer: StreamBuffer): SessionTokenState {
@@ -109,19 +176,41 @@ function summarizeTokensFromBuffer(buffer: StreamBuffer): SessionTokenState {
 }
 
 export async function readLastSession(): Promise<CliSessionSnapshot | null> {
+  const targetPath = resolveSessionPath();
+  let fileStat: Awaited<ReturnType<typeof stat>>;
   try {
-    const raw = await readFile(resolveSessionPath(), "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    return normalizeCliSessionSnapshot(parsed);
-  } catch {
-    return null;
+    fileStat = await stat(targetPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
   }
+  if (!fileStat.isFile()) {
+    throw new CliUsageError("Saved chat session is not a regular file.");
+  }
+  if (fileStat.size > MAX_SESSION_BYTES) {
+    throw new CliUsageError("Saved chat session is too large to resume safely.");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(targetPath, "utf8"));
+  } catch (error) {
+    throw new CliUsageError(`Saved chat session is corrupt: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const normalized = normalizeCliSessionSnapshot(parsed);
+  if (!normalized) {
+    throw new CliUsageError("Saved chat session has an unsupported or corrupt shape.");
+  }
+  return normalized;
 }
 
 export async function writeLastSession(snapshot: CliSessionSnapshot): Promise<void> {
+  if (!isCliSessionSnapshot(snapshot)) {
+    throw new CliUsageError("Refusing to write an invalid chat session snapshot.");
+  }
   const targetPath = resolveSessionPath();
   await mkdir(path.dirname(targetPath), { recursive: true, mode: 0o700 });
-  const tmpPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+  const tmpPath = `${targetPath}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(tmpPath, `${JSON.stringify(snapshot, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   await rename(tmpPath, targetPath);
 }

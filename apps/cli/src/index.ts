@@ -66,6 +66,12 @@ export function shouldCreateFreshAgentForSavedSession(error: unknown): boolean {
   return error.status === 404 || error.code === "NOT_FOUND" || error.code === "AGENT_NOT_FOUND";
 }
 
+export function assertRunPromptInput(promptParts: readonly string[], stdinIsTty: boolean | undefined): void {
+  if (promptParts.length === 0 && stdinIsTty === true) {
+    throw new CliUsageError("Usage: harness run <prompt>. Pipe stdin for non-interactive prompts, or run `harness` for chat.");
+  }
+}
+
 async function resolveAgentForChat(
   http: CliHttpPort,
   input: {
@@ -155,7 +161,7 @@ async function runChat(options: GlobalOptions & { agent?: string; mode?: CliMode
 
   let backend: CliBackend | null = null;
   let stream: CliStreamPort | null = null;
-  let cleanedUp = false;
+  let cleanupPromise: Promise<void> | null = null;
   let getSnapshot: (() => CliSessionSnapshot) | null = null;
   const persistSession = async () => {
     const snapshot = getSnapshot?.();
@@ -166,23 +172,27 @@ async function runChat(options: GlobalOptions & { agent?: string; mode?: CliMode
       stderr.write(`Session was not saved: ${error instanceof Error ? error.message : String(error)}\n`);
     }
   };
-  const cleanup = () => {
-    if (cleanedUp) return;
-    cleanedUp = true;
-    try {
-      stream?.close?.();
-    } catch {
-      // best-effort socket teardown
-    }
-    void backend?.dispose();
+  const cleanup = async () => {
+    if (cleanupPromise) return cleanupPromise;
+    cleanupPromise = (async () => {
+      try {
+        stream?.close?.();
+      } catch {
+        // best-effort socket teardown
+      }
+      await backend?.dispose();
+    })();
+    return cleanupPromise;
   };
 
   // Paint the shell immediately; the (embedded) server boots in the background so
   // the user sees instant feedback instead of a frozen terminal during startup.
   const session = mountFullscreen(React.createElement(BootScreen, { workspace, theme }), {
     onExit: () => {
-      void persistSession();
-      cleanup();
+      void (async () => {
+        await persistSession();
+        await cleanup();
+      })();
     },
   });
   try {
@@ -241,7 +251,7 @@ async function runChat(options: GlobalOptions & { agent?: string; mode?: CliMode
   } finally {
     await persistSession();
     session.dispose();
-    cleanup();
+    await cleanup();
   }
 }
 
@@ -295,6 +305,7 @@ program
   .option("--timeout <ms>", "Max wait time", "300000")
   .option("--approve", "Auto-approve approval prompts")
   .action(async (promptParts: string[], options) => runCommand(async () => {
+    assertRunPromptInput(promptParts, input.isTTY);
     const prompt = promptParts.length > 0 ? promptParts.join(" ") : await readStdin();
     await withBackend(program.opts<GlobalOptions>(), { stream: true }, async (deps) => {
       process.exitCode = await runPrompt({

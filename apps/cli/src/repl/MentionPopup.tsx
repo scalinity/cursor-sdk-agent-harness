@@ -1,8 +1,10 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { ContextChip, ContextMentionKind, ContextSearchResult } from "@harness/shared";
+import { sanitizeTerminalText } from "../output/sanitize.js";
 import type { MentionSelectionItem } from "../types.js";
 import { bg, border, createTuiTheme, fg, type TuiTheme } from "./theme.js";
+import { glyph } from "./glyphs.js";
 
 export const MAX_MENTION_ITEMS = 8;
 
@@ -46,7 +48,7 @@ export interface MentionPopupProps {
 export function MentionPopup({ results, selectedIndex, focused = true, open = results !== null, theme = createTuiTheme() }: MentionPopupProps) {
   const items = flattenMentionResults(results).slice(0, MAX_MENTION_ITEMS);
   if (!open) return null;
-  const borderColor = focused ? theme.stateActive : theme.border;
+  const borderColor = focused ? theme.state?.ready : theme.border;
   if (items.length === 0) {
     return (
       <Box flexDirection="column" borderStyle="round" {...border(borderColor)} paddingX={1} {...bg(theme.panel)}>
@@ -59,10 +61,12 @@ export function MentionPopup({ results, selectedIndex, focused = true, open = re
       <Text {...fg(theme.muted)}>CONTEXT PICKER</Text>
       {items.map((item, index) => {
         const selected = index === selectedIndex;
+        const label = sanitizeTerminalText(item.label);
+        const detail = sanitizeTerminalText(item.detail);
         return (
-          <Text key={`${item.kind}:${item.value}`} {...fg(selected ? theme.stateActive : theme.text)} bold={selected}>
-            {selected ? "▸ " : "  "}
-            {iconForKind(item.kind)} {item.label} <Text {...fg(theme.muted)}>{item.detail}</Text>
+          <Text key={`${item.kind}:${item.value}`} {...fg(selected ? theme.state?.ready : theme.text)} bold={selected}>
+            {selected ? `${glyph.done} ` : "  "}
+            {iconForKind(item.kind)} {label} <Text {...fg(theme.muted)}>{detail}</Text>
           </Text>
         );
       })}

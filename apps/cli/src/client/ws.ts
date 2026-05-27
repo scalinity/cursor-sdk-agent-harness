@@ -38,11 +38,14 @@ export class HarnessWsClient implements CliStreamPort {
       const socket = new WebSocket(this.url, { origin: this.origin });
       this.socket = socket;
       const rejectInitial = (error: Error) => reject(error);
+      const rejectClosed = () => reject(new CliStreamError("WebSocket closed before the connection opened."));
       socket.once("open", () => {
         socket.off("error", rejectInitial);
+        socket.off("close", rejectClosed);
         resolve();
       });
       socket.once("error", rejectInitial);
+      socket.once("close", rejectClosed);
       socket.on("message", (data) => {
         const raw = typeof data === "string" ? data : data.toString("utf8");
         let parsed: unknown;
@@ -162,7 +165,9 @@ export class HarnessWsClient implements CliStreamPort {
   close(): void {
     const socket = this.socket;
     this.socket = null;
-    if (socket && socket.readyState === WebSocket.OPEN) socket.close(1000, "done");
+    if (!socket) return;
+    if (socket.readyState === WebSocket.OPEN) socket.close(1000, "done");
+    else if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.CLOSING) socket.terminate();
   }
 
   private send(frame: ClientFrame): boolean {

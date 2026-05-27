@@ -44,7 +44,8 @@ export function resolveStreamScrollDelta(
   layout: Pick<StreamViewportLayout, "bodyHeight" | "maxOffset">,
   currentOffset: number,
 ): number | null {
-  if (key.ctrl && key.input === "g") return -currentOffset;
+  if (key.ctrl && key.input === "g") return currentOffset > 0 ? -currentOffset : null;
+  if (layout.maxOffset <= 0) return null;
 
   const step = key.shift ? 5 : 1;
   if (key.upArrow && !key.ctrl && !key.meta) return step;

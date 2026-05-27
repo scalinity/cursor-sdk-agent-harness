@@ -1,23 +1,24 @@
 export const MIN_COLUMNS = 60;
 export const MIN_ROWS = 16;
 
+export interface TuiStateColors {
+  ready: string;
+  running: string;
+  success: string;
+  error: string;
+}
+
 export interface TuiTheme {
   noColor: boolean;
   background?: string;
   panel?: string;
   panelSoft?: string;
   border?: string;
-  borderFocus?: string;
   text?: string;
   muted?: string;
   brand?: string;
-  brandWarm?: string;
   code?: string;
-  stateReady?: string;
-  stateActive?: string;
-  stateWarning?: string;
-  stateDanger?: string;
-  stateSuccess?: string;
+  state?: TuiStateColors;
 }
 
 export function createTuiTheme(env: NodeJS.ProcessEnv = process.env): TuiTheme {
@@ -29,26 +30,27 @@ export function createTuiTheme(env: NodeJS.ProcessEnv = process.env): TuiTheme {
     panel: "",
     panelSoft: "",
     border: "#66717f",
-    borderFocus: "#E04E1F",
     text: "#eef2f7",
     muted: "#9aa3ad",
+    // ASSUMPTION: brand is intentionally warm vermillion and used only for brand identity surfaces.
     brand: "#E04E1F",
-    brandWarm: "#d48360",
     code: "#7dd7ff",
-    stateReady: "#95d475",
-    stateActive: "#9bd7d8",
-    stateWarning: "#f2c94c",
-    stateDanger: "#ff7a8a",
-    stateSuccess: "#95d475",
+    state: {
+      ready: "#95d475",
+      running: "#f2c94c",
+      success: "#95d475",
+      error: "#ff7a8a",
+    },
   };
 }
 
 export function statusColor(theme: TuiTheme, status: "ready" | "connecting" | "connected" | "reconnecting" | "disconnected"): string | undefined {
   if (theme.noColor) return undefined;
-  if (status === "connected") return theme.stateSuccess;
-  if (status === "connecting" || status === "reconnecting") return theme.stateWarning;
-  if (status === "disconnected") return theme.stateDanger;
-  return theme.stateReady;
+  const state = theme.state;
+  if (status === "connected") return state?.success;
+  if (status === "connecting" || status === "reconnecting") return state?.running;
+  if (status === "disconnected") return state?.error;
+  return state?.ready;
 }
 
 export function fg(color: string | undefined): { color?: string } {

@@ -14,6 +14,7 @@ describe("CLI session resume", () => {
   let sessionPath = "";
 
   afterEach(async () => {
+    delete process.env.HARNESS_CLI_SESSION_PATH;
     if (sessionPath) {
       await rm(sessionPath, { force: true });
       sessionPath = "";
@@ -82,7 +83,36 @@ describe("CLI session resume", () => {
 
     const loaded = await readLastSession();
     expect(loaded?.sessionTokens).toEqual({ tokens: 30, hasUnavailableTurn: false });
+  });
 
-    delete process.env.HARNESS_CLI_SESSION_PATH;
+  it("rejects corrupt saved session JSON instead of treating it as missing", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "harness-cli-session-"));
+    tempDirs.push(dir);
+    sessionPath = path.join(dir, "last-session.json");
+    process.env.HARNESS_CLI_SESSION_PATH = sessionPath;
+    await writeFile(sessionPath, "{not json\n");
+
+    await expect(readLastSession()).rejects.toThrow(/corrupt/i);
+  });
+
+  it("rejects saved sessions with invalid stream items", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "harness-cli-session-"));
+    tempDirs.push(dir);
+    sessionPath = path.join(dir, "last-session.json");
+    process.env.HARNESS_CLI_SESSION_PATH = sessionPath;
+    await writeFile(sessionPath, `${JSON.stringify({
+      version: 1,
+      savedAt: "2026-05-27T00:00:00.000Z",
+      workspace: dir,
+      agent: { id: "agent-1", name: "CLI", modelId: "composer-2-5-fast", executionMode: "ask" },
+      mode: "ask",
+      modelId: "composer-2-5-fast",
+      sessionCost: { micros: 2500, hasUnavailableTurn: false },
+      sessionTokens: { tokens: 1, hasUnavailableTurn: false },
+      buffer: { items: [{ type: "assistant" }] },
+      scrollOffset: 0,
+    })}\n`);
+
+    await expect(readLastSession()).rejects.toThrow(/unsupported|corrupt/i);
   });
 });

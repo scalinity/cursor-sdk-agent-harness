@@ -90,12 +90,19 @@ describe("CLI attachments", () => {
     await expect(readImageFromPath(emptyPath)).rejects.toThrow(/empty/i);
   });
 
-  it.skipIf(process.platform === "win32")("rejects symlinked image paths", async () => {
-    const target = await writeTempPng("target.png");
-    const linkPath = path.join(path.dirname(target), "link.png");
-    await symlink(target, linkPath);
+  it("rejects symlinked and mislabeled image files without leaking full paths", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "harness-cli-attach-"));
+    tempDirs.push(dir);
+    const target = path.join(dir, "secret.png");
+    const link = path.join(dir, "link.png");
+    const fake = path.join(dir, "fake.png");
+    await writeFile(target, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    await symlink(target, link);
+    await writeFile(fake, "not really a png");
 
-    await expect(readImageFromPath(linkPath)).rejects.toThrow(/symlink/i);
+    await expect(readImageFromPath(link)).rejects.toThrow(/symlink/i);
+    await expect(readImageFromPath(fake)).rejects.toThrow(/does not match image\/png \(fake\.png\)/i);
+    await expect(readImageFromPath(fake)).rejects.not.toThrow(dir);
   });
 
   it("rejects files whose bytes do not match the image extension", async () => {
@@ -127,7 +134,7 @@ describe("CLI attachments", () => {
 
     expect(result.selected).toHaveLength(MAX_IMAGE_ATTACHMENTS - 2);
     expect(result.selected[0]).toBe(paths[0]);
-    expect(result.skippedCount).toBe(4);
+    expect(result.skippedCount).toBe(6);
   });
 
   it("caps merged attachments at the shared max", () => {
