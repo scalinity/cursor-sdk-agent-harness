@@ -11,7 +11,7 @@ import { computeTuiLayout, countInputLines, MAX_INPUT_VISIBLE_LINES } from "./la
 import { MentionPopup, flattenMentionResults, MAX_MENTION_ITEMS, moveMentionSelection } from "./MentionPopup.js";
 import { filterSlashCommands, SlashPalette } from "./SlashPalette.js";
 import { clampStreamScrollOffset, createStreamBuffer, ingestStreamFrame, StreamView, type StreamBuffer, type StreamItem } from "./StreamView.js";
-import { StatusBar, type LiveTurnUsage } from "./StatusBar.js";
+import { StatusBar, type LiveTurnUsage, type SessionCostState } from "./StatusBar.js";
 import { formatActiveToolLine } from "./ToolCallLine.js";
 import { createTuiTheme, bg, border, fg, truncateMiddle, MIN_COLUMNS, MIN_ROWS } from "./theme.js";
 import { useSpinnerFrame } from "./useSpinnerFrame.js";
@@ -62,7 +62,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [queuedPrompts, setQueuedPrompts] = useState<PromptRequest[]>([]);
   const [streamStatus, setStreamStatus] = useState<StreamConnectionStatus>("ready");
-  const [sessionCostMicros, setSessionCostMicros] = useState(0);
+  const [sessionCost, setSessionCost] = useState<SessionCostState>({ micros: 0, hasUnavailableTurn: false });
   const [turnUsage, setTurnUsage] = useState<LiveTurnUsage | null>(null);
   const [pendingApproval, setPendingApproval] = useState<{ runId: string; requestId: string } | null>(null);
   const [history] = useState(() => new PromptHistory(historyEntries));
@@ -83,7 +83,8 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
   const spinner = useSpinnerFrame(turnActive);
   const runningTool = toolStartRef.current ? findRunningTool(buffer.items, toolStartRef.current.callId) : undefined;
   const lastItem = buffer.items.at(-1);
-  const chromeState = deriveChromeState({ streamStatus, turnActive, toolRunning: runningTool !== undefined, lastItemType: lastItem?.type });
+  const chromeState = deriveChromeState({ streamStatus, turnActive, busy, toolRunning: runningTool !== undefined, lastItemType: lastItem?.type });
+  const [cwdBase] = useState(() => safeProcessCwd(workspace));
   // ASSUMPTION: The CLI is single-user until a multi-account config exists; label
   // the active context as "local" rather than inventing account support here.
   // Flag if wrong.
@@ -93,7 +94,6 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         ? truncateMiddle(formatActiveToolLine(spinner, runningTool, Date.now() - toolStartRef.current.startMs), streamWidth)
         : `${spinner} ${isStartingRun ? "starting run" : "agent working"}`)
     : undefined;
-  const visibleActiveRunId = agentTurnActive ? activeRunId : null;
   const cleanupController = useReplCleanup({ stream, activeRunId, isStartingRun });
 
   const appendUser = (text: string) => setBuffer((current) => ({ items: [...current.items, { type: "user", text, at: formatTurnClock() }] }));
@@ -238,7 +238,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         }
         if (isTerminalFrame(frame)) {
           if (frame.type === "run.final_result") {
-            setSessionCostMicros((current) => current + (frame.event.payload.usage.cost_usd_micros ?? 0));
+            setSessionCost((current) => addSessionCost(current, frame.event.payload.usage.cost_usd_micros));
           }
           finishRun();
         }
@@ -311,6 +311,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
       <HeaderBar
         width={layout.columns}
         workspace={workspace}
+        cwdBase={cwdBase}
         modelId={modelId}
         accountLabel={accountLabel}
         chromeState={chromeState}
@@ -349,14 +350,8 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
         }}
       />
       <StatusBar
-        workspace={workspace}
-        modelId={modelId}
-        mode={mode}
-        sessionCostMicros={sessionCostMicros}
+        sessionCost={sessionCost}
         turnUsage={turnActive ? turnUsage : null}
-        connection={streamStatus}
-        queuedPrompts={queuedPrompts.length}
-        activeRunId={visibleActiveRunId}
         width={layout.columns}
         theme={theme}
       />
@@ -519,10 +514,31 @@ function cliAgentFromSummary(agent: Pick<AgentSummary, "id" | "name" | "modelId"
   };
 }
 
-function deriveChromeState(input: { streamStatus: StreamConnectionStatus; turnActive: boolean; toolRunning: boolean; lastItemType?: StreamItem["type"] | undefined }): ChromeState {
+export interface ChromeStateInput {
+  streamStatus: StreamConnectionStatus;
+  turnActive: boolean;
+  busy: boolean;
+  toolRunning: boolean;
+  lastItemType?: StreamItem["type"] | undefined;
+}
+
+export function deriveChromeState(input: ChromeStateInput): ChromeState {
   if (input.streamStatus === "disconnected") return "disconnected";
   if (!input.turnActive && input.lastItemType === "error") return "error";
   if (input.toolRunning) return "tool-running";
-  if (input.turnActive) return "streaming";
+  if (input.turnActive || input.busy) return "streaming";
   return "ready";
+}
+
+function addSessionCost(current: SessionCostState, costMicros: number | null): SessionCostState {
+  if (costMicros === null) return { ...current, hasUnavailableTurn: true };
+  return { ...current, micros: current.micros + costMicros };
+}
+
+function safeProcessCwd(fallback: string): string {
+  try {
+    return process.cwd();
+  } catch {
+    return fallback;
+  }
 }

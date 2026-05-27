@@ -1,29 +1,27 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { formatMicros } from "../output/table.js";
-import type { CliMode } from "../types.js";
 import { bg, createTuiTheme, fg, truncateMiddle, type TuiTheme } from "./theme.js";
+
+export interface SessionCostState {
+  micros: number;
+  hasUnavailableTurn: boolean;
+}
 
 export type LiveTurnUsage =
   | { status: "available"; tokens: number; costMicros: number | null }
   | { status: "unavailable" };
 
 export interface StatusBarProps {
-  workspace: string;
-  modelId: string;
-  mode: CliMode;
-  sessionCostMicros: number;
+  sessionCost: SessionCostState;
   turnUsage?: LiveTurnUsage | null;
-  connection: "ready" | "connecting" | "connected" | "reconnecting" | "disconnected";
-  queuedPrompts?: number;
-  activeRunId?: string | null;
   width?: number;
   theme?: TuiTheme;
 }
 
-export function formatStatusBar(props: StatusBarProps): string {
-  const compact = true;
-  return formatStatusDetails(props, compact);
+export function formatStatusBar(props: StatusBarProps, options: { width?: number } = {}): string {
+  const width = options.width ?? props.width ?? 80;
+  return formatStatusDetails(props, width < 120);
 }
 
 export function StatusBar(props: StatusBarProps) {
@@ -41,9 +39,15 @@ export function StatusBar(props: StatusBarProps) {
 
 function formatStatusDetails(props: StatusBarProps, compact: boolean): string {
   const hints = compact ? "^C cancel · ^D quit · ^L clear · PgUp/Dn scroll" : "Enter submit · Shift+Enter newline · ↑↓ history · Shift+↑↓ scroll · Esc dismiss · ^C cancel/quit · ^L clear";
-  const sessionCost = `session ${formatMicros(props.sessionCostMicros)}`;
+  const sessionCost = formatSessionCost(props.sessionCost);
   const usage = props.turnUsage ? `${formatLiveTurnUsage(props.turnUsage)} · ` : "";
   return `${usage}${sessionCost} · ${hints}`;
+}
+
+function formatSessionCost(cost: SessionCostState): string {
+  if (cost.hasUnavailableTurn && cost.micros === 0) return "session unavailable";
+  if (cost.hasUnavailableTurn) return `session partial ${formatMicros(cost.micros)}`;
+  return `session ${formatMicros(cost.micros)}`;
 }
 
 function formatLiveTurnUsage(usage: LiveTurnUsage): string {
