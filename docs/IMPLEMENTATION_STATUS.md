@@ -4364,3 +4364,27 @@ Finished the remaining CLI visual identity refinements on the current dirty tree
 ### Follow-up
 
 The wider checkout still contains unrelated dirty counter/server/web/shared work from before this visual pass. Stage only the intended CLI visual identity files if committing this pass separately.
+
+---
+
+## CLI thinking spinner animation — 2026-05-27
+
+### Summary
+
+Restored animated thinking/boot/tool spinners after the visual-identity pass froze `glyph.thinking` (`◐`). Spinner frames now cycle `thinkingSpinnerFrames` (`◐`, `◑`, `◒`, `◓`) — quarter-circle variants within the approved vocabulary — instead of static `◐` or out-of-vocabulary Braille. Gradient peak width uses trimmed thinking text (no trailing pad spaces).
+
+### Files modified
+
+- `apps/cli/src/repl/glyphs.ts` — export `thinkingSpinnerFrames`.
+- `apps/cli/src/repl/useSpinnerFrame.ts` — animate via quarter-circle frames; export `THINKING_SPINNER_FRAME_COUNT`.
+- `apps/cli/src/repl/App.tsx` — gradient peak uses `thinkingText.trimEnd().length`.
+- `apps/cli/THEME.md` — document animated thinking spinner frames.
+- `apps/cli/tests/repl/useSpinnerFrame.test.ts` — cycle + regression tests.
+- `apps/cli/tests/repl/App.test.tsx` — update spinner glyph expectations.
+
+### Verification
+
+- `pnpm -F @harness/cli typecheck` — pass.
+- `pnpm -F @harness/cli lint` — pass.
+- `pnpm -F @harness/cli test` — pass, 28 files / 159 tests.
+- `pnpm -F @harness/cli build` — pass.
