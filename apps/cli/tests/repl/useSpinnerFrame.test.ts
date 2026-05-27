@@ -2,20 +2,20 @@ import { describe, expect, it } from "vitest";
 import {
   THINKING_DOT_FRAME_HOLD,
   THINKING_SPINNER_FRAME_COUNT,
+  THINKING_SPINNER_FRAMES,
   formatThinkingIndicatorText,
   formatThinkingSpinnerFrame,
 } from "../../src/repl/useSpinnerFrame.js";
-import { glyph, thinkingSpinnerFrames } from "../../src/repl/glyphs.js";
 
 const THINKING_DOT_PHASE_COUNT = 4;
 const THINKING_CYCLE_LENGTH = THINKING_DOT_FRAME_HOLD * THINKING_DOT_PHASE_COUNT;
 
 describe("formatThinkingSpinnerFrame", () => {
-  it("cycles quarter-circle thinking glyphs instead of staying static", () => {
-    expect(formatThinkingSpinnerFrame(0)).toBe(glyph.thinking);
+  it("cycles Braille dot frames instead of staying static", () => {
+    expect(formatThinkingSpinnerFrame(0)).toBe("⠋");
     expect(formatThinkingSpinnerFrame(1)).not.toBe(formatThinkingSpinnerFrame(0));
-    expect([0, 1, 2, 3].map(formatThinkingSpinnerFrame)).toEqual([...thinkingSpinnerFrames]);
-    expect(formatThinkingSpinnerFrame(THINKING_SPINNER_FRAME_COUNT)).toBe(glyph.thinking);
+    expect([0, 1, 2, 3].map(formatThinkingSpinnerFrame)).toEqual(["⠋", "⠙", "⠹", "⠸"]);
+    expect(formatThinkingSpinnerFrame(THINKING_SPINNER_FRAME_COUNT)).toBe("⠋");
   });
 
   it("does not freeze on a single glyph across the spinner frame window", () => {
@@ -30,7 +30,7 @@ describe("thinking indicator cycle", () => {
   it("advances the spinner every tick and dot text every hold window", () => {
     for (let index = 0; index < THINKING_CYCLE_LENGTH; index += 1) {
       expect(formatThinkingSpinnerFrame(index)).toBe(
-        thinkingSpinnerFrames[index % THINKING_SPINNER_FRAME_COUNT],
+        THINKING_SPINNER_FRAMES[index % THINKING_SPINNER_FRAME_COUNT],
       );
       const phase = Math.floor(index / THINKING_DOT_FRAME_HOLD);
       expect(formatThinkingIndicatorText(index)).toBe(

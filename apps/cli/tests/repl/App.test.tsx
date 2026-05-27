@@ -30,10 +30,10 @@ describe("App turn formatting", () => {
 
   it("animates the thinking spinner glyph on every frame", () => {
     expect([0, 1, 2, 3].map(formatThinkingSpinnerFrame)).toEqual([
-      "◐",
-      "◑",
-      "◒",
-      "◓",
+      "⠋",
+      "⠙",
+      "⠹",
+      "⠸",
     ]);
   });
 
