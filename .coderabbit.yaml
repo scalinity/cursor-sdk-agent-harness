@@ -1,0 +1,144 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# Usage-conscious CodeRabbit config for the Cursor SDK Agent Harness monorepo.
+# Focus: high-signal review on TS/SQL runtime code; skip docs/locks/build noise;
+# pause incremental reviews on long-lived branches; disable token-heavy walkthrough extras.
+
+language: en-US
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  review_details: false
+  collapse_walkthrough: true
+  changed_files_summary: true
+  sequence_diagrams: false
+  estimate_code_review_effort: false
+  assess_linked_issues: false
+  related_issues: false
+  related_prs: false
+  suggested_labels: false
+  suggested_reviewers: false
+  poem: false
+  in_progress_fortune: false
+
+  instructions: |
+    Monorepo layout: apps/server (Fastify + SDK runtime), apps/web (React 19 UI),
+    apps/cli (terminal REPL), packages/shared (Zod boundary schemas).
+    Import direction is strict: shared ← server/web; server and web never import each other.
+
+    Prioritize bugs, security, and architecture invariants from CLAUDE.md over style nits.
+    We already run ESLint, Prettier, and Vitest in CI — do not re-litigate formatting,
+    import order, or line length unless they hide a real defect.
+
+    Never suggest fabricating usage/cost data, marking runs CANCELLED without verified SDK
+    cancellation, or bypassing persist-before-broadcast / workspace allowlist rules.
+
+  path_filters:
+    # Docs and status churn — low signal for code review
+    - "!**/*.md"
+    - "!docs/**"
+    - "!**/LICENSE*"
+    - "!**/*.txt"
+
+    # Lockfiles and package manager artifacts
+    - "!**/pnpm-lock.yaml"
+    - "!**/package-lock.json"
+    - "!**/yarn.lock"
+    - "!**/*.lock"
+
+    # Build output and bundled assets
+    - "!**/dist/**"
+    - "!**/dist-electron/**"
+    - "!**/*.min.js"
+    - "!**/*.min.css"
+
+    # Static mockups and HTML references
+    - "!**/*.html"
+
+    # Test snapshots and mock fixtures
+    - "!**/*.snap"
+    - "!**/__mocks__/**"
+    - "!**/fixtures/**"
+
+    # Binary / image assets
+    - "!**/*.png"
+    - "!**/*.jpg"
+    - "!**/*.svg"
+    - "!**/*.webp"
+
+  path_instructions:
+    - path: "apps/server/**"
+      instructions: |
+        Security-critical backend. Enforce persist-before-broadcast: only
+        apps/server/src/sdk/persist-and-broadcast.ts may publish WS frames after DB commit.
+        Flag bus.publish or direct WS emit elsewhere. Check CSRF on mutations, workspace
+        allowlist realpath resolution, Pino redaction for secrets/API keys, and honest SDK
+        usage extraction (usage_source unavailable when the SDK does not expose usage).
+    - path: "packages/shared/**"
+      instructions: |
+        Zod schemas are the source of truth for WS frames, REST bodies, and domain types.
+        Never introduce TS interfaces that diverge from their Zod schema. Validate at boundaries.
+    - path: "apps/web/src/components/**"
+      instructions: |
+        No direct useEffect in components (extract hooks). No hardcoded colors, spacing, or
+        motion values — use design tokens via Tailwind. Live and replay must share
+        run-store.ingestServerFrame; never fork render paths.
+    - path: "apps/web/src/pages/**"
+      instructions: |
+        Same rules as components: no useEffect in pages, token-only styling, shared live/replay path.
+    - path: "apps/cli/**"
+      instructions: |
+        Terminal UI uses the fixed glyph vocabulary and brand/state color separation in THEME.md.
+        Prefer minimal, focused diffs in REPL surfaces.
+    - path: "apps/server/src/db/migrations/**"
+      instructions: |
+        SQL columns use snake_case per spec Section 8. JSON columns need json_valid CHECK
+        constraints. Review for backward-compatible migrations and transaction safety.
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 8
+    drafts: false
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+      - "[skip review]"
+      - "chore(deps)"
+      - "chore: bump"
+    labels:
+      - "!do-not-review"
+      - "!wip"
+    ignore_usernames:
+      - "dependabot[bot]"
+      - "renovate[bot]"
+      - "github-actions[bot]"
+
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+    simplify:
+      enabled: false
+
+  tools:
+    eslint:
+      enabled: false
+    ruff:
+      enabled: false
+    markdownlint:
+      enabled: false
+    languagetool:
+      enabled: false
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  opt_out: false
+  learnings:
+    scope: auto
