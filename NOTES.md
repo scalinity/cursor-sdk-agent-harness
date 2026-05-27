@@ -51,3 +51,19 @@ deliberately **not** fixed in this tier. Tier numbers refer to the 3-tier plan
   change to stream partial tool output (out of Tier 1's render-only scope). The
   active-tool overlay shows spinner + summary + elapsed instead. Revisit if the
   server starts emitting partial tool output.
+
+## From the /review-2 pass (2026-05-27) — deferred suggestions
+
+- **S5 — parallel running tools lose overlay attribution.** `toolStartRef`
+  (`App.tsx`) is a single slot keyed by the latest running `call_id`; when a
+  second concurrent tool finishes it clears the ref while the first is still
+  running, so the overlay falls back to "agent working". Deferred — needs a
+  multi-tool tracking structure (stack/map); parallel tool calls are an edge.
+- **S6 — glob/grep with the pattern in a `path`-named key duplicates
+  primary+scope.** `{path:"src/**"}` on a glob renders `glob src/** in src/**`
+  (`tool-call.ts`). Deferred — cosmetic edge; glob/grep normally carry a
+  `pattern`/`query` key, not `path`.
+- **S8 — `secondaryDetail` bakes the English "in " into the summary data.**
+  `tool-call.ts` stores `secondaryDetail: \`in ${scope}\``. Deferred to Tier 3
+  (visual identity / relabeling) — the "in " decoration should move to the
+  render layer when Tier 3 owns labels/i18n.
