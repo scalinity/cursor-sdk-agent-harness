@@ -21,7 +21,7 @@
  * replaced binary.
  */
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, readdirSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -90,44 +90,63 @@ if (!appDir) {
   throw new Error("[package-mac] cannot find .app in dist-electron/mac-arm64");
 }
 
-const appPath = path.join(macArm64, appDir);
+const finalAppPath = path.join(macArm64, appDir);
+const rebuildAppPath = appDir.includes(" ") ? path.join(macArm64, appDir.replace(/\s+/g, "")) : finalAppPath;
+let appPath = finalAppPath;
+if (rebuildAppPath !== finalAppPath) {
+  rmSync(rebuildAppPath, { recursive: true, force: true });
+  renameSync(finalAppPath, rebuildAppPath);
+  appPath = rebuildAppPath;
+}
+
+function restoreFinalAppPath() {
+  if (appPath === finalAppPath || !existsSync(appPath)) return;
+  rmSync(finalAppPath, { recursive: true, force: true });
+  renameSync(appPath, finalAppPath);
+  appPath = finalAppPath;
+}
+
 const betterSqlite3Dir = path.join(
   appPath,
   "Contents/Resources/app/node_modules/better-sqlite3",
 );
 
 if (existsSync(betterSqlite3Dir)) {
-  const packagedPackageJson = JSON.parse(
-    readFileSync(path.join(betterSqlite3Dir, "package.json"), "utf8"),
-  );
-  const packagedBindingGyp = path.join(betterSqlite3Dir, "binding.gyp");
-  if (!existsSync(packagedBindingGyp)) {
-    const sourceBindingGyp = findBetterSqlite3BindingGyp(packagedPackageJson.version);
-    if (!sourceBindingGyp) {
-      throw new Error(
-        `[package-mac] cannot find source binding.gyp for better-sqlite3 ${packagedPackageJson.version}`,
-      );
+  try {
+    const packagedPackageJson = JSON.parse(
+      readFileSync(path.join(betterSqlite3Dir, "package.json"), "utf8"),
+    );
+    const packagedBindingGyp = path.join(betterSqlite3Dir, "binding.gyp");
+    if (!existsSync(packagedBindingGyp)) {
+      const sourceBindingGyp = findBetterSqlite3BindingGyp(packagedPackageJson.version);
+      if (!sourceBindingGyp) {
+        throw new Error(
+          `[package-mac] cannot find source binding.gyp for better-sqlite3 ${packagedPackageJson.version}`,
+        );
+      }
+      copyFileSync(sourceBindingGyp, packagedBindingGyp);
     }
-    copyFileSync(sourceBindingGyp, packagedBindingGyp);
-  }
 
-  console.log(
-    `[package-mac] force-rebuilding better-sqlite3 for Electron ${ELECTRON_VERSION} (ABI 130)`,
-  );
-  run(
-    "npx",
-    [
-      "--yes",
-      "node-gyp",
-      "rebuild",
-      `--target=${ELECTRON_VERSION}`,
-      "--arch=arm64",
-      "--dist-url=https://electronjs.org/headers",
-      "--build-from-source",
-      `--python=${venvPython}`,
-    ],
-    { cwd: betterSqlite3Dir },
-  );
+    console.log(
+      `[package-mac] force-rebuilding better-sqlite3 for Electron ${ELECTRON_VERSION} (ABI 130)`,
+    );
+    run(
+      "npx",
+      [
+        "--yes",
+        "node-gyp@9",
+        "rebuild",
+        `--target=${ELECTRON_VERSION}`,
+        "--arch=arm64",
+        "--dist-url=https://electronjs.org/headers",
+        "--build-from-source",
+        `--python=${venvPython}`,
+      ],
+      { cwd: betterSqlite3Dir },
+    );
+  } finally {
+    restoreFinalAppPath();
+  }
 
   // Re-sign — the binary we just replaced invalidates the existing signature.
   // Use the same Developer ID identity electron-builder used; ad-hoc (`-`)

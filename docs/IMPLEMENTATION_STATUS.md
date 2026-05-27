@@ -3821,3 +3821,25 @@ Fixed the CLI REPL transcript so running `sdk.tool_call` frames render immediate
 ### Next phase
 
 Continue with the Tier 3 brand-accent confirmation gate when ready. Default proposed accent remains vermillion `#E04E1F`.
+
+---
+
+## Desktop Packaging Path Fix — 2026-05-27
+
+### Summary
+
+During final merge verification, `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` first failed in `hdiutil convert` when the default DMG output filename contained spaces, then failed in the post-package `better-sqlite3` rebuild because `node-gyp` generated an unquoted native-build path inside the space-bearing `.app` bundle. The packaging config now emits a space-free DMG artifact filename, and the packaging script temporarily renames the app bundle to a space-free path for the native rebuild before restoring and signing `Cursor SDK Agent Harness.app`.
+
+### Files modified
+
+- `apps/desktop/electron-builder.json` — adds a space-free `artifactName` for packaged artifacts.
+- `apps/desktop/scripts/package-mac.mjs` — runs the `better-sqlite3` native rebuild from a temporary space-free `.app` path, restores the product app name, pins the rebuild to `node-gyp@9`, and signs the restored bundle.
+- `docs/IMPLEMENTATION_STATUS.md` — recorded this status entry.
+
+### Verification
+
+- Initial final-run `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — failed at `hdiutil convert` for the default space-bearing DMG artifact name.
+- Manual `hdiutil convert` to `/tmp/cursor-harness-test.dmg` and `apps/desktop/dist-electron/cursor-harness-test.dmg` — pass, confirming the source DMG was valid and the failure was output-path specific.
+- Follow-up `pnpm -F @harness/desktop run package:mac` retry — failed in `node-gyp rebuild` for `better-sqlite3` while rebuilding from the space-bearing `.app` path.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass after the artifact/rebuild-path fix.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` — installed timestamp May 27 02:45:08 2026.
