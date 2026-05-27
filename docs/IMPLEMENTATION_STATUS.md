@@ -4371,14 +4371,13 @@ The wider checkout still contains unrelated dirty counter/server/web/shared work
 
 ### Summary
 
-Restored animated thinking/boot/tool spinners after the visual-identity pass froze `glyph.thinking` (`◐`). Spinner frames now cycle `thinkingSpinnerFrames` (`◐`, `◑`, `◒`, `◓`) — quarter-circle variants within the approved vocabulary — instead of static `◐` or out-of-vocabulary Braille. Gradient peak width uses trimmed thinking text (no trailing pad spaces).
+Restored animated thinking/boot/tool spinners after the visual-identity pass froze `glyph.thinking` (`◐`). The live REPL spinner cycles Braille dot frames (`⠋` … `⠧`) via `THINKING_SPINNER_FRAMES`; static `◐` remains for non-animated tool markers. Gradient peak width uses trimmed thinking text (no trailing pad spaces).
 
 ### Files modified
 
-- `apps/cli/src/repl/glyphs.ts` — export `thinkingSpinnerFrames`.
-- `apps/cli/src/repl/useSpinnerFrame.ts` — animate via quarter-circle frames; export `THINKING_SPINNER_FRAME_COUNT`.
+- `apps/cli/src/repl/useSpinnerFrame.ts` — Braille frame cycle; export `THINKING_SPINNER_FRAME_COUNT`.
 - `apps/cli/src/repl/App.tsx` — gradient peak uses `thinkingText.trimEnd().length`.
-- `apps/cli/THEME.md` — document animated thinking spinner frames.
+- `apps/cli/THEME.md` — document Braille live spinner vs static `glyph.thinking`.
 - `apps/cli/tests/repl/useSpinnerFrame.test.ts` — cycle + regression tests.
 - `apps/cli/tests/repl/App.test.tsx` — update spinner glyph expectations.
 
@@ -4388,3 +4387,47 @@ Restored animated thinking/boot/tool spinners after the visual-identity pass fro
 - `pnpm -F @harness/cli lint` — pass.
 - `pnpm -F @harness/cli test` — pass, 28 files / 159 tests.
 - `pnpm -F @harness/cli build` — pass.
+
+---
+
+## 2026-05-27 — Review debate merge-comment hook
+
+Added a small repo script to standardize review debate handoff comments and guarantee Codex gets tagged in the final handoff line.
+
+### Files modified
+
+- `scripts/review-debate-hook.mjs` — new helper that emits a markdown merge comment with reviewer position, Codex position, and `<@U0B6G38BPNV>` handoff.
+- `package.json` — adds `review:debate:hook` script entry.
+
+### Verification
+
+- `node scripts/review-debate-hook.mjs --reviewer "Looks good" --codex "Consider edge cases"` — pass.
+
+### Next
+
+Continue with the active phase prompt; this utility is non-invasive and does not alter runtime behavior.
+
+## 2026-05-27 — Main branch reconciliation
+
+Reconciled the visible remote branches back into `main`.
+
+### Branch decisions
+
+- `origin/codex/set-up-review-debate-hook` — merged; this was the only unique unmerged branch.
+- `origin/cursor/cloud-agent-setup-8594` — already represented by merged PR #2 on `main`; no duplicate merge needed.
+- `origin/cursor/cloud-agent-setup-95de` — superseded by PR #2's Cursor Cloud AGENTS.md instructions; no duplicate merge needed.
+
+### Follow-up hardening
+
+- Fixed `scripts/review-debate-hook.mjs` so a missing option value does not consume the next flag.
+- Added `scripts/__tests__/review-debate-hook.test.mjs` coverage for normal output and missing-value parsing.
+
+### Verification
+
+- `node scripts/review-debate-hook.mjs --reviewer "Looks good" --codex "Consider edge cases"` — pass.
+- `node scripts/review-debate-hook.mjs --reviewer --codex "Counterpoint"` — pass.
+- `pnpm test:scripts` — pass.
+- `pnpm typecheck` — pass.
+- `pnpm lint` — pass.
+- `pnpm test` — pass.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — partial: web, server, and desktop TypeScript/build stages passed; mac packaging is blocked in this Linux Cloud VM because `electron-builder` cannot resolve its optional DMG dependency `dmg-license` even after installing `python3.12-venv` and rerunning `pnpm install --optional`.
