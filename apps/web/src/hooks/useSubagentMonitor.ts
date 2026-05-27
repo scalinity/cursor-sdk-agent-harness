@@ -14,6 +14,7 @@ export interface UseSubagentMonitorResult {
   totalTokens: number;
   totalTokensPartial: boolean;
   totalCostMicros: number | null;
+  totalCostPartial: boolean;
   hasSubagents: boolean;
   loading: boolean;
   error: string | null;
@@ -27,6 +28,7 @@ interface SubagentSnapshot {
   totalTokens: number;
   totalTokensPartial: boolean;
   totalCostMicros: number | null;
+  totalCostPartial: boolean;
 }
 
 const EMPTY_SNAPSHOT: SubagentSnapshot = {
@@ -36,6 +38,7 @@ const EMPTY_SNAPSHOT: SubagentSnapshot = {
   totalTokens: 0,
   totalTokensPartial: false,
   totalCostMicros: null,
+  totalCostPartial: false,
 };
 
 function eventPreview(events: string[] | undefined): string[] {
@@ -191,6 +194,7 @@ export function useSubagentMonitor(parentRunId: string | null): UseSubagentMonit
     totalTokens: snapshot.totalTokens,
     totalTokensPartial: snapshot.totalTokensPartial,
     totalCostMicros: snapshot.totalCostMicros,
+    totalCostPartial: snapshot.totalCostPartial,
     hasSubagents: snapshot.subagents.length > 0,
     loading,
     error,

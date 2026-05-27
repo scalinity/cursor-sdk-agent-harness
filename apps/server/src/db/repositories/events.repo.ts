@@ -111,6 +111,44 @@ function rowToDomain(row: EventDbRow): EventRow {
   };
 }
 
+function previewPayloadFromRow(row: {
+  sdk_type: string;
+  call_id: string | null;
+  kind: string;
+  status: string | null;
+  payload_json: string;
+  payload_bytes: number;
+}): unknown {
+  if (row.sdk_type !== "tool_call" || row.payload_bytes <= LARGE_PAYLOAD_THRESHOLD_BYTES) {
+    return JSON.parse(row.payload_json);
+  }
+  try {
+    const parsed = JSON.parse(row.payload_json) as {
+      call_id?: unknown;
+      name?: unknown;
+      status?: unknown;
+    };
+    const status = parsed.status;
+    const normalizedStatus =
+      status === "running" || status === "completed" || status === "error"
+        ? status
+        : row.status === "running" || row.status === "completed" || row.status === "error"
+          ? row.status
+          : "error";
+    return {
+      call_id: typeof parsed.call_id === "string" ? parsed.call_id : row.call_id ?? "unknown",
+      name: typeof parsed.name === "string" ? parsed.name : "unknown",
+      status: normalizedStatus,
+    };
+  } catch {
+    return {
+      call_id: row.call_id ?? "unknown",
+      name: "unknown",
+      status: "error" as const,
+    };
+  }
+}
+
 function rowToReplayDomain(row: ReplayEventDbRow): EventRow {
   const shouldSlim =
     row.sdk_type === "tool_call" &&
@@ -123,7 +161,22 @@ function rowToReplayDomain(row: ReplayEventDbRow): EventRow {
     typeof row.replay_name !== "string" ||
     (status !== "running" && status !== "completed" && status !== "error")
   ) {
-    return rowToDomain(row);
+    const fallbackStatus =
+      status === "running" || status === "completed" || status === "error"
+        ? status
+        : "error";
+    const payload: ToolCallReplayPayload = {
+      call_id: typeof row.replay_call_id === "string" ? row.replay_call_id : row.call_id ?? "unknown",
+      name: typeof row.replay_name === "string" ? row.replay_name : "unknown",
+      status: fallbackStatus,
+    };
+    if (row.replay_has_args === 1) payload.args = null;
+    if (row.replay_has_result === 1) payload.result = null;
+    return {
+      ...rowMetadata(row),
+      payload,
+      raw: row.raw_bytes > 0 ? {} : null,
+    };
   }
 
   const payload: ToolCallReplayPayload = {
@@ -332,7 +385,7 @@ export class EventsRepo {
   getRecentPreviewByRunId(runId: string, limit = 5): RecentEventPreviewRow[] {
     const rows = this.raw
       .prepare(
-        `SELECT seq, kind, status, payload_json, occurred_at
+        `SELECT seq, kind, status, sdk_type, call_id, payload_json, payload_bytes, occurred_at
            FROM events
           WHERE run_id = ?
           ORDER BY seq DESC
@@ -342,14 +395,17 @@ export class EventsRepo {
       seq: number;
       kind: string;
       status: string | null;
+      sdk_type: string;
+      call_id: string | null;
       payload_json: string;
+      payload_bytes: number;
       occurred_at: string;
     }>;
     return rows.reverse().map((row) => ({
       seq: row.seq,
       kind: row.kind,
       status: row.status,
-      payload: JSON.parse(row.payload_json),
+      payload: previewPayloadFromRow(row),
       occurredAt: row.occurred_at,
     }));
   }

@@ -2,16 +2,17 @@ import type { UsageSummary } from "@harness/shared";
 import { formatMicros, formatTokens } from "../../lib/format.js";
 
 function cacheHitRate(summary: UsageSummary): string {
-  if (summary.cacheUnavailableCount > 0 && summary.totalInputTokens === 0) return "unavailable";
+  if (summary.cacheUnavailableCount > 0) return "unavailable";
   if (summary.totalInputTokens === 0) return "--";
   const pct = (100 * summary.totalCachedInputTokens) / summary.totalInputTokens;
-  return `${summary.cacheUnavailableCount > 0 ? "partial " : ""}${pct.toFixed(1)}%`;
+  return `${pct.toFixed(1)}%`;
 }
 
 function cacheSavings(summary: UsageSummary): string {
+  if (summary.cacheUnavailableCount > 0) return "cache data incomplete for one or more runs";
   if (summary.totalInputTokens === 0) return "";
   const freshInputTokens = summary.totalInputTokens - summary.totalCachedInputTokens;
-  return `${summary.cacheUnavailableCount > 0 ? "partial " : ""}${formatTokens(freshInputTokens)} fresh · ${formatTokens(summary.totalCachedInputTokens)} cached`;
+  return `${formatTokens(freshInputTokens)} fresh · ${formatTokens(summary.totalCachedInputTokens)} cached`;
 }
 
 function formatPartialTokens(value: number, unavailableCount: number): string {
