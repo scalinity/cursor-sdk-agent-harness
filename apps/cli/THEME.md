@@ -35,6 +35,8 @@
 - `glyph.thinking` = `◐`
 - `glyph.readyDot` = `●`
 
+The live thinking/boot spinner animates `thinkingSpinnerFrames` (`◐`, `◑`, `◒`, `◓`) — quarter-circle variants of `glyph.thinking` only. Do not use Braille dot frames in the REPL.
+
 Allowed non-state glyphs (layout/information only; keep stable by rule):
 
 - `─`, `┌`, `└`, `│` (frame and diff box borders)
