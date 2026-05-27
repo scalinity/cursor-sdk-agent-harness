@@ -1,5 +1,3 @@
-import React from "react";
-import { Text } from "ink";
 import { sanitizeTerminalText } from "../output/sanitize.js";
 import { styles } from "../render/styles.js";
 import { glyph } from "./glyphs.js";
@@ -41,9 +39,4 @@ export function formatToolCallLine(input: ToolCallLineProps): string {
  * stays in sync and both are sanitized identically. */
 export function formatActiveToolLine(spinner: string, input: { verb: string; primaryArg: string; secondaryDetail?: string }, elapsedMs: number): string {
   return `${spinner} ${formatToolSummary(input)}  ${Math.floor(elapsedMs / 1000)}s`;
-}
-
-export function ToolCallLine(props: ToolCallLineProps) {
-  const color = props.status === "error" ? "red" : props.status === "completed" ? "green" : "yellow";
-  return <Text color={color}>{formatToolCallLine(props)}</Text>;
 }

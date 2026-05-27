@@ -272,6 +272,49 @@ brand, border, and state colors.
 
 ---
 
+## CLI Full-Suite Review Address Pass — 2026-05-27
+
+### Summary
+
+Ran the requested `review-orchestrator` full-suite review on `apps/cli/` with 10
+independent agents: three code-review passes, three correctness/reliability/
+performance passes, three security/data-scope passes, and one verification pass.
+Then ran the `address` workflow and resolved the actionable findings in the CLI
+surface.
+
+### Changes delivered
+
+- Kept the already-fixed root command parser and resume-default handling, then
+  added a fast-fail guard so `harness run` with no prompt does not block forever
+  on a TTY.
+- Removed the remaining direct `useEffect` from `App` by moving scroll clamping
+  into a hook; added mention-timer cleanup and stale async-result guards.
+- Bounded queued prompts and made queued work drain after run creation or stream
+  subscription failures; pending start-cancel state now clears on start failure.
+- Hardened saved session resume with file-size limits, strict stream item shape
+  validation, private temp files, and explicit corrupt-session errors.
+- Hardened skill creation and image attachments: validate skill names before path
+  creation, reject symlinks, use `O_NOFOLLOW` and private file modes, cap/dedupe
+  image drops before reading, verify image signatures, and redact full paths from
+  attachment errors.
+- Sanitized terminal-rendered user-controlled labels in the composer and mention
+  picker, and froze running tool lines when only a terminal `sdk.status` fallback
+  arrives.
+- Added the CLI package `lint` script, ignored `.harness-cli/`, and updated the
+  review cache / learning-state / fix-template records for this run.
+
+### Verification
+
+- `pnpm -F @harness/cli typecheck && pnpm -F @harness/cli lint && pnpm -F @harness/cli test` passed (27 files / 144 tests).
+- `pnpm typecheck` passed.
+- `pnpm lint` passed.
+- `pnpm test` passed: shared 39, eslint-plugin 6, web 147, server 468 passing / 1 skipped, CLI 144, desktop 0 test files, scripts 11.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` passed; web/server/desktop rebuilt and the macOS app packaged.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from
+  `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app`.
+
+---
+
 ## Review Orchestrator Pass — 2026-05-25
 
 ### Summary
@@ -3992,6 +4035,49 @@ Accepted the recorded default Tier 3 brand accent and applied it as vermillion `
 ### Next phase
 
 Continue with the next Tier 3 visual identity subsection when its prompt or subsection scope is provided.
+
+## CLI Refactor Tier 3.2/3.3/3.4 — Visual Identity Completion — 2026-05-27
+
+### Summary
+
+Completed the remaining visual-identity subsections. Border behavior now keeps scrollback and overlays on neutral separators by default, with the input frame using the warm `brand` border only while focused. The glyph set is fully documented in `THEME.md` (brand/state colors + run-state + layout glyph rules), and stream rhythm is enforced through explicit block-gap logic in `StreamView` so conceptual sections stay separated by one blank line while tool sequences remain contiguous.
+
+### Files modified
+
+- `apps/cli/src/repl/theme.ts` — confirmed `brand` and `state.*` split is the single source of terminal chroma; neutral borders remain dedicated to muted separators, with brand reserved for identity surfaces.
+- `apps/cli/src/repl/App.tsx`, `BootScreen.tsx`, `InputBar.tsx`, `MentionPopup.tsx`, `SlashPalette.tsx`, and `StreamView.tsx` — retained focus-driven border and glyph-state behavior for subsections 3.2–3.4.
+- `apps/cli/src/render/styles.ts`, `apps/cli/src/render/markdown.ts`, `apps/cli/src/render/diff.ts`, and `apps/cli/src/render/code-block.ts` — keep render coloring in the token factory.
+- `apps/cli/src/repl/ToolCallLine.tsx` — removed the dead JSX wrapper that hardcoded `red/green/yellow` so all tool-line color comes from token functions.
+- `apps/cli/src/repl/glyphs.ts` and `apps/cli/THEME.md` — preserved the full state glyph map and rhythm/border rules.
+- `apps/cli/tests/repl/ToolCallLine.test.ts` — continues coverage of tool glyph + status rendering.
+- `docs/IMPLEMENTATION_STATUS.md` — this status entry.
+- `apps/cli/tests/repl/tui-layout.test.ts` and `apps/cli/tests/repl/StreamView.test.tsx` — still validate turn headers and spacing behavior used by the visual rhythm.
+
+### Verification
+
+- `pnpm -F @harness/cli test` — pass (27 files / 144 tests).
+- `pnpm -F @harness/cli typecheck` — pass.
+- `pnpm exec eslint apps/cli/src apps/cli` — pass.
+- `pnpm typecheck` — pass.
+- `pnpm lint` — pass.
+- `pnpm test` — pass.
+
+### Render sample (NO_COLOR=1)
+
+```text
+── claude ──
+I can help track down your visual identity changes.
+
+▸ glob **/*.ts in /Users/example/project
+
+◐ Thinking...
+  Auditing token and glyph mapping for each sequence.
+── you · 14:32 ───────────────────────────────────────────────────────
+```
+
+### Outstanding
+
+- No blocking follow-ups for this phase. Visual-only refinements for light-terminal tuning are intentionally out-of-scope and remain noted in `NOTES.md`.
 
 ---
 
