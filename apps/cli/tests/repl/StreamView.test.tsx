@@ -64,8 +64,8 @@ describe("StreamView helpers", () => {
         occurred_at: base.sent_at,
         received_at: base.sent_at,
         sdk_type: "tool_call",
-        kind: "tool_call.running",
-        payload: { call_id: "call-1", name: "read_file", status: "running", args: { path: "auth.ts" } },
+        kind: "tool_call.completed",
+        payload: { call_id: "call-1", name: "read_file", status: "completed", args: { path: "auth.ts" } },
       },
     } satisfies ServerFrame);
     buffer = ingestStreamFrame(buffer, {
@@ -147,5 +147,45 @@ describe("StreamView helpers", () => {
     expect(out).toContain("── claude ──");
     expect(out).toContain("Done.");
     expect(out).toContain("Mode switched to agent.");
+  });
+
+  it("suppresses running tools and marks them cancelled on interruption", () => {
+    let buffer = createStreamBuffer();
+    buffer = ingestStreamFrame(buffer, {
+      ...base,
+      type: "sdk.tool_call",
+      event: {
+        event_id: "00000000-0000-4000-8000-0000000000a1",
+        schema_version: 1,
+        seq: 1,
+        agent_id: "agent-1",
+        run_id: "run-1",
+        occurred_at: base.sent_at,
+        received_at: base.sent_at,
+        sdk_type: "tool_call",
+        kind: "tool_call.running",
+        payload: { call_id: "c1", name: "bash", status: "running", args: { command: "sleep 100" } },
+      },
+    } satisfies ServerFrame);
+    expect(renderStreamItems(buffer.items)).not.toContain("sleep 100");
+    buffer = ingestStreamFrame(buffer, {
+      ...base,
+      type: "run.interrupted",
+      event: {
+        event_id: "00000000-0000-4000-8000-0000000000a2",
+        schema_version: 1,
+        seq: 2,
+        agent_id: "agent-1",
+        run_id: "run-1",
+        occurred_at: base.sent_at,
+        received_at: base.sent_at,
+        sdk_type: "status",
+        kind: "run.interrupted",
+        payload: { reason: "user_cancelled" },
+      },
+    } satisfies ServerFrame);
+    const out = renderStreamItems(buffer.items);
+    expect(out).toContain("⏸");
+    expect(out).toContain("shell sleep 100 (cancelled)");
   });
 });

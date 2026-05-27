@@ -41,3 +41,13 @@ deliberately **not** fixed in this tier. Tier numbers refer to the 3-tier plan
   after the `height === undefined` early return. Pre-existing; works because
   `height` is consistently defined/undefined per call site, but it violates the
   rules-of-hooks letter. Address if `StreamView` is restructured.
+
+## From Tier 1 implementation
+
+- **1.6 live shell stdout tail — deferred.** The spec asks the active shell
+  line to tail the last 1–2 lines of stdout while running. The `sdk.tool_call`
+  running frame exposes no partial `result`/stdout — output arrives only on the
+  completed frame — so there is no in-flight stdout to tail without a server
+  change to stream partial tool output (out of Tier 1's render-only scope). The
+  active-tool overlay shows spinner + summary + elapsed instead. Revisit if the
+  server starts emitting partial tool output.

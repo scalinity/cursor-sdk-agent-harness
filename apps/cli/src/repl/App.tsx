@@ -10,9 +10,10 @@ import { InputBar, parseSlashCommand, PromptHistory, type MentionTrigger } from 
 import { computeTuiLayout, countInputLines, MAX_INPUT_VISIBLE_LINES } from "./layout.js";
 import { MentionPopup, flattenMentionResults, MAX_MENTION_ITEMS, moveMentionSelection } from "./MentionPopup.js";
 import { filterSlashCommands, SlashPalette } from "./SlashPalette.js";
-import { clampStreamScrollOffset, createStreamBuffer, ingestStreamFrame, StreamView, type StreamBuffer } from "./StreamView.js";
+import { clampStreamScrollOffset, createStreamBuffer, ingestStreamFrame, StreamView, type StreamBuffer, type StreamItem } from "./StreamView.js";
 import { StatusBar } from "./StatusBar.js";
-import { createTuiTheme, bg, border, fg, MIN_COLUMNS, MIN_ROWS } from "./theme.js";
+import { formatActiveToolLine } from "./ToolCallLine.js";
+import { createTuiTheme, bg, border, fg, truncateMiddle, MIN_COLUMNS, MIN_ROWS } from "./theme.js";
 import { useSpinnerFrame } from "./useSpinnerFrame.js";
 import { useTerminalSize } from "./useTerminalSize.js";
 import { useReplCleanup, type ReplCleanupController } from "./useReplCleanup.js";
@@ -65,6 +66,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
   const [pendingApproval, setPendingApproval] = useState<{ runId: string; requestId: string } | null>(null);
   const [history] = useState(() => new PromptHistory(historyEntries));
   const queueRef = useRef<PromptRequest[]>([]);
+  const toolStartRef = useRef<{ callId: string; startMs: number } | null>(null);
   const mentionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mentionRequestSeqRef = useRef(0);
   const allMentionItems = flattenMentionResults(mentionResults);
@@ -78,7 +80,12 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
   const busy = activeRunId !== null || isStartingRun;
   const turnActive = isStartingRun || agentTurnActive;
   const spinner = useSpinnerFrame(turnActive);
-  const activeLabel = turnActive ? `${spinner} ${isStartingRun ? "starting run" : "agent working"}` : undefined;
+  const runningTool = toolStartRef.current ? findRunningTool(buffer.items, toolStartRef.current.callId) : undefined;
+  const activeLabel = turnActive
+    ? (runningTool && toolStartRef.current
+        ? truncateMiddle(formatActiveToolLine(spinner, runningTool, Date.now() - toolStartRef.current.startMs), streamWidth)
+        : `${spinner} ${isStartingRun ? "starting run" : "agent working"}`)
+    : undefined;
   const visibleActiveRunId = agentTurnActive ? activeRunId : null;
   const cleanupController = useReplCleanup({ stream, activeRunId, isStartingRun });
 
@@ -193,6 +200,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
       const finishRun = () => {
         if (runFinished) return;
         runFinished = true;
+        toolStartRef.current = null;
         setActiveRunId(null);
         setAgentTurnActive(false);
         setPendingApproval(null);
@@ -209,6 +217,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
       setAgentTurnActive(true);
       setStreamStatus("connected");
       const subscription = stream.subscribeToRun(run.runId, (frame: ServerFrame) => {
+        trackToolStart(frame, toolStartRef);
         setBuffer((current) => ingestStreamFrame(current, frame, workspace));
         if (frame.type === "sdk.request") setPendingApproval({ runId: run.runId, requestId: frame.event.payload.request_id });
         if (isRunStatusTerminalFrame(frame)) {
@@ -408,6 +417,24 @@ async function handleSlashCommand(ctx: SlashCommandContext): Promise<void> {
 function clearMentionTimer(ref: React.MutableRefObject<ReturnType<typeof setTimeout> | null>): void {
   if (ref.current) clearTimeout(ref.current);
   ref.current = null;
+}
+
+function trackToolStart(frame: ServerFrame, ref: React.MutableRefObject<{ callId: string; startMs: number } | null>): void {
+  if (frame.type !== "sdk.tool_call") return;
+  const payload = frame.event.payload;
+  if (payload.status === "running") {
+    if (ref.current?.callId !== payload.call_id) ref.current = { callId: payload.call_id, startMs: Date.now() };
+  } else if (ref.current?.callId === payload.call_id) {
+    ref.current = null;
+  }
+}
+
+function findRunningTool(items: readonly StreamItem[], callId: string): Extract<StreamItem, { type: "tool" }> | undefined {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item?.type === "tool" && item.callId === callId) return item.status === "running" ? item : undefined;
+  }
+  return undefined;
 }
 
 function cleanupAndExit(cleanup: ReplCleanupController, exit: () => void): void {

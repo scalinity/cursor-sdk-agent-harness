@@ -18,7 +18,7 @@ export type StreamItem =
   | { type: "user"; text: string; at: string }
   | { type: "assistant"; text: string }
   | { type: "thinking"; text: string; collapsed?: boolean }
-  | { type: "tool"; callId: string; name: string; status: "running" | "completed" | "error"; verb: string; primaryArg: string; secondaryDetail?: string; durationMs?: number; error?: string }
+  | { type: "tool"; callId: string; name: string; status: "running" | "completed" | "error" | "cancelled"; verb: string; primaryArg: string; secondaryDetail?: string; durationMs?: number; error?: string }
   | { type: "diff"; path: string; language?: string; before?: string; after?: string; unifiedDiff?: string }
   | { type: "approval"; requestId: string; description: string }
   | { type: "summary"; status: string; tokens: number | null; costMicros: number | null; durationMs: number | null }
@@ -108,6 +108,10 @@ export function ingestStreamFrame(buffer: StreamBuffer, frame: ServerFrame, cwd:
       break;
     }
     case "run.interrupted": {
+      for (let index = 0; index < items.length; index += 1) {
+        const candidate = items[index];
+        if (candidate?.type === "tool" && candidate.status === "running") items[index] = { ...candidate, status: "cancelled" };
+      }
       items.push({ type: "summary", status: "CANCELLED", tokens: null, costMicros: null, durationMs: null });
       break;
     }
@@ -122,7 +126,7 @@ export function ingestStreamFrame(buffer: StreamBuffer, frame: ServerFrame, cwd:
 }
 
 export function renderStreamItems(items: readonly StreamItem[], width = 80): string {
-  return items.map((item) => renderStreamItem(item, width)).join("\n");
+  return items.map((item) => renderStreamItem(item, width)).filter((line) => line.length > 0).join("\n");
 }
 
 export function renderViewportLines(text: string, width: number, height: number, scrollOffset: number): string[] {
@@ -204,7 +208,9 @@ function renderStreamItem(item: StreamItem, width: number): string {
     case "thinking":
       return styles.thinking(`◐ Thinking...\n  ${sanitizeTerminalText(item.text)}`);
     case "tool":
-      return formatToolCallLine(item);
+      // Running tools render live in the active-run overlay (spinner + timer),
+      // so they are suppressed here; they reappear frozen once completed/cancelled.
+      return item.status === "running" ? "" : formatToolCallLine(item);
     case "diff":
       return renderFileEdit(item);
     case "approval":
