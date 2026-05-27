@@ -34,6 +34,46 @@ each phase. Use it as the single source of truth for "what is decided" vs
 
 ---
 
+## CLI/App Session Isolation — 2026-05-27
+
+### Summary
+
+Investigated why CLI-created conversations appeared in the desktop app under the
+Home workspace. The app database showed recent runs with `workspace_id = Home`
+while their agents' `cwd_json` pointed at CLI launch directories such as
+`apps/cli`, `Pool-Bench`, and `Pool2`. Root cause: the CLI's zero-setup embedded
+server used the same default SQLite path as the desktop app, and server-side run
+creation tagged each run with the global `app.activeWorkspaceId` setting, which
+was Home.
+
+### Changes delivered
+
+- Added a CLI-owned default SQLite path at `~/.harness-cli/harness.sqlite`.
+- Routed embedded CLI server startup through a `DB_PATH` override so default CLI
+  sessions no longer write into the desktop app's run history database.
+- Kept explicit `--server` / `HARNESS_SERVER_URL` behavior as the opt-in path for
+  connecting the CLI to an external server.
+- Added regression coverage for the embedded-server env override.
+
+### Verification
+
+- Confirmed the app DB mismatch with a read-only SQLite query joining `runs`,
+  `workspace_allowlist`, and `agents`.
+- Watched the new `apps/cli/tests/backend.test.ts` fail before the production
+  change and pass after it.
+- `pnpm -F @harness/cli test -- backend.test.ts` passed.
+- `pnpm -F @harness/cli typecheck` passed.
+- `pnpm exec eslint apps/cli/src/backend.ts apps/cli/src/config.ts apps/cli/tests/backend.test.ts` passed.
+- `pnpm typecheck` passed.
+- `pnpm lint` passed.
+- `pnpm test` passed.
+- `pnpm -F @harness/cli build` passed.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` passed.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from
+  `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app`.
+
+---
+
 ## CLI Resume Flag Fix — 2026-05-27
 
 ### Summary
