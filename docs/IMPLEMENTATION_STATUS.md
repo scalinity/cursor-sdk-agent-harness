@@ -34,6 +34,43 @@ each phase. Use it as the single source of truth for "what is decided" vs
 
 ---
 
+## CLI Resume Flag Fix — 2026-05-27
+
+### Summary
+
+Fixed the root `harness -r` invocation so it reaches the interactive resume path
+instead of printing Commander root help and exiting before session lookup. The
+root command now owns the default chat action, letting Commander parse global
+flags normally while explicit subcommands continue to bypass the default action.
+
+### Changes delivered
+
+- Moved the no-subcommand chat launch into a Commander root action.
+- Preserved piped-prompt behavior for non-TTY `harness` invocations, with an
+  explicit usage error when `-r` is attempted outside a TTY.
+- Added parser regression coverage for `harness -r`, global `--server`/`--origin`
+  options on the default chat path, and explicit subcommands.
+
+### Verification
+
+- Reproduced the bug with a TTY run of `bin/harness -r`: it printed root help
+  instead of the missing-session resume error.
+- `pnpm -F @harness/cli exec vitest run tests/cli-program.test.ts tests/session.test.ts` passed.
+- `pnpm -F @harness/cli typecheck` passed.
+- `pnpm -F @harness/cli build` passed.
+- TTY smoke after rebuild: `bin/harness -r` with an empty temp session path now
+  reports "No saved chat session found. Start a chat with `harness` first."
+- `pnpm -F @harness/cli test` passed (27 files / 123 tests).
+- `pnpm exec eslint apps/cli` passed.
+- `pnpm typecheck` passed.
+- `pnpm lint` passed.
+- `pnpm test` passed.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` passed.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from
+  `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app`.
+
+---
+
 ## CLI Thinking Indicator Placement — 2026-05-27
 
 ### Summary

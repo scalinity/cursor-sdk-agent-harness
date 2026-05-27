@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { stdin as input, stdout as output, stderr } from "node:process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import React from "react";
 import { createAgent, listAgents } from "./commands/agents.js";
@@ -17,23 +19,20 @@ import { readLastSession, writeLastSession, type CliSessionSnapshot } from "./se
 import { mountFullscreen } from "./repl/tui-lifecycle.js";
 import type { CliAgentSummary, CliHttpPort, CliMode, CliStreamPort, CommandDeps } from "./types.js";
 
-interface GlobalOptions {
+export interface GlobalOptions {
   server?: string;
   origin?: string;
   resume?: boolean;
 }
 
-
-function primarySubcommand(): string | undefined {
-  for (const arg of process.argv.slice(2)) {
-    if (arg.startsWith("-")) continue;
-    return arg;
-  }
-  return undefined;
-}
-
-function shouldLaunchInteractiveChat(): boolean {
-  return !process.argv.slice(2).some((arg) => arg === "--help" || arg === "-h" || arg === "--version" || arg === "-V");
+export function attachDefaultChatAction(
+  command: Command,
+  action: (options: GlobalOptions) => Promise<void>,
+): void {
+  command.action(async (options: GlobalOptions) => action({
+    ...options,
+    resume: Boolean(options.resume),
+  }));
 }
 
 async function resolveAgentForChat(
@@ -221,6 +220,20 @@ program
   .option("--server <url>", "Attach to an external Harness server instead of the embedded one")
   .option("--origin <url>", "Origin header for WebSocket upgrades (advanced)");
 
+attachDefaultChatAction(program, async (options) => runCommand(async () => {
+  if (input.isTTY !== true) {
+    if (options.resume) {
+      throw new CliUsageError("Interactive resume requires a TTY. Run `harness -r` in a terminal.");
+    }
+    const prompt = await readStdin();
+    await withBackend(options, { stream: true }, async (deps) => {
+      process.exitCode = await runPrompt({ prompt, mode: "agent" }, deps);
+    });
+    return;
+  }
+  await runChat(options);
+}));
+
 program
   .command("chat")
   .option("--agent <id>", "Start with a specific agent")
@@ -317,22 +330,13 @@ program.command("history").option("--agent <id>", "Filter by agent").option("--l
   await runCommand(async () => withBackend(program.opts<GlobalOptions>(), {}, (deps) => showHistory({ agent: options.agent, limit: Number(options.limit), json: Boolean(options.json) }, deps)));
 });
 
-if (primarySubcommand() === undefined) {
-  if (input.isTTY !== true) {
-    const prompt = await readStdin();
-    await runCommand(async () => withBackend(program.opts<GlobalOptions>(), { stream: true }, async (deps) => {
-      process.exitCode = await runPrompt({ prompt, mode: "agent" }, deps);
-    }));
-  } else {
-    await runCommand(async () => {
-      await program.parseAsync(process.argv);
-      if (shouldLaunchInteractiveChat()) {
-        await runChat({ ...program.opts<GlobalOptions>(), resume: Boolean(program.opts<GlobalOptions>().resume) });
-      }
-    });
-  }
-} else {
+if (isEntrypoint()) {
   await program.parseAsync(process.argv);
+}
+
+function isEntrypoint(): boolean {
+  const entryPath = process.argv[1];
+  return entryPath !== undefined && path.resolve(entryPath) === fileURLToPath(import.meta.url);
 }
 
 function normalizeMode(value: unknown): CliMode {
