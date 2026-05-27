@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import { normalizePath } from "../render/path.js";
 import { sanitizeTerminalText } from "../output/sanitize.js";
 import { truncateMiddle, fg, bg, type TuiTheme } from "./theme.js";
+import { glyph } from "./glyphs.js";
 
 export type ChromeState = "ready" | "streaming" | "tool-running" | "disconnected" | "error";
 
@@ -39,8 +40,8 @@ export function HeaderBar({
   return (
     <Box flexDirection="column" width={width} paddingX={1} paddingTop={0} {...bg(theme.background)}>
       <Box width={Math.max(1, width - 2)} justifyContent="space-between">
-        <Text {...fg(theme.brand)} bold>
-          ▌ {title}
+        <Text {...fg(theme.stateActive)} bold>
+          {title}
         </Text>
         <Text {...fg(chromeStateColor(theme, chromeState))}>{modelLabel}</Text>
       </Box>
@@ -57,7 +58,7 @@ export function formatChromeIndicator(
   accountLabel: string,
   state: ChromeState,
 ): string {
-  return `${sanitizeChromeLine(modelId)} · ${sanitizeChromeLine(accountLabel)} · ${state} ●`;
+  return `${sanitizeChromeLine(modelId)} · ${sanitizeChromeLine(accountLabel)} · ${state} ${glyph.readyDot}`;
 }
 
 export function formatHeaderCwdLabel(

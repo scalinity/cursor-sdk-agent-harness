@@ -39,27 +39,29 @@ export interface MentionPopupProps {
   results: ContextSearchResult | null;
   selectedIndex: number;
   open?: boolean;
+  focused?: boolean;
   theme?: TuiTheme;
 }
 
-export function MentionPopup({ results, selectedIndex, open = results !== null, theme = createTuiTheme() }: MentionPopupProps) {
+export function MentionPopup({ results, selectedIndex, focused = true, open = results !== null, theme = createTuiTheme() }: MentionPopupProps) {
   const items = flattenMentionResults(results).slice(0, MAX_MENTION_ITEMS);
   if (!open) return null;
+  const borderColor = focused ? theme.stateActive : theme.border;
   if (items.length === 0) {
     return (
-      <Box flexDirection="column" borderStyle="round" {...border(theme.borderFocus)} paddingX={1} {...bg(theme.panel)}>
+      <Box flexDirection="column" borderStyle="round" {...border(borderColor)} paddingX={1} {...bg(theme.panel)}>
         <Text {...fg(theme.muted)}>type to search files, folders, and symbols</Text>
       </Box>
     );
   }
   return (
-    <Box flexDirection="column" borderStyle="round" {...border(theme.borderFocus)} paddingX={1} {...bg(theme.panel)}>
+    <Box flexDirection="column" borderStyle="round" {...border(borderColor)} paddingX={1} {...bg(theme.panel)}>
       <Text {...fg(theme.muted)}>CONTEXT PICKER</Text>
       {items.map((item, index) => {
         const selected = index === selectedIndex;
         return (
-          <Text key={`${item.kind}:${item.value}`} {...fg(selected ? theme.brand : theme.text)} bold={selected}>
-            {selected ? "◆ " : "◇ "}
+          <Text key={`${item.kind}:${item.value}`} {...fg(selected ? theme.stateActive : theme.text)} bold={selected}>
+            {selected ? "▸ " : "  "}
             {iconForKind(item.kind)} {item.label} <Text {...fg(theme.muted)}>{item.detail}</Text>
           </Text>
         );
@@ -71,11 +73,11 @@ export function MentionPopup({ results, selectedIndex, open = results !== null, 
 function iconForKind(kind: MentionSelectionItem["kind"]): string {
   switch (kind) {
     case "file":
-      return "•";
+      return "file:";
     case "folder":
-      return "▸";
+      return "dir:";
     case "symbol":
-      return "ƒ";
+      return "sym:";
     default:
       return "@";
   }

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import type { AgentSummary, ContextChip, ContextSearchResult, ServerFrame } from "@harness/shared";
 import { isRunStatusTerminalFrame, isTerminalFrame } from "../client/ws.js";
@@ -36,7 +36,11 @@ import { useTerminalSize } from "./useTerminalSize.js";
 import { useReplCleanup, type ReplCleanupController } from "./useReplCleanup.js";
 import { useResumeNotice } from "./useResumeNotice.js";
 import { useSessionSnapshotRegistration, type ReplSessionSnapshotState } from "./useSessionSnapshotRegistration.js";
+import { useMentionTimerCleanup } from "./useMentionTimerCleanup.js";
+import { useStreamScrollClamp } from "./useStreamScrollClamp.js";
 import type { CliSessionSnapshot } from "../session.js";
+
+const MAX_QUEUED_PROMPTS = 8;
 
 export interface ReplResumeState {
   buffer: StreamBuffer;
@@ -182,17 +186,13 @@ export function App({
   };
   useSessionSnapshotRegistration(onRegisterSessionSnapshot, sessionStateRef);
   useResumeNotice(resume !== undefined, setBuffer);
+  useMentionTimerCleanup(mentionTimerRef, mentionRequestSeqRef);
   const streamViewport = useMemo(
     () => computeStreamViewportState(buffer.items, streamWidth, streamHeight, scrollOffset, activeLabel),
     [activeLabel, buffer.items, scrollOffset, streamHeight, streamWidth],
   );
   const { maxOffset, bodyHeight, effectiveOffset, streamScrollActive } = streamViewport;
-
-  useEffect(() => {
-    if (scrollOffset !== effectiveOffset) {
-      setScrollOffset(effectiveOffset);
-    }
-  }, [effectiveOffset, scrollOffset]);
+  useStreamScrollClamp(scrollOffset, effectiveOffset, setScrollOffset);
 
   const appendUser = (text: string) => setBuffer((current) => ({ items: [...current.items, { type: "user", text, at: formatTurnClock() }] }));
   const appendSystem = (text: string) => setBuffer((current) => ({ items: [...current.items, { type: "system", text }] }));
@@ -260,6 +260,10 @@ export function App({
     const promptText = request.text.trim();
     if (promptText.length === 0 && request.images.length === 0) return;
     if (busy) {
+      if (queueRef.current.length >= MAX_QUEUED_PROMPTS) {
+        appendError(`Queue is full (${MAX_QUEUED_PROMPTS} prompts). Wait for the current run to finish, then try again.`);
+        return;
+      }
       const queued: QueuedPrompt = userDisplay === undefined ? { request } : { request, userDisplay };
       queueRef.current = [...queueRef.current, queued];
       setQueuedPrompts(queueRef.current);
@@ -277,11 +281,11 @@ export function App({
       if (slash?.command === "unknown" && slash.args[0]) {
         const skill = await resolveSkillBySlashCommand(slash.args[0], workspace);
         if (skill) {
-          clearComposerAttachments();
           const body = await readSkillBody(skill.filePath);
           const args = slash.args.slice(1);
           const prompt = buildSkillInvocationPrompt(skill, body, args);
           const display = `/${skill.name}${args.length > 0 ? ` ${args.join(" ")}` : ""}`;
+          clearComposerAttachments();
           dispatchPrompt(promptSnapshot(prompt, { mentions: [], images: [] }), display);
           return;
         }
@@ -326,6 +330,7 @@ export function App({
       appendSystem(`At most ${MAX_IMAGE_ATTACHMENTS} images per message.`);
     }
     void Promise.allSettled(selected.selected.map((filePath) => readImageFromPath(filePath))).then((results) => {
+      if (cleanupController.disposedRef.current) return;
       const loaded: ImageAttachment[] = [];
       const failures: string[] = [];
       for (const result of results) {
@@ -336,17 +341,21 @@ export function App({
         appendError(formatImageDropFailure(results));
         return;
       }
-      setImageAttachments((current) => {
-        const merged = mergeImageAttachments(current, loaded);
-        if (merged.length < current.length + loaded.length) {
-          appendSystem(`At most ${MAX_IMAGE_ATTACHMENTS} images per message.`);
-        }
-        return merged;
-      });
+      setImageAttachments((current) => mergeImageAttachments(current, loaded));
       if (failures.length > 0) {
         appendError(`Could not attach ${failures.length} dropped image${failures.length === 1 ? "" : "s"}: ${failures.join("; ")}`);
       }
     });
+  };
+
+  const startQueuedPrompt = () => {
+    const next = queueRef.current[0];
+    if (next === undefined) return;
+    queueRef.current = queueRef.current.slice(1);
+    setQueuedPrompts(queueRef.current);
+    setTimeout(() => {
+      if (!cleanupController.disposedRef.current) startPrompt(next.request, next.userDisplay);
+    }, 0);
   };
 
   const startPrompt = (request: PromptRequest, userDisplay?: string) => {
@@ -379,12 +388,7 @@ export function App({
         setAgentTurnActive(false);
         setPendingApproval(null);
         setStreamStatus("ready");
-        const next = queueRef.current[0];
-        if (next !== undefined) {
-          queueRef.current = queueRef.current.slice(1);
-          setQueuedPrompts(queueRef.current);
-          setTimeout(() => startPrompt(next.request, next.userDisplay), 0);
-        }
+        startQueuedPrompt();
       };
       setIsStartingRun(false);
       setActiveRunId(run.runId);
@@ -395,6 +399,7 @@ export function App({
         setBuffer((current) => ingestStreamFrame(current, frame, workspace));
         if (frame.type === "sdk.request") setPendingApproval({ runId: run.runId, requestId: frame.event.payload.request_id });
         if (isRunStatusTerminalFrame(frame)) {
+          toolStartRef.current = null;
           setAgentTurnActive(false);
           setPendingApproval(null);
           setStreamStatus("ready");
@@ -414,8 +419,10 @@ export function App({
         setActiveRunId(null);
         setAgentTurnActive(false);
         setPendingApproval(null);
+        toolStartRef.current = null;
         setStreamStatus("disconnected");
         appendError(error instanceof Error ? error.message : String(error));
+        startQueuedPrompt();
       });
       if (cleanupController.cancelPendingStartRef.current) {
         const sent = stream.cancelRun?.(run.runId) ?? false;
@@ -427,8 +434,12 @@ export function App({
       setIsStartingRun(false);
       setActiveRunId(null);
       setAgentTurnActive(false);
+      setPendingApproval(null);
+      toolStartRef.current = null;
+      cleanupController.cancelPendingStartRef.current = false;
       setStreamStatus("disconnected");
       appendError(error instanceof Error ? error.message : String(error));
+      startQueuedPrompt();
     });
   };
 
@@ -453,12 +464,12 @@ export function App({
     clearMentionTimer(mentionTimerRef);
     mentionTimerRef.current = setTimeout(() => {
       void http.contextSearch(mention.query).then((result) => {
-        if (mentionRequestSeqRef.current !== seq) return;
+        if (cleanupController.disposedRef.current || mentionRequestSeqRef.current !== seq) return;
         const visibleCount = Math.min(MAX_MENTION_ITEMS, flattenMentionResults(result).length);
         setMentionResults(result);
         setMentionIndex((current) => clampSelectionIndex(current, visibleCount));
       }).catch((error: unknown) => {
-        if (mentionRequestSeqRef.current !== seq) return;
+        if (cleanupController.disposedRef.current || mentionRequestSeqRef.current !== seq) return;
         setMentionResults(null);
         appendError(`Context search failed for @${mention.query}: ${error instanceof Error ? error.message : String(error)}`);
       });
@@ -530,7 +541,7 @@ export function App({
 function TooSmallTerminal({ columns, rows, theme }: { columns: number; rows: number; theme: ReturnType<typeof createTuiTheme> }) {
   return (
     <Box flexDirection="column" paddingX={1} {...bg(theme.background)}>
-      <Text {...fg(theme.brand)} bold>▌ Cursor Harness</Text>
+      <Text {...fg(theme.stateActive)} bold>Cursor Harness</Text>
       <Text {...fg(theme.stateWarning)}>terminal too small: {columns}x{rows}</Text>
       <Text {...fg(theme.muted)}>minimum supported size is {MIN_COLUMNS}x{MIN_ROWS}</Text>
     </Box>

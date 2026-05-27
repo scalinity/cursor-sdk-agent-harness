@@ -89,6 +89,7 @@ export interface InputBarProps {
   /** When true, ↑/↓ scroll the stream and prompt history moves to Ctrl+↑/↓. */
   streamScrollActive?: boolean;
   theme: TuiTheme;
+  focused?: boolean;
   onMentionNavigate?: (delta: number) => void;
   onMentionDismiss?: () => void;
   onMentionSelect?: (chips: ContextChip[]) => void;
@@ -114,6 +115,7 @@ export function InputBar({
   width = 80,
   maxVisibleLines = 4,
   streamScrollActive = false,
+  focused = true,
   theme,
   onMentionNavigate,
   onMentionDismiss,
@@ -242,23 +244,29 @@ export function InputBar({
   const lastLineIndex = visibleLines.length - 1;
 
   return (
-    <Box flexDirection="column" borderStyle="round" {...border(theme.borderFocus)} paddingX={1} {...bg(theme.panel)}>
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      {...border(focused ? theme.stateActive : theme.border)}
+      paddingX={1}
+      {...bg(theme.panel)}
+    >
       {visibleLines.map((line, index) => (
         <Box key={`${hiddenLineCount + index}:${line}`}>
           {index === 0 ? (
             <>
               {chips.map((chip) => (
-                <Text key={chip.id} {...fg(theme.brand)}>[@{chip.mention.displayLabel}] </Text>
+                <Text key={chip.id} {...fg(theme.muted)}>[@{chip.mention.displayLabel}] </Text>
               ))}
               {imageAttachments.map((attachment) => (
-                <Text key={attachment.id} {...fg(theme.brandWarm)}>[img:{formatImageChipLabel(attachment.name)}] </Text>
+                <Text key={attachment.id} {...fg(theme.muted)}>[img:{formatImageChipLabel(attachment.name)}] </Text>
               ))}
             </>
           ) : null}
-          <Text {...fg(theme.brand)}>{index === 0 ? "❯ " : "  "}</Text>
+          <Text {...fg(focused ? theme.brand : theme.muted)}>{index === 0 ? "▸ " : "  "}</Text>
           {hiddenLineCount > 0 && index === 0 ? <Text {...fg(theme.muted)}>… </Text> : null}
           {line.length > 0 ? <Text {...fg(theme.text)}>{line}</Text> : null}
-          {index === lastLineIndex ? <Text {...fg(theme.brand)}>█</Text> : null}
+          {index === lastLineIndex ? <Text {...fg(focused ? theme.brand : theme.muted)}>{" "}</Text> : null}
         </Box>
       ))}
     </Box>

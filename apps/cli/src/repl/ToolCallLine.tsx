@@ -1,8 +1,8 @@
 import React from "react";
 import { Text } from "ink";
-import cliSpinners from "cli-spinners";
 import { sanitizeTerminalText } from "../output/sanitize.js";
 import { styles } from "../render/styles.js";
+import { glyph } from "./glyphs.js";
 
 export interface ToolCallLineProps {
   verb: string;
@@ -26,13 +26,14 @@ function formatToolSummary(input: { verb: string; primaryArg: string; secondaryD
 export function formatToolCallLine(input: ToolCallLineProps): string {
   const summary = formatToolSummary(input);
   if (input.status === "cancelled") {
-    return `${styles.muted("⏸")} ${styles.muted(`${summary} (cancelled)`)}`;
+    return `${styles.muted(glyph.paused)} ${styles.muted(`${summary} (cancelled)`)}`;
   }
-  const glyphChar = input.status === "running" ? (cliSpinners.dots.frames[0] ?? "⠋") : input.status === "completed" ? "✓" : "✗";
-  const glyph = input.status === "running" ? styles.glyphRun(glyphChar) : input.status === "completed" ? styles.glyphOk(glyphChar) : styles.glyphErr(glyphChar);
+  const glyphChar = input.status === "running" ? glyph.running : input.status === "completed" ? glyph.done : glyph.failed;
+  const glyphRenderer =
+    input.status === "running" ? styles.glyphRun(glyphChar) : input.status === "completed" ? styles.glyphOk(glyphChar) : styles.glyphErr(glyphChar);
   const duration = input.durationMs !== undefined ? `   ${(input.durationMs / 1000).toFixed(1)}s` : "";
   const error = input.error ? styles.error(` — ${sanitizeTerminalText(input.error)}`) : "";
-  return `${glyph} ${styles.tool(`${summary}${duration}`)}${error}`;
+  return `${glyphRenderer} ${styles.tool(`${summary}${duration}`)}${error}`;
 }
 
 /** Live, animated line for a running tool: spinner + summary + elapsed seconds.
