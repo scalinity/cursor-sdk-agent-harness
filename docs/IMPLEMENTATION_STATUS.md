@@ -3992,3 +3992,35 @@ Accepted the recorded default Tier 3 brand accent and applied it as vermillion `
 ### Next phase
 
 Continue with the next Tier 3 visual identity subsection when its prompt or subsection scope is provided.
+
+---
+
+## CLI Input Hardening and Hook Extraction — 2026-05-27
+
+### Summary
+
+Hardened CLI image attachment handling and cleaned up the REPL component side-effect boundaries. Dropped images are now capped before file reads, symlink paths are rejected with `O_NOFOLLOW` reads, and image bytes must match the extension-derived MIME type before being sent to the SDK. `App.tsx` no longer owns the resume notice or session snapshot registration effects directly; those are isolated in named hooks, while viewport computation now reuses `computeStreamViewportState`. The thinking indicator dot cadence is slower and exported through a named constant for test coverage, and the skill markdown test now matches the intentionally quoted frontmatter output.
+
+### Files modified
+
+- `apps/cli/src/lib/attachments.ts` — rejects symlinked image paths, validates image signatures, reads with no-follow handles, and keeps attachment errors basename-scoped.
+- `apps/cli/src/repl/App.tsx` — uses pre-read image drop capping, preserves queued prompt display text, catches async submit errors, reuses computed stream viewport state, and moves direct effects into hooks.
+- `apps/cli/src/repl/useResumeNotice.ts` and `apps/cli/src/repl/useSessionSnapshotRegistration.ts` — contain the resume banner and session snapshot registration effects.
+- `apps/cli/src/repl/useSpinnerFrame.ts` and `apps/cli/tests/repl/App.test.tsx` — slow and cover the thinking-dot cadence.
+- `apps/cli/tests/lib/attachments.test.ts` — covers symlink rejection and MIME signature mismatches.
+- `apps/cli/tests/lib/skills.test.ts` — expects the quoted SKILL.md description frontmatter emitted by `buildSkillMarkdown`.
+- `docs/IMPLEMENTATION_STATUS.md` — recorded this status entry.
+
+### Verification
+
+- `pnpm --filter @harness/cli typecheck` — pass.
+- `pnpm --filter @harness/cli test` — pass, 27 files / 136 tests.
+- `pnpm typecheck` — pass.
+- `pnpm lint` — pass.
+- `pnpm test` — pass: shared 39, eslint-plugin 6, web 147, server 468 passing / 1 skipped, CLI 136, desktop 0 test files, scripts 11.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass; rebuilt web/server/desktop and packaged macOS app.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` — installed timestamp May 27 03:19:14 2026.
+
+### Next phase
+
+Continue with the next Tier 3 visual identity subsection when its prompt or subsection scope is provided.
