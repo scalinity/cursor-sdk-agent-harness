@@ -132,4 +132,20 @@ describe("StreamView helpers", () => {
     expect(output).toContain("30 tokens");
     expect(output).toContain("$0.0025");
   });
+
+  it("renders turn boundaries for user, assistant, and system items", () => {
+    const out = renderStreamItems(
+      [
+        { type: "user", text: "fix the bug", at: "14:32" },
+        { type: "assistant", text: "Done." },
+        { type: "system", text: "Mode switched to agent." },
+      ],
+      40,
+    );
+    expect(out).toContain("── you · 14:32 ");
+    expect(out).toContain("fix the bug");
+    expect(out).toContain("── claude ──");
+    expect(out).toContain("Done.");
+    expect(out).toContain("Mode switched to agent.");
+  });
 });

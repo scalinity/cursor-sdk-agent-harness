@@ -56,7 +56,7 @@ export async function runPrompt(options: RunCommandOptions, deps: CommandDeps): 
         return;
       }
       if (!options.noStream) {
-        rendered = writeIncremental(rendered, renderStreamItems(buffer.items), deps);
+        rendered = writeIncremental(rendered, renderStreamItems(buffer.items, process.stdout.columns ?? 80), deps);
       }
     };
 
@@ -74,7 +74,7 @@ export async function runPrompt(options: RunCommandOptions, deps: CommandDeps): 
     }
 
     if (options.noStream && !options.json) {
-      deps.write(renderStreamItems(buffer.items));
+      deps.write(renderStreamItems(buffer.items, process.stdout.columns ?? 80));
     }
     return 0;
   } catch (error) {

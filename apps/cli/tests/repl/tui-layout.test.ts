@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { computeTuiLayout, countInputLines, MAX_INPUT_VISIBLE_LINES } from "../../src/repl/layout.js";
 import { filterSlashCommands } from "../../src/repl/SlashPalette.js";
-import { clampStreamScrollOffset, formatScrollIndicator, renderViewportLines } from "../../src/repl/StreamView.js";
+import { clampStreamScrollOffset, formatScrollIndicator, formatTurnHeader, renderViewportLines } from "../../src/repl/StreamView.js";
 import { bg, border, createTuiTheme, fg } from "../../src/repl/theme.js";
 
 describe("fullscreen TUI helpers", () => {
@@ -26,8 +26,9 @@ describe("fullscreen TUI helpers", () => {
     const lines = renderViewportLines("alpha beta gamma delta\nlast", 10, 2, 0);
     expect(lines).toEqual(["delta", "last"]);
     expect(renderViewportLines("one\ntwo\nthree", 20, 2, 1)).toEqual(["one", "two"]);
-    // 3 lines, height 2, offset 99 → scrolled up so indicator takes 1 line → bodyHeight=1 → max=2
-    expect(clampStreamScrollOffset([{ type: "assistant", text: "one\ntwo\nthree" }], 20, 2, 99)).toBe(2);
+    // 3 content lines, height 2, offset 99 → indicator takes 1 line → bodyHeight=1 → max=2.
+    // Uses a system item (no turn header) so the math isn't confounded by a ── claude ── line.
+    expect(clampStreamScrollOffset([{ type: "system", text: "one\ntwo\nthree" }], 20, 2, 99)).toBe(2);
   });
 
   it("treats an empty buffer as non-scrollable", () => {
@@ -43,6 +44,13 @@ describe("fullscreen TUI helpers", () => {
     expect(formatScrollIndicator(5, 20)).toBe("▼ 5 below");
     expect(formatScrollIndicator(99999, 40).length).toBeLessThanOrEqual(40);
     expect(formatScrollIndicator(999999999, 12).length).toBeLessThanOrEqual(12);
+  });
+
+  it("renders turn headers as a full-width separator with a timestamp and a short sub-label without", () => {
+    const youHeader = formatTurnHeader("you", 30, "14:32");
+    expect(youHeader.startsWith("── you · 14:32 ")).toBe(true);
+    expect(youHeader.length).toBe(30);
+    expect(formatTurnHeader("claude", 30)).toBe("── claude ──");
   });
 
   it("omits Ink color props in NO_COLOR mode", () => {

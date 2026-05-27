@@ -36,8 +36,8 @@ interface PromptRequest {
   mentions: Array<ContextChip["mention"]>;
 }
 
-export function formatUserPromptBlock(text: string): string {
-  return `\n❯ ${text}\n\n`;
+export function formatTurnClock(date: Date = new Date()): string {
+  return date.toTimeString().slice(0, 5);
 }
 
 export function App({ agent, mode: initialMode, modelId: initialModelId, workspace, historyEntries, http, stream }: ReplAppProps) {
@@ -82,7 +82,8 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
   const visibleActiveRunId = agentTurnActive ? activeRunId : null;
   const cleanupController = useReplCleanup({ stream, activeRunId, isStartingRun });
 
-  const appendAssistant = (text: string) => setBuffer((current) => ({ items: [...current.items, { type: "assistant", text }] }));
+  const appendUser = (text: string) => setBuffer((current) => ({ items: [...current.items, { type: "user", text, at: formatTurnClock() }] }));
+  const appendSystem = (text: string) => setBuffer((current) => ({ items: [...current.items, { type: "system", text }] }));
   const appendError = (message: string) => setBuffer((current) => ({ items: [...current.items, { type: "error", message }] }));
   const promptSnapshot = (text: string): PromptRequest => ({
     text,
@@ -126,12 +127,12 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
     if (key.ctrl && input === "c") {
       if (activeRunId) {
         const sent = stream.cancelRun?.(activeRunId) ?? false;
-        appendAssistant(sent ? "\n[cancel requested]\n" : "\n[cancel unavailable: stream is not connected]\n");
+        appendSystem(sent ? "[cancel requested]" : "[cancel unavailable: stream is not connected]");
         return;
       }
       if (isStartingRun) {
         cleanupController.cancelPendingStartRef.current = true;
-        appendAssistant("\n[cancel requested once the run starts]\n");
+        appendSystem("[cancel requested once the run starts]");
         return;
       }
       if (inputDraft.length > 0) return;
@@ -171,7 +172,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
     if (busy) {
       queueRef.current = [...queueRef.current, request];
       setQueuedPrompts(queueRef.current);
-      appendAssistant(`(queued) ❯ ${text}`);
+      appendSystem(`queued: ${text}`);
       return;
     }
     startPrompt(request);
@@ -185,7 +186,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
     appendPromptHistory(request.text).catch((error: unknown) => {
       appendError(`Prompt history was not saved: ${error instanceof Error ? error.message : String(error)}`);
     });
-    appendAssistant(formatUserPromptBlock(request.text));
+    appendUser(request.text);
     void http.createRun({ agentId: request.agentId, prompt: request.text, executionMode: request.mode, mentions: request.mentions }).then((run) => {
       if (cleanupController.disposedRef.current) return;
       let runFinished = false;
@@ -234,7 +235,7 @@ export function App({ agent, mode: initialMode, modelId: initialModelId, workspa
       if (cleanupController.cancelPendingStartRef.current) {
         const sent = stream.cancelRun?.(run.runId) ?? false;
         cleanupController.cancelPendingStartRef.current = false;
-        appendAssistant(sent ? "\n[cancel requested]\n" : "\n[cancel unavailable: stream is not connected]\n");
+        appendSystem(sent ? "[cancel requested]" : "[cancel unavailable: stream is not connected]");
       }
     }).catch((error: unknown) => {
       if (cleanupController.disposedRef.current) return;
@@ -370,7 +371,7 @@ interface SlashCommandContext {
 
 async function handleSlashCommand(ctx: SlashCommandContext): Promise<void> {
   const { slash, setBuffer } = ctx;
-  const appendMessage = (message: string) => setBuffer((current) => ({ items: [...current.items, { type: "assistant", text: message }] }));
+  const appendMessage = (message: string) => setBuffer((current) => ({ items: [...current.items, { type: "system", text: message }] }));
   const appendError = (message: string) => setBuffer((current) => ({ items: [...current.items, { type: "error", message }] }));
   switch (slash.command) {
     case "mode":

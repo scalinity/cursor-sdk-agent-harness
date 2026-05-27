@@ -8,19 +8,21 @@ import { renderDiff } from "../render/diff.js";
 import { renderMarkdown } from "../render/markdown.js";
 import { formatToolCall } from "../render/tool-call.js";
 import { formatToolCallLine } from "./ToolCallLine.js";
-import { createTuiTheme, fg, hardWrapText, truncateMiddle, type TuiTheme } from "./theme.js";
+import { createTuiTheme, fg, hardWrapText, truncateMiddle, visibleLength, type TuiTheme } from "./theme.js";
 
 const MAX_BUFFER_ITEMS = 5000;
 const MAX_TEXT_LINES = 5000;
 const MAX_TEXT_BYTES = 512 * 1024;
 
 export type StreamItem =
+  | { type: "user"; text: string; at: string }
   | { type: "assistant"; text: string }
   | { type: "thinking"; text: string; collapsed?: boolean }
   | { type: "tool"; callId: string; name: string; status: "running" | "completed" | "error"; verb: string; primaryArg: string; secondaryDetail?: string; durationMs?: number; error?: string }
   | { type: "diff"; path: string; diff: string }
   | { type: "approval"; requestId: string; description: string }
   | { type: "summary"; status: string; tokens: number | null; costMicros: number | null; durationMs: number | null }
+  | { type: "system"; text: string }
   | { type: "error"; message: string };
 
 export interface StreamBuffer {
@@ -112,8 +114,8 @@ export function ingestStreamFrame(buffer: StreamBuffer, frame: ServerFrame, cwd:
   return { items: capItems(items) };
 }
 
-export function renderStreamItems(items: readonly StreamItem[]): string {
-  return items.map(renderStreamItem).join("\n");
+export function renderStreamItems(items: readonly StreamItem[], width = 80): string {
+  return items.map((item) => renderStreamItem(item, width)).join("\n");
 }
 
 export function renderViewportLines(text: string, width: number, height: number, scrollOffset: number): string[] {
@@ -126,7 +128,7 @@ export function renderViewportLines(text: string, width: number, height: number,
 }
 
 export function clampStreamScrollOffset(items: readonly StreamItem[], width: number, height: number, scrollOffset: number, activeLabel?: string | undefined): number {
-  const rendered = renderStreamItems(items);
+  const rendered = renderStreamItems(items, Math.max(12, width));
   const labelHeight = activeLabel ? 1 : 0;
   const indicatorHeight = scrollOffset > 0 && rendered.length > 0 ? 1 : 0;
   const bodyHeight = Math.max(1, height - labelHeight - indicatorHeight);
@@ -141,6 +143,17 @@ export function formatScrollIndicator(scrollOffset: number, width: number): stri
   return truncateMiddle(text, safeWidth);
 }
 
+/**
+ * Turn separator. With a timestamp it fills to `width` (── you · 14:32 ─────);
+ * without one it is a short sub-label (── claude ──).
+ */
+export function formatTurnHeader(label: string, width: number, at?: string): string {
+  if (at === undefined) return `── ${label} ──`;
+  const prefix = `── ${label} · ${at} `;
+  const fill = Math.max(0, Math.max(12, width) - visibleLength(prefix));
+  return `${prefix}${"─".repeat(fill)}`;
+}
+
 export interface StreamViewProps {
   items: readonly StreamItem[];
   height?: number;
@@ -151,7 +164,8 @@ export interface StreamViewProps {
 }
 
 export const StreamView = memo(function StreamView({ items, height, width = process.stdout.columns ?? 80, scrollOffset = 0, activeLabel, theme = createTuiTheme() }: StreamViewProps) {
-  const rendered = useMemo(() => renderStreamItems(items), [items]);
+  const safeWidth = Math.max(12, width);
+  const rendered = useMemo(() => renderStreamItems(items, safeWidth), [items, safeWidth]);
   if (height === undefined) {
     return (
       <Box flexDirection="column">
@@ -163,7 +177,6 @@ export const StreamView = memo(function StreamView({ items, height, width = proc
   const showScrollIndicator = scrollOffset > 0 && rendered.length > 0;
   const indicatorHeight = showScrollIndicator ? 1 : 0;
   const bodyHeight = Math.max(1, height - labelHeight - indicatorHeight);
-  const safeWidth = Math.max(12, width);
   const lines = useMemo(() => rendered.length > 0 ? renderViewportLines(rendered, safeWidth, bodyHeight, scrollOffset) : [], [bodyHeight, rendered, scrollOffset, safeWidth]);
   const indicatorText = formatScrollIndicator(scrollOffset, safeWidth);
   return (
@@ -175,10 +188,12 @@ export const StreamView = memo(function StreamView({ items, height, width = proc
   );
 });
 
-function renderStreamItem(item: StreamItem): string {
+function renderStreamItem(item: StreamItem, width: number): string {
   switch (item.type) {
+    case "user":
+      return `${formatTurnHeader("you", width, item.at)}\n${sanitizeTerminalText(item.text)}`;
     case "assistant":
-      return renderMarkdown(item.text);
+      return `${formatTurnHeader("claude", width)}\n${renderMarkdown(item.text)}`;
     case "thinking":
       return chalk.dim(`◐ Thinking...\n  ${sanitizeTerminalText(item.text)}`);
     case "tool":
@@ -189,16 +204,22 @@ function renderStreamItem(item: StreamItem): string {
       return chalk.yellow(`⚠ Approval required: ${sanitizeTerminalText(item.description)} [y]es / [n]o / [a]lways`);
     case "summary":
       return renderSummary(item);
+    case "system":
+      return sanitizeTerminalText(item.text);
     case "error":
       return chalk.red(sanitizeTerminalText(item.message));
   }
 }
 
 function renderSummary(item: Extract<StreamItem, { type: "summary" }>): string {
+  if (item.tokens === null && item.costMicros === null && item.durationMs === null) {
+    return `── ${item.status.toLowerCase()} ──`;
+  }
   const tokens = item.tokens === null ? "tokens unavailable" : `${item.tokens.toLocaleString("en-US")} tokens`;
   const cost = formatMicros(item.costMicros);
   const duration = item.durationMs === null ? "duration n/a" : `${(item.durationMs / 1000).toFixed(1)}s`;
-  return `─── ${tokens} · ${cost} · ${duration} · ${item.status} ───`;
+  const status = item.status === "FINISHED" ? "" : ` · ${item.status.toLowerCase()}`;
+  return `── ${tokens} · turn ${cost} · ${duration}${status} ──`;
 }
 
 function summarizeUnknown(value: unknown): string {
