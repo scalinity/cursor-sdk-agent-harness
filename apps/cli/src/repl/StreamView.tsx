@@ -98,6 +98,7 @@ export function ingestStreamFrame(buffer: StreamBuffer, frame: ServerFrame, cwd:
     }
     case "run.final_result": {
       const usage = frame.event.payload.usage;
+      reconcileRunningTools(items, "completed");
       items.push({
         type: "summary",
         status: "FINISHED",
@@ -108,14 +109,12 @@ export function ingestStreamFrame(buffer: StreamBuffer, frame: ServerFrame, cwd:
       break;
     }
     case "run.interrupted": {
-      for (let index = 0; index < items.length; index += 1) {
-        const candidate = items[index];
-        if (candidate?.type === "tool" && candidate.status === "running") items[index] = { ...candidate, status: "cancelled" };
-      }
+      reconcileRunningTools(items, "cancelled");
       items.push({ type: "summary", status: "CANCELLED", tokens: null, costMicros: null, durationMs: null });
       break;
     }
     case "error": {
+      reconcileRunningTools(items, "completed");
       items.push({ type: "error", message: frame.message });
       break;
     }
@@ -245,6 +244,19 @@ function summarizeUnknown(value: unknown): string {
 function sumTokens(input: number | null, output: number | null): number | null {
   if (input === null && output === null) return null;
   return (input ?? 0) + (output ?? 0);
+}
+
+// Tools are suppressed from the static buffer while running (shown live in the
+// overlay). When a run ends we must flip any still-running tool to a terminal
+// status so it reappears frozen instead of rendering as an empty line. NOTE:
+// only frames ingestStreamFrame handles (final_result/interrupted/error) trigger
+// this; a run that ends via an sdk.status-only terminal frame is not reconciled
+// here (see NOTES.md).
+function reconcileRunningTools(items: StreamItem[], status: "completed" | "cancelled"): void {
+  for (let index = 0; index < items.length; index += 1) {
+    const candidate = items[index];
+    if (candidate?.type === "tool" && candidate.status === "running") items[index] = { ...candidate, status };
+  }
 }
 
 function capItems(items: StreamItem[]): StreamItem[] {
