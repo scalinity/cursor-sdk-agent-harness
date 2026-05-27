@@ -11,7 +11,7 @@ import {
   thinkingGradientPeakIndex,
 } from "../../src/repl/App.js";
 import type { TokenUsage } from "@harness/shared";
-import { THINKING_DOT_FRAME_HOLD } from "../../src/repl/useSpinnerFrame.js";
+import { THINKING_DOT_FRAME_HOLD, formatThinkingSpinnerFrame } from "../../src/repl/useSpinnerFrame.js";
 
 describe("App turn formatting", () => {
   it("formats the turn clock as HH:MM in local time", () => {
@@ -28,12 +28,8 @@ describe("App turn formatting", () => {
     expect(formatThinkingIndicatorText(THINKING_DOT_FRAME_HOLD * 3)).toBe("Thinking...");
   });
 
-  it("animates the thinking spinner glyph on every frame", async () => {
-    const mod = await import("../../src/repl/useSpinnerFrame.js") as typeof import("../../src/repl/useSpinnerFrame.js") & {
-      formatThinkingSpinnerFrame?: (frameIndex: number) => string;
-    };
-
-    expect([0, 1, 2, 3].map((frame) => mod.formatThinkingSpinnerFrame?.(frame))).toEqual([
+  it("animates the thinking spinner glyph on every frame", () => {
+    expect([0, 1, 2, 3].map(formatThinkingSpinnerFrame)).toEqual([
       "⠋",
       "⠙",
       "⠹",
