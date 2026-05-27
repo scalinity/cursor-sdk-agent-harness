@@ -62,14 +62,16 @@ from the existing run/tool/error lifecycle.
 
 - Scoped CLI gates passed after each subsection: `pnpm -F @harness/cli
   typecheck`, `pnpm -F @harness/cli test`, and `pnpm exec eslint apps/cli`.
-- Full repo gates passed: `pnpm typecheck`, `pnpm lint`, and `pnpm test`
-  (shared 39, eslint-plugin 6, server 468 passing / 1 skipped, web 147, CLI 77,
-  scripts 11; desktop has no test files and exits 0).
-- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` passed; packaged the
-  macOS app and rebuilt native Electron bindings.
+- `/review-5` completed with five read-only review agents; `/address` resolved the
+  actionable findings around stale status props, partial/unavailable session cost,
+  render-time cwd fallback, busy-state transitions, and chrome line sanitization.
+- Full repo gates passed after review fixes: `pnpm typecheck`, `pnpm lint`, and
+  `pnpm test` (shared 39, eslint-plugin 6, server 468 passing / 1 skipped, web
+  147, CLI 84, scripts 11; desktop has no test files and exits 0).
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` passed after review
+  fixes; packaged the macOS app and rebuilt native Electron bindings.
 - Reinstalled `/Applications/Cursor SDK Agent Harness.app` from
   `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app`.
-- Final review pass is pending: `/review-5`, then `/address` for any findings.
 
 ### Next prompt
 
