@@ -55,6 +55,8 @@ function sendRuntimeError(reply: FastifyReply, err: AgentRuntimeError) {
     case "SDK_RESUME_FAILED":
     case "SDK_SEND_FAILED":
       return reply.code(502).send({ code: err.code, message: err.message });
+    case "MCP_SECRET_MISSING":
+      return reply.code(503).send({ code: err.code, message: err.message, details: err.details });
     default: {
       const _exhaustive: never = err.code;
       void _exhaustive;
@@ -278,9 +280,11 @@ export async function registerRunsRoutes(
       const completedCount = subagents.length - activeCount;
       const totalTokens = subagents.reduce((sum, subagent) => sum + subagent.tokenCount, 0);
       const totalTokensPartial = subagents.some((subagent) => subagent.tokenCountPartial);
-      const totalCostMicros = subagents.length > 0 && subagents.every((subagent) => subagent.costMicros !== null)
-        ? subagents.reduce((sum, subagent) => sum + (subagent.costMicros ?? 0), 0)
-        : null;
+      const totalCostPartial = subagents.some((subagent) => subagent.costMicros === null);
+      const totalCostMicros =
+        subagents.length > 0 && !totalCostPartial
+          ? subagents.reduce((sum, subagent) => sum + (subagent.costMicros ?? 0), 0)
+          : null;
       return subagentListResponseSchema.parse({
         subagents: subagents.map((subagent) => ({
           ...subagent,
@@ -291,6 +295,7 @@ export async function registerRunsRoutes(
         totalTokens,
         totalTokensPartial,
         totalCostMicros,
+        totalCostPartial,
       });
     },
   );

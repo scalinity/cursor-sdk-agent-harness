@@ -4,6 +4,7 @@ import {
   type McpSecretRefParts,
   type McpSecretStore,
 } from "../keychain/mcp-secret-store.js";
+import { ForeignMcpSecretRefError } from "./mcp-secret-errors.js";
 
 const SECRET_ENV_KEY_RE = /(?:token|secret|password|api[_-]?key|access[_-]?key|private[_-]?key)/i;
 const SECRET_HEADER_KEY_RE = /^(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key)$|(?:token|secret|api[_-]?key|password)/i;
@@ -37,6 +38,41 @@ export interface ExternalizedMcpSecrets {
   wroteSecrets: boolean;
 }
 
+function visitConfigStringFields(
+  config: McpServerConfig,
+  visitor: (path: readonly string[], value: string) => void,
+): void {
+  if ("command" in config) {
+    if (config.env) {
+      for (const [key, value] of Object.entries(config.env)) {
+        visitor(["env", key], value);
+      }
+    }
+    return;
+  }
+
+  if (config.headers) {
+    for (const [key, value] of Object.entries(config.headers)) {
+      visitor(["headers", key], value);
+    }
+  }
+  if (config.auth?.CLIENT_ID) {
+    visitor(["auth", "CLIENT_ID"], config.auth.CLIENT_ID);
+  }
+  if (config.auth?.CLIENT_SECRET) {
+    visitor(["auth", "CLIENT_SECRET"], config.auth.CLIENT_SECRET);
+  }
+}
+
+export function assertOwnedMcpSecretRefs(config: McpServerConfig, serverId: string): void {
+  visitConfigStringFields(config, (path, value) => {
+    const ref = parseMcpSecretRef(value);
+    if (ref !== null && !refMatchesPath(ref, serverId, path)) {
+      throw new ForeignMcpSecretRefError(serverId, path, ref.serverId);
+    }
+  });
+}
+
 async function externalizeValue(
   store: McpSecretStore,
   serverId: string,
@@ -44,6 +80,9 @@ async function externalizeValue(
   value: string,
 ): Promise<{ value: string; wrote: boolean }> {
   const ref = parseMcpSecretRef(value);
+  if (ref !== null && !refMatchesPath(ref, serverId, path)) {
+    throw new ForeignMcpSecretRefError(serverId, path, ref.serverId);
+  }
   if (refMatchesPath(ref, serverId, path)) return { value, wrote: false };
   return { value: await store.set(serverId, path, value), wrote: true };
 }
@@ -53,6 +92,7 @@ export async function externalizeMcpSecrets(
   serverId: string,
   store: McpSecretStore,
 ): Promise<ExternalizedMcpSecrets> {
+  assertOwnedMcpSecretRefs(config, serverId);
   const next = cloneConfig(config);
   let wroteSecrets = false;
   if ("command" in next) {
