@@ -1,16 +1,16 @@
-import chalk from "chalk";
 import { sanitizeTerminalText } from "../output/sanitize.js";
 import { renderCodeBlock } from "./code-block.js";
+import { styles } from "./styles.js";
 
 export interface MarkdownRenderOptions {
   columns?: number;
 }
 
 function renderInline(input: string): string {
-  let output = input.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label: string, url: string) => `${chalk.underline(label)} ${chalk.dim(`(${url})`)}`);
-  output = output.replace(/`([^`]+)`/g, (_match, code: string) => chalk.inverse.cyan(` ${code} `));
-  output = output.replace(/\*\*([^*]+)\*\*/g, (_match, text: string) => chalk.bold(text));
-  output = output.replace(/(^|\s)_([^_]+)_(?=\s|$)/g, (_match, prefix: string, text: string) => `${prefix}${chalk.italic(text)}`);
+  let output = input.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label: string, url: string) => `${styles.link(label)} ${styles.url(`(${url})`)}`);
+  output = output.replace(/`([^`]+)`/g, (_match, code: string) => styles.code(` ${code} `));
+  output = output.replace(/\*\*([^*]+)\*\*/g, (_match, text: string) => styles.bold(text));
+  output = output.replace(/(^|\s)_([^_]+)_(?=\s|$)/g, (_match, prefix: string, text: string) => `${prefix}${styles.italic(text)}`);
   return output;
 }
 
@@ -67,9 +67,9 @@ export function renderMarkdown(markdown: string, options: MarkdownRenderOptions 
 
     const heading = line.match(/^(#{1,6})\s+(.*)$/);
     if (heading) {
-      rendered.push(chalk.bold(`${heading[1]} ${renderInline(heading[2] ?? "")}`));
+      rendered.push(styles.bold(`${heading[1]} ${renderInline(heading[2] ?? "")}`));
     } else if (line.startsWith(">")) {
-      rendered.push(chalk.dim(`│ ${renderInline(line.replace(/^>\s?/, ""))}`));
+      rendered.push(styles.quote(`│ ${renderInline(line.replace(/^>\s?/, ""))}`));
     } else {
       rendered.push(renderInline(line));
     }

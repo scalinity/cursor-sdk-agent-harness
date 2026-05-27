@@ -1,6 +1,6 @@
 import React, { memo, useMemo } from "react";
 import { Box, Text } from "ink";
-import chalk from "chalk";
+import { styles } from "../render/styles.js";
 import type { ServerFrame } from "@harness/shared";
 import { sanitizeTerminalText } from "../output/sanitize.js";
 import { formatMicros } from "../output/table.js";
@@ -191,23 +191,23 @@ export const StreamView = memo(function StreamView({ items, height, width = proc
 function renderStreamItem(item: StreamItem, width: number): string {
   switch (item.type) {
     case "user":
-      return `${formatTurnHeader("you", width, item.at)}\n${sanitizeTerminalText(item.text)}`;
+      return `${styles.accent(formatTurnHeader("you", width, item.at))}\n${styles.user(sanitizeTerminalText(item.text))}`;
     case "assistant":
-      return `${formatTurnHeader("claude", width)}\n${renderMarkdown(item.text)}`;
+      return `${styles.muted(formatTurnHeader("claude", width))}\n${renderMarkdown(item.text)}`;
     case "thinking":
-      return chalk.dim(`◐ Thinking...\n  ${sanitizeTerminalText(item.text)}`);
+      return styles.thinking(`◐ Thinking...\n  ${sanitizeTerminalText(item.text)}`);
     case "tool":
       return formatToolCallLine(item);
     case "diff":
-      return `${chalk.cyan(`┌─ ${sanitizeTerminalText(item.path)} ─`)}\n${renderDiff(item.diff)}\n${chalk.cyan("└────────")}`;
+      return `${styles.frame(`┌─ ${sanitizeTerminalText(item.path)} ─`)}\n${renderDiff(item.diff)}\n${styles.frame("└────────")}`;
     case "approval":
-      return chalk.yellow(`⚠ Approval required: ${sanitizeTerminalText(item.description)} [y]es / [n]o / [a]lways`);
+      return styles.approval(`⚠ Approval required: ${sanitizeTerminalText(item.description)} [y]es / [n]o / [a]lways`);
     case "summary":
-      return renderSummary(item);
+      return styles.muted(renderSummary(item));
     case "system":
-      return sanitizeTerminalText(item.text);
+      return styles.system(sanitizeTerminalText(item.text));
     case "error":
-      return chalk.red(sanitizeTerminalText(item.message));
+      return styles.error(sanitizeTerminalText(item.message));
   }
 }
 

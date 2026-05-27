@@ -1,5 +1,5 @@
-import chalk from "chalk";
 import { sanitizeTerminalText } from "../output/sanitize.js";
+import { styles } from "./styles.js";
 
 export interface CodeBlockOptions {
   language?: string;
@@ -26,5 +26,5 @@ export function renderCodeBlock(code: string, options: CodeBlockOptions = {}): s
     return `│  ${clipped.padEnd(contentWidth)}│`;
   });
   const bottom = `└${"─".repeat(innerWidth + 1)}┘`;
-  return chalk.dim(top) + "\n" + body.join("\n") + "\n" + chalk.dim(bottom);
+  return styles.frame(top) + "\n" + body.join("\n") + "\n" + styles.frame(bottom);
 }

@@ -1,8 +1,8 @@
-import chalk from "chalk";
 import { CliUsageError } from "../errors.js";
 import { writeJsonLine } from "../output/json.js";
 import { sanitizeTerminalText } from "../output/sanitize.js";
 import type { CommandDeps } from "../types.js";
+import { styles } from "../render/styles.js";
 
 export interface SearchCommandOptions {
   query: string;
@@ -43,5 +43,5 @@ function highlight(value: string, query: string): string {
   const safeQuery = sanitizeTerminalText(query);
   const index = safeValue.toLowerCase().indexOf(safeQuery.toLowerCase());
   if (index === -1) return safeValue;
-  return safeValue.slice(0, index) + chalk.inverse(safeValue.slice(index, index + safeQuery.length)) + safeValue.slice(index + safeQuery.length);
+  return safeValue.slice(0, index) + styles.match(safeValue.slice(index, index + safeQuery.length)) + safeValue.slice(index + safeQuery.length);
 }
