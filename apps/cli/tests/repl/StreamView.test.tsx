@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ServerFrame } from "@harness/shared";
-import { createStreamBuffer, ingestStreamFrame, renderStreamItems } from "../../src/repl/StreamView.js";
+import { createStreamBuffer, ingestStreamFrame, renderStreamItems, type StreamItem } from "../../src/repl/StreamView.js";
 
 const base = {
   id: "frame-123",
@@ -50,7 +50,7 @@ describe("StreamView helpers", () => {
     expect(output).toContain("Checking files");
   });
 
-  it("tracks tool calls, code edits, approvals, and run summaries", () => {
+  it("tracks tool calls, code edits, approvals, and stores run summaries", () => {
     let buffer = createStreamBuffer();
     buffer = ingestStreamFrame(buffer, {
       ...base,
@@ -127,10 +127,12 @@ describe("StreamView helpers", () => {
     } satisfies ServerFrame);
 
     const output = renderStreamItems(buffer.items);
+    const summary = buffer.items.find((item): item is Extract<StreamItem, { type: "summary" }> => item.type === "summary");
     expect(output).toContain("read auth.ts");
     expect(output).toContain("Approval required");
-    expect(output).toContain("30 tokens");
-    expect(output).toContain("$0.0025");
+    expect(output).not.toContain("30 tokens");
+    expect(output).not.toContain("$0.0025");
+    expect(summary).toMatchObject({ status: "FINISHED", tokens: 30, costMicros: 2500 });
   });
 
   it("renders turn boundaries for user, assistant, and system items", () => {

@@ -21,7 +21,7 @@ import { MentionPopup, flattenMentionResults, MAX_MENTION_ITEMS, moveMentionSele
 import { filterSlashCommands, SlashPalette } from "./SlashPalette.js";
 import { createStreamBuffer, ingestStreamFrame, StreamView, type StreamBuffer, type StreamItem } from "./StreamView.js";
 import { applyStreamScrollDelta, computeStreamViewportLayout, resolveStreamScrollDelta } from "./stream-scroll.js";
-import { StatusBar, type LiveTurnUsage, type SessionCostState } from "./StatusBar.js";
+import { StatusBar, type SessionCostState, type SessionTokenState } from "./StatusBar.js";
 import { formatActiveToolLine } from "./ToolCallLine.js";
 import { createTuiTheme, bg, border, fg, truncateMiddle, MIN_COLUMNS, MIN_ROWS } from "./theme.js";
 import { formatThinkingIndicatorText, useSpinnerFrameState } from "./useSpinnerFrame.js";
@@ -32,6 +32,7 @@ import { createSessionSnapshot, type CliSessionSnapshot } from "../session.js";
 export interface ReplResumeState {
   buffer: StreamBuffer;
   sessionCost: SessionCostState;
+  sessionTokens: SessionTokenState;
   scrollOffset: number;
 }
 
@@ -95,8 +96,8 @@ export function App({
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [queuedPrompts, setQueuedPrompts] = useState<PromptRequest[]>([]);
   const [streamStatus, setStreamStatus] = useState<StreamConnectionStatus>("ready");
-  const [sessionCost, setSessionCost] = useState<SessionCostState>(() => resume?.sessionCost ?? { micros: 0, hasUnavailableTurn: false });
-  const [turnUsage, setTurnUsage] = useState<LiveTurnUsage | null>(null);
+  const [sessionCost, setSessionCost] = useState<SessionCostState>(() => resume?.sessionCost ?? createEmptySessionCost());
+  const [sessionTokens, setSessionTokens] = useState<SessionTokenState>(() => resume?.sessionTokens ?? createEmptySessionTokens());
   const [pendingApproval, setPendingApproval] = useState<{ runId: string; requestId: string } | null>(null);
   const [history] = useState(() => new PromptHistory(historyEntries));
   const queueRef = useRef<PromptRequest[]>([]);
@@ -134,7 +135,8 @@ export function App({
     agent,
     mode: initialMode,
     modelId: initialModelId,
-    sessionCost: resume?.sessionCost ?? { micros: 0, hasUnavailableTurn: false },
+    sessionCost: resume?.sessionCost ?? createEmptySessionCost(),
+    sessionTokens: resume?.sessionTokens ?? createEmptySessionTokens(),
     buffer: resume?.buffer ?? createStreamBuffer(),
     scrollOffset: resume?.scrollOffset ?? 0,
   });
@@ -144,6 +146,7 @@ export function App({
     mode,
     modelId,
     sessionCost,
+    sessionTokens,
     buffer,
     scrollOffset,
   };
@@ -343,7 +346,6 @@ export function App({
         toolStartRef.current = null;
         setActiveRunId(null);
         setAgentTurnActive(false);
-        setTurnUsage(null);
         setPendingApproval(null);
         setStreamStatus("ready");
         const next = queueRef.current[0];
@@ -356,9 +358,6 @@ export function App({
       setIsStartingRun(false);
       setActiveRunId(run.runId);
       setAgentTurnActive(true);
-      // ASSUMPTION: live usage is unavailable until the server protocol emits
-      // token/cost deltas before run.final_result. Flag if wrong.
-      setTurnUsage({ status: "unavailable" });
       setStreamStatus("connected");
       const subscription = stream.subscribeToRun(run.runId, (frame: ServerFrame) => {
         trackToolStart(frame, toolStartRef);
@@ -371,7 +370,9 @@ export function App({
         }
         if (isTerminalFrame(frame)) {
           if (frame.type === "run.final_result") {
-            setSessionCost((current) => addSessionCost(current, frame.event.payload.usage.cost_usd_micros));
+            const usage = frame.event.payload.usage;
+            setSessionCost((current) => addSessionCost(current, usage.cost_usd_micros));
+            setSessionTokens((current) => addSessionTokens(current, sumTokens(usage.input_tokens, usage.output_tokens)));
           }
           finishRun();
         }
@@ -381,7 +382,6 @@ export function App({
         setIsStartingRun(false);
         setActiveRunId(null);
         setAgentTurnActive(false);
-        setTurnUsage(null);
         setPendingApproval(null);
         setStreamStatus("disconnected");
         appendError(error instanceof Error ? error.message : String(error));
@@ -396,7 +396,6 @@ export function App({
       setIsStartingRun(false);
       setActiveRunId(null);
       setAgentTurnActive(false);
-      setTurnUsage(null);
       setStreamStatus("disconnected");
       appendError(error instanceof Error ? error.message : String(error));
     });
@@ -488,7 +487,7 @@ export function App({
       />
       <StatusBar
         sessionCost={sessionCost}
-        turnUsage={turnActive ? turnUsage : null}
+        sessionTokens={sessionTokens}
         streamScrollActive={streamScrollActive}
         width={layout.columns}
         theme={theme}
@@ -710,6 +709,24 @@ export function deriveChromeState(input: ChromeStateInput): ChromeState {
 function addSessionCost(current: SessionCostState, costMicros: number | null): SessionCostState {
   if (costMicros === null) return { ...current, hasUnavailableTurn: true };
   return { ...current, micros: current.micros + costMicros };
+}
+
+function addSessionTokens(current: SessionTokenState, tokens: number | null): SessionTokenState {
+  if (tokens === null) return { ...current, hasUnavailableTurn: true };
+  return { ...current, tokens: current.tokens + tokens };
+}
+
+function sumTokens(input: number | null, output: number | null): number | null {
+  if (input === null && output === null) return null;
+  return (input ?? 0) + (output ?? 0);
+}
+
+function createEmptySessionCost(): SessionCostState {
+  return { micros: 0, hasUnavailableTurn: false };
+}
+
+function createEmptySessionTokens(): SessionTokenState {
+  return { tokens: 0, hasUnavailableTurn: false };
 }
 
 function safeProcessCwd(fallback: string): string {

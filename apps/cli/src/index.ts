@@ -191,6 +191,7 @@ async function runChat(options: GlobalOptions & { agent?: string; mode?: CliMode
         resume: {
           buffer: savedSession.buffer,
           sessionCost: savedSession.sessionCost,
+          sessionTokens: savedSession.sessionTokens,
           scrollOffset: savedSession.scrollOffset,
         },
       } : {}),

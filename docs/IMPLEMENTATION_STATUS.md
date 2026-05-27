@@ -3843,3 +3843,34 @@ During final merge verification, `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:d
 - Follow-up `pnpm -F @harness/desktop run package:mac` retry — failed in `node-gyp rebuild` for `better-sqlite3` while rebuilding from the space-bearing `.app` path.
 - `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass after the artifact/rebuild-path fix.
 - Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` — installed timestamp May 27 02:45:08 2026.
+
+---
+
+## CLI Session Usage Totals — 2026-05-27
+
+### Summary
+
+Moved CLI token and cost visibility out of per-turn transcript summary lines and into the bottom status bar as cumulative session totals. Finished-turn usage is still stored in the stream buffer for replay/bookkeeping, but `FINISHED` summaries no longer render as micro-stat rows under each assistant turn. The REPL now increments session token totals and session cost on each `run.final_result`, persists those totals in the resumable session snapshot, and backfills token totals from older saved buffers that do not yet have `sessionTokens`.
+
+### Files modified
+
+- `apps/cli/src/repl/StreamView.tsx` — stops rendering finished-turn token/cost summary rows while preserving stored summary items.
+- `apps/cli/src/repl/StatusBar.tsx` — right-aligns cumulative `total <tokens> · <cost>` in the bottom bar and keeps scroll/prompt hints on the left.
+- `apps/cli/src/repl/App.tsx` — tracks cumulative session tokens alongside session cost and passes both totals to the status bar.
+- `apps/cli/src/session.ts` and `apps/cli/src/index.ts` — persist/restore session token totals, including old-session derivation from stored summaries.
+- `apps/cli/tests/repl/StreamView.test.tsx`, `apps/cli/tests/repl/StatusBar.test.tsx`, `apps/cli/tests/commands/run.test.ts`, and `apps/cli/tests/session.test.ts` — update and add regression coverage for aggregate totals and hidden per-turn micro stats.
+- `docs/IMPLEMENTATION_STATUS.md` — recorded this status entry.
+
+### Verification
+
+- `pnpm --filter @harness/cli typecheck` — pass.
+- `pnpm --filter @harness/cli test` — pass, 27 files / 125 tests.
+- `pnpm typecheck` — pass.
+- `pnpm lint` — pass.
+- `pnpm test` — pass: shared 39, eslint-plugin 6, web 147, server 468 passing / 1 skipped, CLI 125, desktop 0 test files, scripts 11.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — pass; rebuilt web/server/desktop and packaged macOS app.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app` — installed timestamp May 27 02:55:35 2026.
+
+### Next phase
+
+Continue with the Tier 3 brand-accent confirmation gate when ready. Default proposed accent remains vermillion `#E04E1F`.

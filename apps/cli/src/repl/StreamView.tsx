@@ -3,7 +3,6 @@ import { Box, Text } from "ink";
 import { styles } from "../render/styles.js";
 import type { ServerFrame } from "@harness/shared";
 import { sanitizeTerminalText } from "../output/sanitize.js";
-import { formatMicros } from "../output/table.js";
 import { renderFileEdit } from "../render/diff.js";
 import { normalizePath } from "../render/path.js";
 import { renderMarkdown } from "../render/markdown.js";
@@ -234,14 +233,8 @@ function renderStreamItem(item: StreamItem, width: number): string {
 }
 
 function renderSummary(item: Extract<StreamItem, { type: "summary" }>): string {
-  if (item.tokens === null && item.costMicros === null && item.durationMs === null) {
-    return `── ${item.status.toLowerCase()} ──`;
-  }
-  const tokens = item.tokens === null ? "tokens unavailable" : `${item.tokens.toLocaleString("en-US")} tokens`;
-  const cost = formatMicros(item.costMicros);
-  const duration = item.durationMs === null ? "duration n/a" : `${(item.durationMs / 1000).toFixed(1)}s`;
-  const status = item.status === "FINISHED" ? "" : ` · ${item.status.toLowerCase()}`;
-  return `── ${tokens} · turn ${cost} · ${duration}${status} ──`;
+  if (item.status === "FINISHED") return "";
+  return `── ${item.status.toLowerCase()} ──`;
 }
 
 function summarizeUnknown(value: unknown): string {

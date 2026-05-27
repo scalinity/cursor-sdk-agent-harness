@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { CliAgentSummary, CliMode } from "./types.js";
 import type { StreamBuffer } from "./repl/StreamView.js";
-import type { SessionCostState } from "./repl/StatusBar.js";
+import type { SessionCostState, SessionTokenState } from "./repl/StatusBar.js";
 import { CONFIG_DIR } from "./config.js";
 
 export const SESSION_PATH = path.join(CONFIG_DIR, "last-session.json");
@@ -19,23 +19,44 @@ export interface CliSessionSnapshot {
   mode: CliMode;
   modelId: string;
   sessionCost: SessionCostState;
+  sessionTokens: SessionTokenState;
   buffer: StreamBuffer;
   scrollOffset: number;
 }
 
 export function isCliSessionSnapshot(value: unknown): value is CliSessionSnapshot {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  if (record.version !== 1) return false;
-  if (typeof record.savedAt !== "string") return false;
-  if (typeof record.workspace !== "string" || record.workspace.length === 0) return false;
-  if (record.mode !== "ask" && record.mode !== "agent") return false;
-  if (typeof record.modelId !== "string" || record.modelId.length === 0) return false;
-  if (typeof record.scrollOffset !== "number" || !Number.isFinite(record.scrollOffset)) return false;
-  if (!isSessionCost(record.sessionCost)) return false;
-  if (!isAgentSummary(record.agent)) return false;
-  if (!isStreamBuffer(record.buffer)) return false;
+  const normalized = normalizeCliSessionSnapshot(value);
+  if (!normalized || !value || typeof value !== "object" || Array.isArray(value)) return false;
+  Object.assign(value, normalized);
   return true;
+}
+
+function normalizeCliSessionSnapshot(value: unknown): CliSessionSnapshot | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1) return null;
+  if (typeof record.savedAt !== "string") return null;
+  if (typeof record.workspace !== "string" || record.workspace.length === 0) return null;
+  if (record.mode !== "ask" && record.mode !== "agent") return null;
+  if (typeof record.modelId !== "string" || record.modelId.length === 0) return null;
+  if (typeof record.scrollOffset !== "number" || !Number.isFinite(record.scrollOffset)) return null;
+  if (!isSessionCost(record.sessionCost)) return null;
+  if (!isAgentSummary(record.agent)) return null;
+  if (!isStreamBuffer(record.buffer)) return null;
+  const sessionTokens = resolveSessionTokens(record.sessionTokens, record.buffer);
+  if (!sessionTokens) return null;
+  return {
+    version: 1,
+    savedAt: record.savedAt,
+    workspace: record.workspace,
+    agent: record.agent,
+    mode: record.mode,
+    modelId: record.modelId,
+    sessionCost: record.sessionCost,
+    sessionTokens,
+    buffer: record.buffer,
+    scrollOffset: record.scrollOffset,
+  };
 }
 
 function isSessionCost(value: unknown): value is SessionCostState {
@@ -44,6 +65,19 @@ function isSessionCost(value: unknown): value is SessionCostState {
   return typeof record.micros === "number"
     && Number.isFinite(record.micros)
     && typeof record.hasUnavailableTurn === "boolean";
+}
+
+function isSessionTokens(value: unknown): value is SessionTokenState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.tokens === "number"
+    && Number.isFinite(record.tokens)
+    && typeof record.hasUnavailableTurn === "boolean";
+}
+
+function resolveSessionTokens(value: unknown, buffer: StreamBuffer): SessionTokenState | null {
+  if (value === undefined) return summarizeTokensFromBuffer(buffer);
+  return isSessionTokens(value) ? value : null;
 }
 
 function isAgentSummary(value: unknown): value is CliAgentSummary {
@@ -61,11 +95,24 @@ function isStreamBuffer(value: unknown): value is StreamBuffer {
   return Array.isArray(items);
 }
 
+function summarizeTokensFromBuffer(buffer: StreamBuffer): SessionTokenState {
+  let tokens = 0;
+  let hasUnavailableTurn = false;
+  for (const item of buffer.items) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const record = item as Record<string, unknown>;
+    if (record.type !== "summary" || record.status !== "FINISHED") continue;
+    if (typeof record.tokens === "number" && Number.isFinite(record.tokens)) tokens += record.tokens;
+    else hasUnavailableTurn = true;
+  }
+  return { tokens, hasUnavailableTurn };
+}
+
 export async function readLastSession(): Promise<CliSessionSnapshot | null> {
   try {
     const raw = await readFile(resolveSessionPath(), "utf8");
     const parsed: unknown = JSON.parse(raw);
-    return isCliSessionSnapshot(parsed) ? parsed : null;
+    return normalizeCliSessionSnapshot(parsed);
   } catch {
     return null;
   }
@@ -85,6 +132,7 @@ export function createSessionSnapshot(input: {
   mode: CliMode;
   modelId: string;
   sessionCost: SessionCostState;
+  sessionTokens?: SessionTokenState;
   buffer: StreamBuffer;
   scrollOffset: number;
   savedAt?: Date;
@@ -97,6 +145,7 @@ export function createSessionSnapshot(input: {
     mode: input.mode,
     modelId: input.modelId,
     sessionCost: input.sessionCost,
+    sessionTokens: input.sessionTokens ?? summarizeTokensFromBuffer(input.buffer),
     buffer: input.buffer,
     scrollOffset: Math.max(0, Math.floor(input.scrollOffset)),
   };

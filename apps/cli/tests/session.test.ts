@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -28,6 +28,7 @@ describe("CLI session resume", () => {
       mode: "agent",
       modelId: "composer-2-5-fast",
       sessionCost: { micros: 1000, hasUnavailableTurn: false },
+      sessionTokens: { tokens: 30, hasUnavailableTurn: false },
       buffer: { items: [{ type: "user", text: "hello", at: "12:00" }] },
       scrollOffset: 2,
     });
@@ -47,6 +48,7 @@ describe("CLI session resume", () => {
       mode: "ask",
       modelId: "composer-2-5-fast",
       sessionCost: { micros: 0, hasUnavailableTurn: true },
+      sessionTokens: { tokens: 42, hasUnavailableTurn: false },
       buffer: { items: [{ type: "assistant", text: "Hi there" }] },
       scrollOffset: 0,
     });
@@ -54,6 +56,32 @@ describe("CLI session resume", () => {
     await writeLastSession(snapshot);
     const loaded = await readLastSession();
     expect(loaded).toEqual(snapshot);
+    const raw = JSON.parse(await readFile(sessionPath, "utf8")) as { sessionTokens?: unknown };
+    expect(raw.sessionTokens).toEqual({ tokens: 42, hasUnavailableTurn: false });
+
+    delete process.env.HARNESS_CLI_SESSION_PATH;
+  });
+
+  it("derives token totals when resuming an older saved session", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "harness-cli-session-"));
+    tempDirs.push(dir);
+    sessionPath = path.join(dir, "last-session.json");
+    process.env.HARNESS_CLI_SESSION_PATH = sessionPath;
+
+    await writeFile(sessionPath, `${JSON.stringify({
+      version: 1,
+      savedAt: "2026-05-27T00:00:00.000Z",
+      workspace: dir,
+      agent: { id: "agent-1", name: "CLI", modelId: "composer-2-5-fast", executionMode: "ask" },
+      mode: "ask",
+      modelId: "composer-2-5-fast",
+      sessionCost: { micros: 2500, hasUnavailableTurn: false },
+      buffer: { items: [{ type: "summary", status: "FINISHED", tokens: 30, costMicros: 2500, durationMs: 1200 }] },
+      scrollOffset: 0,
+    })}\n`);
+
+    const loaded = await readLastSession();
+    expect(loaded?.sessionTokens).toEqual({ tokens: 30, hasUnavailableTurn: false });
 
     delete process.env.HARNESS_CLI_SESSION_PATH;
   });
