@@ -10,113 +10,30 @@ done
 
 ROOT_DIR="$(cd -P "$(dirname "$SOURCE")/.." >/dev/null 2>&1 && pwd)"
 CLI_ENTRY="$ROOT_DIR/apps/cli/dist/index.js"
-SERVER_ENTRY="$ROOT_DIR/apps/server/dist/index.js"
-SERVER_URL="${HARNESS_SERVER_URL:-http://127.0.0.1:4783}"
-CONFIG_DIR="${HARNESS_CLI_HOME:-$HOME/.harness-cli}"
-SERVER_LOG="$CONFIG_DIR/server.log"
-SERVER_PID="$CONFIG_DIR/server.pid"
+SERVER_ENTRY="$ROOT_DIR/apps/server/dist/programmatic.js"
 
-for ((i = 1; i <= $#; i++)); do
-  arg="${!i}"
-  if [[ "$arg" == "--server" ]]; then
-    next=$((i + 1))
-    if (( next <= $# )); then
-      SERVER_URL="${!next}"
-    fi
-  elif [[ "$arg" == --server=* ]]; then
-    SERVER_URL="${arg#--server=}"
+build_pkg() {
+  local filter="$1" label="$2" log
+  log="$(mktemp -t harness-build)"
+  printf 'Building %s...\n' "$label" >&2
+  if ! (cd "$ROOT_DIR" && pnpm --filter "$filter" build) >"$log" 2>&1; then
+    printf 'Failed to build %s:\n' "$label" >&2
+    cat "$log" >&2
+    rm -f "$log"
+    exit 1
   fi
-done
+  rm -f "$log"
+}
 
+# The CLI boots the harness server in-process — no separate daemon, pid file, or
+# readiness polling. We only need the compiled artifacts to exist. The server's
+# dist is required because the CLI dynamically imports it for the embedded server
+# (skipped when the user attaches to an external server via --server).
+if [ ! -f "$SERVER_ENTRY" ]; then
+  build_pkg "@harness/server" "harness server"
+fi
 if [ ! -x "$CLI_ENTRY" ]; then
-  (cd "$ROOT_DIR" && pnpm --filter @harness/cli build >/dev/null)
+  build_pkg "@harness/cli" "harness CLI"
 fi
 
-should_skip_server_start() {
-  if [[ "${HARNESS_SKIP_SERVER_AUTOSTART:-}" == "1" ]]; then
-    return 0
-  fi
-  for arg in "$@"; do
-    case "$arg" in
-      -h|--help|help)
-        return 0
-        ;;
-    esac
-  done
-  return 1
-}
-
-is_default_local_server() {
-  local normalized="${SERVER_URL%/}"
-  [[ "$normalized" == "http://127.0.0.1:4783" || "$normalized" == "http://localhost:4783" ]]
-}
-
-server_is_ready() {
-  CHECK_URL="${SERVER_URL%/}/api/security/csrf-token" node --input-type=module <<'NODE' >/dev/null 2>&1
-const controller = new AbortController();
-const timeout = setTimeout(() => controller.abort(), 500);
-try {
-  const response = await fetch(process.env.CHECK_URL, { signal: controller.signal });
-  process.exit(response.ok ? 0 : 1);
-} catch {
-  process.exit(1);
-} finally {
-  clearTimeout(timeout);
-}
-NODE
-}
-
-wait_for_server() {
-  local tries=0
-  while (( tries < 80 )); do
-    if server_is_ready; then
-      return 0
-    fi
-    sleep 0.25
-    tries=$((tries + 1))
-  done
-  return 1
-}
-
-start_local_server() {
-  mkdir -p -m 700 "$CONFIG_DIR"
-  if [ ! -f "$SERVER_ENTRY" ]; then
-    printf 'Building harness server...\n' >&2
-    (cd "$ROOT_DIR" && pnpm --filter @harness/server build >/dev/null)
-  fi
-  printf 'Starting harness server...\n' >&2
-  (
-    cd "$ROOT_DIR/apps/server"
-    nohup node "$SERVER_ENTRY" >>"$SERVER_LOG" 2>&1 < /dev/null &
-    server_pid=$!
-    echo "$server_pid" >"$SERVER_PID"
-    disown "$server_pid" 2>/dev/null || true
-  )
-}
-
-ensure_local_server() {
-  if should_skip_server_start "$@"; then
-    return 0
-  fi
-  if ! is_default_local_server; then
-    return 0
-  fi
-  if server_is_ready; then
-    return 0
-  fi
-  if [ -f "$SERVER_PID" ] && kill -0 "$(cat "$SERVER_PID")" 2>/dev/null; then
-    if wait_for_server; then
-      return 0
-    fi
-  fi
-  start_local_server
-  if wait_for_server; then
-    return 0
-  fi
-  printf 'Harness server did not start at %s. Log: %s\n' "$SERVER_URL" "$SERVER_LOG" >&2
-  tail -n 40 "$SERVER_LOG" >&2 || true
-  exit 2
-}
-
-ensure_local_server "$@"
 exec node "$CLI_ENTRY" "$@"

@@ -9,13 +9,15 @@ export class CliUsageError extends Error {
   }
 }
 
-export function formatCliError(error: unknown, serverUrl?: string): { message: string; exitCode: number } {
+export function formatCliError(error: unknown, serverUrl?: string, embedded = false): { message: string; exitCode: number } {
   if (error instanceof CliUsageError) {
     return { message: error.message, exitCode: error.exitCode };
   }
   if (error instanceof CliHttpError && error.code === "NETWORK_ERROR") {
     return {
-      message: `Cannot connect to harness server at ${serverUrl ?? "the configured URL"}. Start it with: pnpm start:server`,
+      message: embedded
+        ? "The embedded harness server stopped responding. Re-run `harness`, or pass --server <url> to attach to an external server."
+        : `Cannot connect to harness server at ${serverUrl ?? "the configured URL"}. Start it with: pnpm start:server`,
       exitCode: 2,
     };
   }

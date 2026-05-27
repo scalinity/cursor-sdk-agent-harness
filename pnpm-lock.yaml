@@ -41,6 +41,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@harness/server':
+        specifier: workspace:*
+        version: link:../server
       '@harness/shared':
         specifier: workspace:*
         version: link:../../packages/shared

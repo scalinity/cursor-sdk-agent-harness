@@ -15,7 +15,7 @@ const envSchema = z
     PORT: z.coerce.number().int().min(1).max(65535).default(4783),
     WEB_ORIGIN: z.string().url().default("http://127.0.0.1:5173"),
     DB_PATH: z.string().min(1).default(path.join(DEFAULT_DB_DIR, "harness.sqlite")),
-    LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+    LOG_LEVEL: z.enum(["silent", "debug", "info", "warn", "error"]).default("info"),
     KEYCHAIN_SERVICE: z.string().min(1).default("cursor-sdk-agent-harness"),
     CURSOR_API_KEY: z.string().min(1).optional(),
     ALLOW_REMOTE_BIND: z

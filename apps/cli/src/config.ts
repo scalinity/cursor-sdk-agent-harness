@@ -19,6 +19,17 @@ export function resolveServerUrl(flagValue?: string): string {
   return (flagValue ?? process.env.HARNESS_SERVER_URL ?? DEFAULT_SERVER_URL).replace(/\/$/, "");
 }
 
+/**
+ * Returns the externally-configured server URL the user explicitly opted into
+ * (via `--server` or `HARNESS_SERVER_URL`), or `undefined` when neither is set.
+ * `undefined` is the signal to boot an embedded in-process server instead of
+ * connecting to a standalone one.
+ */
+export function resolveExplicitServerUrl(flagValue?: string): string | undefined {
+  const raw = flagValue ?? process.env.HARNESS_SERVER_URL;
+  return raw ? raw.replace(/\/$/, "") : undefined;
+}
+
 export function resolveWebOrigin(flagValue?: string): string {
   return (flagValue ?? process.env.HARNESS_WEB_ORIGIN ?? DEFAULT_WEB_ORIGIN).replace(/\/$/, "");
 }

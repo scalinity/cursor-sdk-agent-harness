@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@harness/server": "workspace:*",
     "@harness/shared": "workspace:*",
     "chalk": "5.6.2",
     "cli-spinners": "3.4.0",
