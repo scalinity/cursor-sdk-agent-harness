@@ -21,6 +21,8 @@ export {
   requestIdSchema,
   runIdSchema,
 } from "./constants.js";
+export { desktopMenuChannels } from "./desktop-menu.js";
+export type { DesktopMenuChannel } from "./desktop-menu.js";
 export type {
   AgentId,
   CallId,

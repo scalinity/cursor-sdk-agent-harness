@@ -157,7 +157,6 @@ export function AppShell() {
   // Native menu actions — Electron only. Browser mode silently ignores.
   useNativeMenuActions({
     "menu:new-agent": () => setNewAgentOpen(true),
-    "menu:new-session": newSession,
     "menu:open-workspace": () => void workspacePicker.pick(),
     "menu:toggle-code-pane": () => toggleCodeHidden(),
     "menu:preferences": () => navigate("/settings"),

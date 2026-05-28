@@ -1,3 +1,4 @@
+import { type DesktopMenuChannel } from "@harness/shared";
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   BrowserInvokeRequest,
@@ -25,15 +26,7 @@ const harnessBridge = {
    * Subscribe to native menu actions from the main process. Returns an
    * unsubscribe function.
    */
-  onMenuAction: (
-    channel:
-      | "menu:new-agent"
-      | "menu:new-session"
-      | "menu:open-workspace"
-      | "menu:toggle-code-pane"
-      | "menu:preferences",
-    handler: () => void,
-  ): (() => void) => {
+  onMenuAction: (channel: DesktopMenuChannel, handler: () => void): (() => void) => {
     const listener = (): void => handler();
     ipcRenderer.on(channel, listener);
     return () => ipcRenderer.removeListener(channel, listener);

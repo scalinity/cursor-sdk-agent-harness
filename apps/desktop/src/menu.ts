@@ -1,9 +1,13 @@
+import { desktopMenuChannels, type DesktopMenuChannel } from "@harness/shared";
 import { app, Menu, type BrowserWindow, type MenuItemConstructorOptions } from "electron";
+
+/** Channels emitted by this module — kept in sync with `@harness/shared` desktopMenuChannels. */
+export const mainProcessMenuChannels = desktopMenuChannels;
 
 export function buildAppMenu(getWindow: () => BrowserWindow | null): void {
   const isMac = process.platform === "darwin";
 
-  const send = (channel: string): void => {
+  const send = (channel: DesktopMenuChannel): void => {
     const w = getWindow();
     if (w) w.webContents.send(channel);
   };
@@ -37,9 +41,9 @@ export function buildAppMenu(getWindow: () => BrowserWindow | null): void {
       label: "File",
       submenu: [
         {
-          label: "New Session",
+          label: "New Agent",
           accelerator: "CmdOrCtrl+N",
-          click: () => send("menu:new-session"),
+          click: () => send("menu:new-agent"),
         },
         {
           label: "Open Workspace…",

@@ -12,6 +12,7 @@
  * from `AppShell` and are wrapped in stable `useCallback` closures.
  */
 import { useEffect, useRef } from "react";
+import { desktopMenuChannels } from "@harness/shared";
 import { desktopBridge, type MenuActionChannel } from "../lib/desktop-bridge.js";
 
 export type MenuActionHandlers = Partial<
@@ -29,13 +30,7 @@ export function useNativeMenuActions(handlers: MenuActionHandlers): void {
   useEffect(() => {
     const bridge = desktopBridge;
     if (!bridge) return;
-    const channels: MenuActionChannel[] = [
-      "menu:new-agent",
-      "menu:new-session",
-      "menu:open-workspace",
-      "menu:toggle-code-pane",
-      "menu:preferences",
-    ];
+    const channels: MenuActionChannel[] = [...desktopMenuChannels];
     const unsubs = channels.map((channel) =>
       bridge.onMenuAction(channel, () => {
         const h = ref.current[channel];
