@@ -130,20 +130,17 @@ export function useWebSocket(config: UseWebSocketConfig): UseWebSocketResult {
   const { url, csrfToken, onFrame, onStateChange } = config;
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
   const onDegradedRef = useRef<() => void>(() => {});
-  const internalRef = useRef<InternalState | null>(null);
-  if (internalRef.current === null) {
-    internalRef.current = {
-      socket: null,
-      socketAbort: null,
-      attempt: 0,
-      outboundQueue: [],
-      reconnectTimer: null,
-      staleTimer: null,
-      disposed: false,
-      missedHeartbeatAcks: 0,
-      frameValidation: createFrameValidationTracker(() => onDegradedRef.current()),
-    };
-  }
+  const internalRef = useRef<InternalState>({
+    socket: null,
+    socketAbort: null,
+    attempt: 0,
+    outboundQueue: [],
+    reconnectTimer: null,
+    staleTimer: null,
+    disposed: false,
+    missedHeartbeatAcks: 0,
+    frameValidation: createFrameValidationTracker(() => onDegradedRef.current()),
+  });
   // Stable refs for the callbacks so the connect loop never tears down on
   // every parent render.
   const onFrameRef = useRef(onFrame);
@@ -156,8 +153,7 @@ export function useWebSocket(config: UseWebSocketConfig): UseWebSocketResult {
     onStateChangeRef.current?.(next);
   }, []);
   onDegradedRef.current = () => {
-    const internal = internalRef.current;
-    if (!internal || internal.disposed) return;
+    if (internalRef.current.disposed) return;
     transition("error");
   };
 

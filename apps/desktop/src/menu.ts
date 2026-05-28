@@ -1,13 +1,19 @@
-import { desktopMenuChannels, type DesktopMenuChannel } from "@harness/shared";
 import { app, Menu, type BrowserWindow, type MenuItemConstructorOptions } from "electron";
 
-/** Channels emitted by this module — kept in sync with `@harness/shared` desktopMenuChannels. */
-export const mainProcessMenuChannels = desktopMenuChannels;
+/** Channels emitted by this module — kept in sync with `@harness/shared` `desktopMenuChannels`. */
+export const mainProcessMenuChannels = [
+  "menu:new-agent",
+  "menu:open-workspace",
+  "menu:toggle-code-pane",
+  "menu:preferences",
+] as const;
+
+export type MainProcessMenuChannel = (typeof mainProcessMenuChannels)[number];
 
 export function buildAppMenu(getWindow: () => BrowserWindow | null): void {
   const isMac = process.platform === "darwin";
 
-  const send = (channel: DesktopMenuChannel): void => {
+  const send = (channel: MainProcessMenuChannel): void => {
     const w = getWindow();
     if (w) w.webContents.send(channel);
   };

@@ -1,5 +1,5 @@
-import { type DesktopMenuChannel } from "@harness/shared";
 import { contextBridge, ipcRenderer } from "electron";
+import type { MainProcessMenuChannel } from "./menu.js";
 import type {
   BrowserInvokeRequest,
   BrowserInvokeResult,
@@ -26,7 +26,7 @@ const harnessBridge = {
    * Subscribe to native menu actions from the main process. Returns an
    * unsubscribe function.
    */
-  onMenuAction: (channel: DesktopMenuChannel, handler: () => void): (() => void) => {
+  onMenuAction: (channel: MainProcessMenuChannel, handler: () => void): (() => void) => {
     const listener = (): void => handler();
     ipcRenderer.on(channel, listener);
     return () => ipcRenderer.removeListener(channel, listener);

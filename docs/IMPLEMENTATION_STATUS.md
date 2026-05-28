@@ -31,6 +31,48 @@ each phase. Use it as the single source of truth for "what is decided" vs
 | 22 | Enrichment: Docs Indexing, Notepads, Terminal AI, Slash Commands | ✅ complete | Custom documentation indexing (crawl + FTS5 search + @docs mentions), persistent Notepads (@notepad mentions, editor page), Terminal AI (Cmd+K pattern-based command generation with dangerous-command detection), user-definable slash commands (CRUD + template expansion + built-in /explain, /review, /test, /fix, /refactor). Migration 0005, 19 new shared schemas (enrichment.ts), 3 new repos (docs, notepads, slash-commands), 4 new server routes, 1 new service (docs-crawler), 4 new hooks, 4 new components/pages, extended @-mention system with docs+notepad kinds. 500+ tests (350 server, 122 web). |
 | 23 | Semantic Search and Multi-Model Support | ✅ complete | Vector semantic codebase search (all-MiniLM-L6-v2 384-dim via @xenova/transformers ONNX **WASM**; boundary-aware chunker, incremental indexer + fs.watch, brute-force cosine) with @codebase semantic-preference→grep fallback. Multi-model providers (BYOK Anthropic/OpenAI/Google/Ollama, chat-only) via ModelRouter + ProviderRunController emitting identical canonical events; Keychain-backed keys. Auto mode (per-task heuristic). Migration 0007, shared semantic-search.ts + providers.ts, provider/index settings pages, statusbar index badge, SearchPanel Semantic toggle, unified model selector. Gates green: server 408 (+1 gated embed smoke), web 124, shared, eslint, scripts. |
 | 24 | Advanced Agent Features and Platform Expansion | 🟡 partial | Priority 1 shipped and review-hardened: sub-agent spawn/completion detection, child-run persistence, `/api/runs/:runId/subagents`, live WS frames, dashboard UI, top-level history filtering, lifecycle transaction sync, and dashboard error/loading states. Remaining independent features (Design Mode, worktree isolation, CLI/headless, light theme) deferred after the natural Priority 1 boundary. |
+| 25 | Post-Audit P0 Data Integrity & Critical Bugs | ✅ complete | Six CA-P25 fixes (C1–C6): forensic subagent lifecycle persist, desktop ⌘N IPC, WS validation degradation surfacing, shutdown settlement grace, honest cancel-unavailable semantics, streaming-text buffer cleanup on run removal. Commits `c5b1fa9`…`f1297d3`. |
+
+---
+
+## Phase 25 — Post-Audit P0 Fixes — 2026-05-27
+
+### Summary
+
+Remediated six post-audit P0 issues (CA-P25-C1–C6) affecting data integrity, desktop
+menu wiring, silent WS frame drops, graceful shutdown, cancel-unavailable semantics,
+and streaming-text memory retention. One logical commit per fix ID with prefix
+`CA-P25-C{n}` declared in commit bodies.
+
+### Changes delivered
+
+- **CA-P25-C1:** Per-draft subagent lifecycle validation in `persist-and-broadcast.ts`;
+  invalid drafts forensic-persist as `system.unknown_sdk_message` with
+  `SUBAGENT_LIFECYCLE_INVALID`; siblings still persist and broadcast.
+- **CA-P25-C2:** Desktop File menu sends `menu:new-agent` (label "New Agent…");
+  shared `desktopMenuChannels` + `apps/desktop/tests/menu-channels.test.ts`.
+- **CA-P25-C3:** `packages/shared/src/ws-frame-validation.ts` threshold (5) wired in
+  web `useWebSocket` (→ `connectionState: "error"`) and CLI `HarnessWsClient`
+  (`onFrameValidationDegraded`).
+- **CA-P25-C4:** `HARNESS_SHUTDOWN_GRACE_MS` (default 5000); `agent-runtime.shutdown()`
+  aborts/cancels active runs, `awaitSettled` with grace, then clears registries;
+  integration test `shutdown-settlement.test.ts`.
+- **CA-P25-C5:** `CANCEL_UNAVAILABLE` no longer calls `setInterrupted`; emits
+  `system.cancel_unavailable` (broadcast) + `cancel_unavailable_count` perf counter;
+  ledger OQ-12/OQ-13 updated.
+- **CA-P25-C6:** `deleteRunBuffers(runId)` + `run-store.removeRun`; called from
+  `AppShell.onDeleteRun` after successful API delete (not from `resetRun`).
+
+### Verification
+
+- `pnpm typecheck && pnpm lint && pnpm test && pnpm test:perf` — all green.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` + reinstall to
+  `/Applications/Cursor SDK Agent Harness.app`.
+- `pnpm -F @harness/cli build` + `~/bin/harness` symlink refresh (CLI touched in C3).
+
+### Next prompt
+
+`26_RESILIENCE_AND_LIFECYCLE_HARDENING.md`
 
 ---
 

@@ -49,6 +49,7 @@ describe("perf-counters", () => {
     const all = counters.snapshotAll();
     expect(Object.keys(all).sort()).toEqual(
       [
+        "cancel_unavailable_count",
         "db_commit_to_bus_publish_ms",
         "sdk_event_received_to_db_commit_ms",
         "ws_flush_delay_ms",
