@@ -94,7 +94,10 @@ export function Composer({
   // model (see useEnsureDefaultAgent). "Ready" means that provisioning has
   // landed and the active agent actually runs the model the user picked — only
   // then is it safe to send, so a model switch never runs on the old model.
-  const ready = activeAgent !== null && activeAgent.modelId === selectedModelId;
+  const ready =
+    activeAgent !== null &&
+    activeAgent.status === "active" &&
+    activeAgent.modelId === selectedModelId;
 
   // Phase 23 — options across all providers + Auto. Non-Cursor models carry a
   // "(Ask only)" badge since they have no tool-use. The current selection is
@@ -182,7 +185,7 @@ export function Composer({
     const trimmed = useUiStore.getState().composerDraft.trim();
     const current = attachments;
     if ((trimmed.length === 0 && current.length === 0) || busy) return;
-    if (!activeAgent || activeAgent.modelId !== selectedModelId) {
+    if (!activeAgent || activeAgent.status !== "active" || activeAgent.modelId !== selectedModelId) {
       // The default agent is still provisioning (or switching models). The
       // Send button is disabled in this state; keyboard users hitting Enter
       // would otherwise get no feedback, so toast the same hint.

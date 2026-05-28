@@ -88,10 +88,18 @@ function postProgress(info: unknown): void {
 }
 
 let asrPromise: Promise<AutomaticSpeechRecognitionPipeline> | null = null;
+
+/** Electron exposes WebGPU but Whisper's WebGPU ONNX path is unreliable there. */
+function preferWasmAsr(): boolean {
+  return typeof navigator !== "undefined" && navigator.userAgent.includes("Electron");
+}
+
 function loadAsr(): Promise<AutomaticSpeechRecognitionPipeline> {
   asrPromise ??= (async () => {
     const hasWebGPU =
-      typeof navigator !== "undefined" && (navigator as { gpu?: unknown }).gpu != null;
+      !preferWasmAsr() &&
+      typeof navigator !== "undefined" &&
+      (navigator as { gpu?: unknown }).gpu != null;
     if (hasWebGPU) {
       try {
         return await pipeline("automatic-speech-recognition", WEBGPU_MODEL, {

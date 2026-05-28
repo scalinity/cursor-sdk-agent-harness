@@ -143,6 +143,8 @@ export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): Speec
   // W5: Ref-based guard against a double-start race (two rapid clicks both see
   // status==="idle" before React batches the first start's state update).
   const startingRef = useRef(false);
+  // Suppress identical worker/VAD error spam (e.g. ONNX WebGPU flakes in Electron).
+  const lastErrorToastRef = useRef<string | null>(null);
 
   const emit = useCallback(() => {
     onTranscriptRef.current(joinText(committedRef.current, interimRef.current));
@@ -208,7 +210,13 @@ export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): Speec
             pendingFinalsRef.current -= 1;
             finishStopIfDrained();
           }
-          report(friendlyError(msg.message), { severity: "warn" });
+          {
+            const toast = friendlyError(msg.message);
+            if (lastErrorToastRef.current !== toast) {
+              lastErrorToastRef.current = toast;
+              report(toast, { severity: "warn" });
+            }
+          }
           return;
         default: {
           const _exhaustive: never = msg;
@@ -249,6 +257,7 @@ export function useSpeechToText({ onTranscript }: UseSpeechToTextOptions): Speec
     pendingFinalsRef.current = 0;
     nextCommitIdRef.current = 1;
     stoppingRef.current = false;
+    lastErrorToastRef.current = null;
     setModelProgress(null);
 
     try {

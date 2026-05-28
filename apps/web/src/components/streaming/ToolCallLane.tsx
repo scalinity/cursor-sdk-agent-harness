@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useToolCallProjection } from "../../hooks/useToolCallProjection.js";
 import { useRunHealth } from "../../hooks/useRunHealth.js";
+import { groupToolCallLanes } from "../../lib/tool-call-projection.js";
 import {
   useRunStore,
   type ApprovalState,
@@ -10,6 +11,8 @@ import { StreamingSurfaceBoundary } from "./StreamingSurfaceBoundary.js";
 
 export interface ToolCallLaneProps {
   runId: string | null;
+  /** When set, only these tool calls are rendered in this lane. */
+  callIds?: readonly string[] | undefined;
 }
 
 /**
@@ -39,8 +42,19 @@ function deriveAwaitingApprovalCallIds(
   return out;
 }
 
-export function ToolCallLane({ runId }: ToolCallLaneProps) {
+export function ToolCallLane({ runId, callIds }: ToolCallLaneProps) {
   const { calls, groups } = useToolCallProjection(runId);
+  const scopedCalls = useMemo(() => {
+    if (!callIds || callIds.length === 0) return calls;
+    const allowed = new Set(callIds);
+    return callIds
+      .map((callId) => calls.find((call) => call.callId === callId))
+      .filter((call): call is NonNullable<typeof call> => call !== undefined && allowed.has(call.callId));
+  }, [callIds, calls]);
+  const scopedGroups = useMemo(
+    () => (callIds && callIds.length > 0 ? groupToolCallLanes(scopedCalls) : groups),
+    [callIds, groups, scopedCalls],
+  );
   const { toolCallHealth } = useRunHealth(runId);
   const approvalsMap = useRunStore((s) =>
     runId ? (s.eventsByRunId[runId]?.approvalsByRequestId ?? null) : null,
@@ -56,8 +70,8 @@ export function ToolCallLane({ runId }: ToolCallLaneProps) {
     [approvalsMap, approvalToolCallIds],
   );
 
-  if (!runId || calls.length === 0) return null;
-  const byId = new Map(calls.map((call) => [call.callId, call]));
+  if (!runId || scopedCalls.length === 0) return null;
+  const byId = new Map(scopedCalls.map((call) => [call.callId, call]));
   const cardFor = (callId: string) => {
     const call = byId.get(callId);
     if (!call) return null;
@@ -77,7 +91,7 @@ export function ToolCallLane({ runId }: ToolCallLaneProps) {
 
   return (
     <div className="tool-call-stack">
-      {groups.map((group) => {
+      {scopedGroups.map((group) => {
         if (group.type === "card") {
           return cardFor(group.callId);
         }

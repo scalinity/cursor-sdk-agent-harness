@@ -102,6 +102,18 @@ describe("Composer", () => {
     expect(sendButton.disabled).toBe(true);
   });
 
+  it("keeps Send disabled when the active agent is in error status", () => {
+    useUiStore.setState({ composerDraft: "hi", selectedModelId: "composer-2-5-fast" });
+    render(
+      <Composer
+        activeAgent={fixtureAgent({ status: "error" })}
+        onSubmit={vi.fn()}
+      />,
+    );
+    const sendButton = screen.getByRole("button", { name: /send/i }) as HTMLButtonElement;
+    expect(sendButton.disabled).toBe(true);
+  });
+
   it("pushes an info toast when Enter is pressed without an active agent", () => {
     useUiStore.setState({ composerDraft: "hello" });
     render(<Composer activeAgent={null} onSubmit={vi.fn()} />);

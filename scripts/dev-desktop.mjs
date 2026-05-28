@@ -2,13 +2,12 @@
 /**
  * Phase 16 dev orchestrator for desktop mode.
  *
- * - Loads repo-root `.env` so CURSOR_API_KEY reaches the embedded Fastify (the
- *   same one-shot import path the browser-mode dev script uses).
+ * - Loads repo-root `.env` so CURSOR_API_KEY reaches the standalone Fastify
+ *   server (the same one-shot import path the browser-mode dev script uses).
+ * - Spawns the harness server with `HARNESS_DESKTOP=1` so `app://harness` is
+ *   accepted alongside the Vite dev origin.
  * - Spawns the Vite dev server (127.0.0.1:5173) so the renderer can hot-reload.
- * - Spawns Electron via `@harness/desktop`'s `dev` script, which compiles the
- *   main process TS and launches a window. Fastify boots in-process inside
- *   that Electron main with HARNESS_DESKTOP=1 so the `app://harness` origin
- *   is accepted alongside the Vite dev origin.
+ * - Spawns Electron, which loads the Vite URL (same-origin via proxy).
  */
 import { spawn } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
@@ -61,17 +60,19 @@ function shutdown(exitCode) {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
+// Standalone harness server (desktop origin policy). Electron loads Vite, which
+// proxies /api and /ws to this process.
+run("server", "pnpm", ["--filter", "@harness/server", "run", "dev"], "36", {
+  HARNESS_DESKTOP: "1",
+});
+
 // Vite dev server hosts the renderer. Electron loads from
 // http://127.0.0.1:5173 so HMR keeps working.
 run("vite", "pnpm", ["--filter", "@harness/web", "run", "dev"], "35");
 
-// Electron main spins up its own in-process Fastify (HARNESS_DESKTOP=1).
-// We wait a couple seconds so Vite has a port to talk to before the renderer
-// loads; Vite still listens immediately, but the wait removes a benign
-// reconnect blip in the renderer console.
+// Give the server a moment to bind before Electron opens the renderer.
 setTimeout(() => {
-  run("electron", "pnpm", ["--filter", "@harness/desktop", "run", "dev"], "36", {
-    HARNESS_DESKTOP: "1",
+  run("electron", "pnpm", ["--filter", "@harness/desktop", "run", "dev"], "34", {
     HARNESS_DEV: "1",
   });
 }, 2000);

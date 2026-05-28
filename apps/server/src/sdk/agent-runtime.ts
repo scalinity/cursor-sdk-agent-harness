@@ -179,6 +179,9 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
     try {
       const handle = await deps.sdk.resumeAgent(row.id, opts);
       liveAgents.set(row.id, handle);
+      if (row.status !== "active") {
+        deps.agentsRepo.updateStatus(row.id, "active");
+      }
       return handle;
     } catch (err) {
       // The SDK shards durable agents by the cwd they were created under
@@ -222,6 +225,9 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
           );
         }
         liveAgents.set(row.id, handle);
+        if (row.status !== "active") {
+          deps.agentsRepo.updateStatus(row.id, "active");
+        }
         return handle;
       } catch (recreateErr) {
         if (recreateErr instanceof AgentRuntimeError) throw recreateErr;

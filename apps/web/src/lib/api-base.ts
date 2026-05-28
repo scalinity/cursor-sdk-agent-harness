@@ -8,12 +8,12 @@
  *
  * In the packaged desktop app the renderer is served from `app://harness`, a
  * custom protocol that can only return static files — it cannot reach the
- * embedded server. The Electron main process therefore passes the server's
- * real origin (e.g. `http://127.0.0.1:4783`) through the preload bridge, and
- * every API/WS call is rewritten to that absolute origin. The server already
- * accepts `app://harness` as a CORS + origin-policy + WS-upgrade origin
- * (see `apps/server/src/app.ts` desktop-mode wiring), so these cross-origin
- * requests are authorized.
+ * harness API. The Electron main process therefore passes the standalone
+ * server's real origin (e.g. `http://127.0.0.1:4783`, overridable via
+ * `HARNESS_SERVER_URL`) through the preload bridge, and every API/WS call is
+ * rewritten to that absolute origin. Start the server separately with
+ * `HARNESS_DESKTOP=1` so it accepts `app://harness` as a CORS + origin-policy
+ * + WS-upgrade origin (see `apps/server/src/app.ts` desktop-mode wiring).
  */
 import { desktopBridge } from "./desktop-bridge.js";
 

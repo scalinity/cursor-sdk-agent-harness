@@ -6,13 +6,16 @@ import { MarkdownBlockView } from "./MarkdownBlockView.js";
 export interface StreamingMarkdownProps {
   runId: string;
   source: "assistant" | "thinking";
+  startSeq?: number | undefined;
+  endSeq?: number | undefined;
 }
 
-export function StreamingMarkdown({ runId, source }: StreamingMarkdownProps) {
-  const { blocks, fallbackText } = useStreamingMarkdown({ runId, source });
+export function StreamingMarkdown({ runId, source, startSeq, endSeq }: StreamingMarkdownProps) {
+  const { blocks, fallbackText } = useStreamingMarkdown({ runId, source, startSeq, endSeq });
   const status = useRunStore((s) => s.byId[runId]?.status ?? null);
   const terminal = status !== null && SDK_RUN_TERMINAL_STATUSES.has(status);
-  const streamIdPrefix = `${runId}:${source}`;
+  const range = startSeq !== undefined && endSeq !== undefined ? `:${startSeq}-${endSeq}` : "";
+  const streamIdPrefix = `${runId}:${source}${range}`;
 
   if (fallbackText !== null) {
     return <pre className="streaming-md streaming-md--fallback mono">{fallbackText}</pre>;

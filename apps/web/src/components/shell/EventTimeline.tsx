@@ -1,11 +1,11 @@
-import { Fragment } from "react";
+import { useMemo } from "react";
 import { useRunStore, type CanonicalRunEvent } from "../../state/run-store.js";
+import { buildTimelineSegments } from "../../lib/timeline-segments.js";
 import { UserMessage } from "../timeline/UserMessage.js";
 import { StreamingMarkdown } from "../streaming/StreamingMarkdown.js";
 import { ThinkingTrace } from "../streaming/ThinkingTrace.js";
 import { ToolCallLane } from "../streaming/ToolCallLane.js";
 import { SystemBanner } from "../streaming/SystemBanner.js";
-import { RunStatusPill } from "../streaming/RunStatusPill.js";
 import { StreamingSurfaceBoundary } from "../streaming/StreamingSurfaceBoundary.js";
 import { CodeEditPreviewPanel } from "../streaming/CodeEditPreviewPanel.js";
 import { ApprovalPrompt } from "../streaming/ApprovalPrompt.js";
@@ -51,12 +51,10 @@ function hasRequestEvent(
 }
 
 /**
- * Phase 09 timeline. Events remain the canonical ordering source, but related
- * deltas are rendered through aggregate streaming surfaces: one assistant
- * markdown stream, one thinking trace, grouped tool-call lanes, code-edit
- * preview placeholders, and status/usage badges. Live and replay both feed the
- * same run-store projections, so surfaces avoid per-token React commits while
- * preserving event order for surrounding markers.
+ * Phase 09 timeline. Events remain the canonical ordering source. Related
+ * deltas render through streaming surfaces scoped to contiguous seq blocks so
+ * assistant prose, thinking traces, and tool calls appear in event order.
+ * Live and replay both feed the same run-store projections.
  */
 export function EventTimeline({ runId, onApprovalResolve }: EventTimelineProps) {
   const eventChunks = useRunStore((s) =>
@@ -66,6 +64,14 @@ export function EventTimeline({ runId, onApprovalResolve }: EventTimelineProps) 
     runId ? (s.eventsByRunId[runId]?.approvalsByRequestId ?? null) : null,
   );
   const { runStalled } = useRunHealth(runId);
+  const segments = useMemo(
+    () => (eventChunks ? buildTimelineSegments(eventChunks) : []),
+    [eventChunks],
+  );
+  const firstCodeEditKey = useMemo(
+    () => segments.find((segment) => segment.type === "code_edit")?.key ?? null,
+    [segments],
+  );
 
   if (!runId) {
     return (
@@ -80,11 +86,6 @@ export function EventTimeline({ runId, onApprovalResolve }: EventTimelineProps) 
     );
   }
 
-  let assistantRendered = false;
-  let thinkingRendered = false;
-  let toolLaneRendered = false;
-  let codeEditRendered = false;
-
   return (
     <>
       {runStalled ? (
@@ -98,137 +99,90 @@ export function EventTimeline({ runId, onApprovalResolve }: EventTimelineProps) 
           </span>
         </div>
       ) : null}
-      {eventChunks.map((chunk, chunkIndex) => (
-        <Fragment key={chunk[0]?.event_id ?? `chunk-${chunkIndex}`}>
-          {chunk.map((evt) => {
-            if (evt.sdk_type === "system") {
-              return (
-                <StreamingSurfaceBoundary key={evt.event_id} surface="system-banner">
-                  <SystemBanner event={evt} />
-                </StreamingSurfaceBoundary>
-              );
-            }
-            if (evt.sdk_type === "user") {
-              return <UserMessage key={evt.event_id} event={evt} />;
-            }
-            if (evt.sdk_type === "thinking") {
-              if (thinkingRendered) return null;
-              thinkingRendered = true;
-              return (
-                <StreamingSurfaceBoundary key={`thinking-${runId}`} surface="thinking-trace">
-                  <ThinkingTrace runId={runId} />
-                </StreamingSurfaceBoundary>
-              );
-            }
-            if (evt.sdk_type === "assistant") {
-              if (assistantRendered) return null;
-              assistantRendered = true;
-              return (
-                <div key={`assistant-${runId}`} className="agent-message">
-                  <div className="agent-message__head">
-                    <span className="agent-message__glyph mono">A</span>
-                    <span className="font-semibold text-accent-primary">Harness</span>
-                    <span className="mono text-xs text-text-tertiary">
-                      {new Date(evt.occurred_at).toLocaleTimeString()}
-                    </span>
-                  </div>
-                  <StreamingSurfaceBoundary surface="assistant-markdown">
-                    <StreamingMarkdown runId={runId} source="assistant" />
-                  </StreamingSurfaceBoundary>
-                </div>
-              );
-            }
-            if (evt.sdk_type === "tool_call") {
-              if (evt.kind === "code_edit.detected") {
-                if (codeEditRendered) return null;
-                codeEditRendered = true;
-                return (
-                  <StreamingSurfaceBoundary key={`code-edits-${runId}`} surface="code-edits">
-                    <CodeEditPreviewPanel runId={runId} />
-                  </StreamingSurfaceBoundary>
-                );
-              }
-              if (toolLaneRendered) return null;
-              toolLaneRendered = true;
-              return (
-                <StreamingSurfaceBoundary key={`tool-calls-${runId}`} surface="tool-calls">
-                  <ToolCallLane runId={runId} />
-                </StreamingSurfaceBoundary>
-              );
-            }
-            if (evt.sdk_type === "status") {
-              return (
-                <div key={evt.event_id} className="my-2 flex items-center gap-2 text-xs text-text-tertiary">
-                  <span className="mono">[{evt.kind}]</span>
-                  <RunStatusPill runId={runId} />
-                </div>
-              );
-            }
-            if (evt.sdk_type === "request" && evt.kind === "request.created") {
-              // RV2-W6: render the inline ApprovalPrompt directly from
-              // `approvalsByRequestId`. The store projects this map from
-              // both `request.created` and `approval.resolved`/`.failed`
-              // frames, so a request whose `request.created` row was
-              // pruned by retention still has its outcome visible here.
-              // The `request_seq` in the store always points to the
-              // earliest seq we observed (request if seen, outcome
-              // otherwise), so the prompt anchors at the right place
-              // even in the degraded case.
-              const reqId = requestIdFromEvent(evt);
-              if (!reqId) return null;
-              const approval = approvalsMap?.[reqId];
-              if (!approval) return null;
-              return (
-                <StreamingSurfaceBoundary key={evt.event_id} surface="approval-prompt">
-                  <ApprovalPrompt
-                    runId={runId}
-                    approval={approval}
-                    onResolve={(rid, decision, reason) => {
-                      if (onApprovalResolve) onApprovalResolve(rid, decision, reason);
-                    }}
-                  />
-                </StreamingSurfaceBoundary>
-              );
-            }
-            // RV2-W6: an outcome whose `request.created` was pruned still
-            // gets rendered — anchor the prompt at the outcome's seq via
-            // requestSeq (which the store sets to the originating seq if
-            // seen, else the outcome's). Skip when the request row IS
-            // present (the branch above already rendered it).
-            if (
-              evt.sdk_type === "request" &&
-              (evt.kind === "approval.resolved" || evt.kind === "approval.failed")
-            ) {
-              const reqId = requestIdFromEvent(evt);
-              if (!reqId) return null;
-              const approval = approvalsMap?.[reqId];
-              if (!approval) return null;
-              // If the originating request event is in the timeline, the
-              // branch above renders this approval; skip here to avoid a
-              // duplicate.
-              const hasRequestEvt = hasRequestEvent(eventChunks, reqId);
-              if (hasRequestEvt) return null;
-              return (
-                <StreamingSurfaceBoundary key={evt.event_id} surface="approval-prompt">
-                  <ApprovalPrompt
-                    runId={runId}
-                    approval={approval}
-                    onResolve={(rid, decision, reason) => {
-                      if (onApprovalResolve) onApprovalResolve(rid, decision, reason);
-                    }}
-                  />
-                </StreamingSurfaceBoundary>
-              );
-            }
+      {segments.map((segment) => {
+        switch (segment.type) {
+          case "system":
             return (
-              <div key={evt.event_id} className="my-1 text-xs text-text-tertiary">
-                <span className="mono">[{evt.kind}]</span>
-                <span className="ml-2">{evt.occurred_at}</span>
+              <StreamingSurfaceBoundary key={segment.key} surface="system-banner">
+                <SystemBanner event={segment.event} />
+              </StreamingSurfaceBoundary>
+            );
+          case "user":
+            return <UserMessage key={segment.key} event={segment.event} />;
+          case "thinking":
+            return (
+              <StreamingSurfaceBoundary key={segment.key} surface="thinking-trace">
+                <ThinkingTrace runId={runId} startSeq={segment.startSeq} endSeq={segment.endSeq} />
+              </StreamingSurfaceBoundary>
+            );
+          case "assistant":
+            return (
+              <div key={segment.key} className="agent-message">
+                <div className="agent-message__head">
+                  <span className="agent-message__glyph mono">A</span>
+                  <span className="font-semibold text-accent-primary">Harness</span>
+                  <span className="mono text-xs text-text-tertiary">
+                    {new Date(segment.anchorEvent.occurred_at).toLocaleTimeString()}
+                  </span>
+                </div>
+                <StreamingSurfaceBoundary surface="assistant-markdown">
+                  <StreamingMarkdown
+                    runId={runId}
+                    source="assistant"
+                    startSeq={segment.startSeq}
+                    endSeq={segment.endSeq}
+                  />
+                </StreamingSurfaceBoundary>
               </div>
             );
-          })}
-        </Fragment>
-      ))}
+          case "tool_call_group":
+            return (
+              <StreamingSurfaceBoundary key={segment.key} surface="tool-calls">
+                <ToolCallLane runId={runId} callIds={segment.callIds} />
+              </StreamingSurfaceBoundary>
+            );
+          case "code_edit":
+            if (segment.key !== firstCodeEditKey) return null;
+            return (
+              <StreamingSurfaceBoundary key={segment.key} surface="code-edits">
+                <CodeEditPreviewPanel runId={runId} />
+              </StreamingSurfaceBoundary>
+            );
+          case "approval": {
+            const evt = segment.event;
+            const reqId = requestIdFromEvent(evt);
+            if (!reqId) return null;
+            const approval = approvalsMap?.[reqId];
+            if (!approval) return null;
+            if (
+              (evt.kind === "approval.resolved" || evt.kind === "approval.failed") &&
+              hasRequestEvent(eventChunks, reqId)
+            ) {
+              return null;
+            }
+            return (
+              <StreamingSurfaceBoundary key={segment.key} surface="approval-prompt">
+                <ApprovalPrompt
+                  runId={runId}
+                  approval={approval}
+                  onResolve={(rid, decision, reason) => {
+                    if (onApprovalResolve) onApprovalResolve(rid, decision, reason);
+                  }}
+                />
+              </StreamingSurfaceBoundary>
+            );
+          }
+          case "fallback":
+            return (
+              <div key={segment.key} className="my-1 text-xs text-text-tertiary">
+                <span className="mono">[{segment.event.kind}]</span>
+                <span className="ml-2">{segment.event.occurred_at}</span>
+              </div>
+            );
+          default:
+            return null;
+        }
+      })}
     </>
   );
 }

@@ -118,4 +118,15 @@ describe("useEnsureDefaultAgent", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(createAgent).not.toHaveBeenCalled();
   });
+
+  it("re-provisions when the remembered default agent is in error status", async () => {
+    window.localStorage.setItem(MAP_KEY, JSON.stringify({ [`ws-home::${MODEL}`]: "agent-bad" }));
+    const bad = agent("agent-bad");
+    bad.status = "error";
+    renderHook((p: UseEnsureDefaultAgentInput) => useEnsureDefaultAgent(p), {
+      initialProps: input({ activeAgent: bad, agents: [bad] }),
+    });
+    await waitFor(() => expect(createAgent).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(selectAgent).toHaveBeenCalledWith("agent-/Users/danny"));
+  });
 });
