@@ -257,6 +257,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     allowlistRepo: repos.workspaceAllowlist,
     searchService,
     modelRouter,
+    shutdownGraceMs: env.HARNESS_SHUTDOWN_GRACE_MS,
   });
 
   const approvalResponder =

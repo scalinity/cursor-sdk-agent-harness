@@ -105,6 +105,8 @@ export interface AgentRuntimeDeps {
    * treated as Cursor (the v1.1 behaviour; keeps existing tests unchanged).
    */
   modelRouter?: ModelRouter | undefined;
+  /** Max ms to wait for active runs to settle during `shutdown()`. */
+  shutdownGraceMs?: number | undefined;
 }
 
 export interface AgentRuntime {
@@ -693,16 +695,9 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
     },
 
     async shutdown(): Promise<void> {
-      // Cancel every in-flight run BEFORE clearing the registries. The
-      // consume loop keeps iterating run.stream() until either the
-      // stream ends OR the abort signal fires; if we cleared
-      // activeRuns/pipeline first, a still-running controller would
-      // re-create per-run text buffers and try to publish on an empty
-      // bus — fragile and order-dependent. Aborting first lets the
-      // loops exit cleanly via the existing
-      // `if (this.abortController.signal.aborted) break` guard in
-      // RunController.consumeAndFinalise.
-      for (const controller of activeRuns.all()) {
+      const graceMs = deps.shutdownGraceMs ?? 5000;
+      const controllers = activeRuns.all();
+      for (const controller of controllers) {
         try {
           controller.abortController.abort("server_close");
         } catch (err) {
@@ -711,6 +706,30 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
             "shutdown: controller abort threw",
           );
         }
+      }
+      const settlement = Promise.allSettled(
+        controllers.map(async (controller) => {
+          try {
+            await controller.cancel("server_close");
+          } catch (err) {
+            deps.logger.warn(
+              { err, runId: controller.runId },
+              "shutdown: controller cancel threw",
+            );
+          }
+          await controller.awaitSettled();
+        }),
+      );
+      await Promise.race([
+        settlement,
+        new Promise<void>((resolve) => setTimeout(resolve, graceMs)),
+      ]);
+      const stillActive = activeRuns.all().map((c) => c.runId);
+      if (stillActive.length > 0) {
+        deps.logger.warn(
+          { runIds: stillActive, graceMs },
+          "shutdown: timed out waiting for run settlement",
+        );
       }
       for (const handle of liveAgents.values()) {
         try {

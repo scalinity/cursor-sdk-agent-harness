@@ -14,6 +14,8 @@ export interface CancelableRun {
   readonly agentId: string;
   readonly abortController: AbortController;
   cancel(reason?: RunInterruptedReason): Promise<CancelResult>;
+  /** Wait for the consume/finalize loop to finish (bounded by shutdown grace). */
+  awaitSettled(): Promise<void>;
   getRunHandle?(): Run | null;
 }
 
