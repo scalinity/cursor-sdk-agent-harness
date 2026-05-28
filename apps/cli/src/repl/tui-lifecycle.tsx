@@ -1,10 +1,17 @@
 import type { ReactElement } from "react";
 import { render } from "ink";
 
-const ENTER_ALT_SCREEN = "[?1049h[2J[?25l";
-const EXIT_ALT_SCREEN = "[?25h[?1049l";
+const ENTER_ALT_SCREEN = "\u001b[?1049h\u001b[2J\u001b[?25l";
+const EXIT_ALT_SCREEN = "\u001b[?25h\u001b[?1049l";
 
 type SignalName = "SIGINT" | "SIGTERM" | "SIGHUP";
+
+/** Restore the terminal after alternate-screen TUI mode. Safe to call multiple times. */
+export function restoreTerminal(): void {
+  if (process.stdout.isTTY) {
+    process.stdout.write(EXIT_ALT_SCREEN);
+  }
+}
 
 export interface FullscreenRenderOptions {
   onExit?: () => void;
@@ -47,7 +54,7 @@ export function mountFullscreen(node: ReactElement, options: FullscreenRenderOpt
   const restore = () => {
     if (restored) return;
     restored = true;
-    process.stdout.write(EXIT_ALT_SCREEN);
+    restoreTerminal();
   };
   const unmount = () => {
     if (unmounted) return;
