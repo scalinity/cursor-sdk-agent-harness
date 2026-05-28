@@ -426,7 +426,10 @@ Phase 01 output — resolves every Open Question from `spec-v1.1.md` Section 14 
   `cancelled`. The `CANCEL_UNAVAILABLE` branch from spec §11 is only
   reachable if `Run.supports("cancel")` returns `false`, which has not
   been observed in v1.0.13 — keep the branch in code but expect it to be
-  dead code unless the SDK regresses.
+  dead code unless the SDK regresses. When that branch fires (Phase 25,
+  CA-P25-C5): persist `system.cancel_unavailable`, broadcast over WS,
+  return `CANCEL_UNAVAILABLE` to the client, and leave `runs.status`
+  unchanged (typically `RUNNING`) — never terminalize as `ERROR`.
 
 ---
 
@@ -444,6 +447,9 @@ Phase 01 output — resolves every Open Question from `spec-v1.1.md` Section 14 
     `runs.status = "ERROR"`, `interrupted_reason = "cancel_failed"`. Never
     classify a user-initiated abort as `ERROR` unless cancellation itself
     threw.
+  - `Run.supports("cancel") === false` (cancel unavailable) → harness does
+    **not** mutate `runs.status`; it emits `system.cancel_unavailable`
+    and surfaces `CANCEL_UNAVAILABLE` on the WS error frame (Phase 25).
   Per docs, `run.wait()` resolves with `RunResult { status: "cancelled"
   }` after a successful cancel — it does NOT throw.
 - **Citation**:

@@ -16,6 +16,7 @@ import {
   type ParsedTurnEndedUsage,
 } from "./usage-extractor.js";
 import type { StreamSink } from "./stream-stub.js";
+import type { PerfCounters } from "../observability/perf-counters.js";
 import type { PersistAndBroadcastPipeline } from "./persist-and-broadcast.js";
 
 /**
@@ -54,6 +55,7 @@ export interface RunControllerInit {
   sink: StreamSink;
   pipeline: Pick<PersistAndBroadcastPipeline, "appendCanonicalEvent">;
   logger: FastifyBaseLogger;
+  perfCounters?: PerfCounters | undefined;
 }
 
 /**
@@ -201,18 +203,19 @@ export class RunController {
       const unsupportedReason = this.runHandle.unsupportedReason("cancel");
       this.init.logger.warn(
         { runId: this.runId, reason, unsupportedReason },
-        "run.cancel: SDK reports unsupported — persisting cancel_unavailable so the run doesn't linger",
+        "run.cancel: SDK reports unsupported — persisting system.cancel_unavailable",
       );
-      // Per spec §11 cancellation contract step 9: when no cancellation
-      // primitive is available the harness must NOT fake CANCELLED.
-      // Write setInterrupted(stream_error, cancel_unavailable) so the
-      // run terminates as ERROR rather than lingering in RUNNING forever.
-      this.init.runsRepo.setInterrupted(
-        this.runId,
-        "stream_error",
-        "cancel_unavailable",
-      );
-      this.appendRunInterrupted("stream_error", "cancel_unavailable");
+      // Spec §11 step 9: no cancellation primitive — do not mutate runs.status.
+      this.init.pipeline.appendCanonicalEvent({
+        runId: this.runId,
+        agentId: this.agentId,
+        sdkType: "system",
+        kind: "system.cancel_unavailable",
+        payload: {
+          ...(unsupportedReason !== undefined ? { unsupported_reason: unsupportedReason } : {}),
+        },
+      });
+      this.init.perfCounters?.observe("cancel_unavailable_count", 1);
       const result: CancelResult = { outcome: "unsupported", unsupportedReason };
       return result;
     }

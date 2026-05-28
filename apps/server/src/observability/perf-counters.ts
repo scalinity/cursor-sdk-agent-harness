@@ -37,12 +37,14 @@ import {
 export type CounterName =
   | "sdk_event_received_to_db_commit_ms"
   | "db_commit_to_bus_publish_ms"
-  | "ws_flush_delay_ms";
+  | "ws_flush_delay_ms"
+  | "cancel_unavailable_count";
 
 export const COUNTER_NAMES: readonly CounterName[] = [
   "sdk_event_received_to_db_commit_ms",
   "db_commit_to_bus_publish_ms",
   "ws_flush_delay_ms",
+  "cancel_unavailable_count",
 ] as const;
 
 export type PerfCounters = PerfCountersAPI<CounterName>;

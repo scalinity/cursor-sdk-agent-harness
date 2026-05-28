@@ -176,7 +176,7 @@ describe("RunController", () => {
     );
   });
 
-  it("cancel() returns unsupported and writes ERROR + cancel_unavailable when SDK reports no cancel support (FIX-G)", async () => {
+  it("cancel() returns unsupported, keeps RUNNING, and emits system.cancel_unavailable (CA-P25-C5)", async () => {
     const sdk = createStubSdkAdapter({
       onSend: ({ agent, idempotencyKey }) => ({
         runId: idempotencyKey ?? "stub",
@@ -190,13 +190,13 @@ describe("RunController", () => {
     const result = await controller.cancel("user_cancelled");
     expect(result.outcome).toBe("unsupported");
     const row = f.runs.getById(runId);
-    expect(row?.status).toBe("ERROR");
-    expect(row?.interruptedReason).toBe("stream_error");
+    expect(row?.status).toBe("RUNNING");
+    expect(row?.interruptedReason).toBeNull();
     expect(f.terminalEvents).toContainEqual(
       expect.objectContaining({
         runId,
-        kind: "run.interrupted",
-        payload: { reason: "stream_error", message: "cancel_unavailable" },
+        kind: "system.cancel_unavailable",
+        sdkType: "system",
       }),
     );
   });

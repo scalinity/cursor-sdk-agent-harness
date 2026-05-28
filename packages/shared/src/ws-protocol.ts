@@ -162,20 +162,33 @@ export const serverHeartbeatFrameSchema = frameBaseSchema.extend({
 
 // -- SDK and derived event frames -------------------------------------------
 
+const systemInitEventSchema = canonicalEventBaseSchema.extend({
+  sdk_type: z.literal("system"),
+  kind: z.literal("system.init"),
+  payload: z.object({
+    subtype: z.literal("init").optional(),
+    model: z.object({ id: z.string() }).optional(),
+    tools: z.array(z.string()).optional(),
+    mode: z.enum(["local", "cloud"]),
+    cwd: z.array(z.string()).optional(),
+    sandbox_enabled: z.boolean().optional(),
+  }),
+});
+
+const systemCancelUnavailableEventSchema = canonicalEventBaseSchema.extend({
+  sdk_type: z.literal("system"),
+  kind: z.literal("system.cancel_unavailable"),
+  payload: z.object({
+    unsupported_reason: z.string().optional(),
+  }),
+});
+
 export const systemEventFrameSchema = frameBaseSchema.extend({
   type: z.literal("sdk.system"),
-  event: canonicalEventBaseSchema.extend({
-    sdk_type: z.literal("system"),
-    kind: z.literal("system.init"),
-    payload: z.object({
-      subtype: z.literal("init").optional(),
-      model: z.object({ id: z.string() }).optional(),
-      tools: z.array(z.string()).optional(),
-      mode: z.enum(["local", "cloud"]),
-      cwd: z.array(z.string()).optional(),
-      sandbox_enabled: z.boolean().optional(),
-    }),
-  }),
+  event: z.discriminatedUnion("kind", [
+    systemInitEventSchema,
+    systemCancelUnavailableEventSchema,
+  ]),
 });
 
 export const userEventFrameSchema = frameBaseSchema.extend({
