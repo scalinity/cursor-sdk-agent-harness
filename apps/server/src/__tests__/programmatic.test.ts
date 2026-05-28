@@ -54,4 +54,29 @@ describe("programmatic startServer", () => {
       await started.close();
     }
   });
+
+  it("boots with a file-backed keychain when HARNESS_KEYCHAIN_DIR is set", async () => {
+    resetKeychainDriverForTests();
+    tempDir = await mkdtemp(join(tmpdir(), "harness-programmatic-file-keychain-"));
+    const started = await startServer({
+      envOverrides: {
+        ...BASE_ENV,
+        DB_PATH: join(tempDir, "harness.sqlite"),
+        HARNESS_KEYCHAIN_DIR: join(tempDir, "keychain"),
+        HARNESS_DESKTOP: "0",
+        WEB_ORIGIN: "http://127.0.0.1:5173",
+      },
+      listenPort: 0,
+    });
+
+    try {
+      const res = await fetch(`${started.url}/api/security/csrf-token`, {
+        headers: { Origin: "http://127.0.0.1:5173" },
+      });
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toHaveProperty("token");
+    } finally {
+      await started.close();
+    }
+  });
 });

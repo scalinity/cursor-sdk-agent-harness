@@ -6,6 +6,7 @@
  */
 import type { AddressInfo } from "node:net";
 import { buildApp, type BuiltApp } from "./app.js";
+import { configureKeychainDriverFromEnv } from "./keychain/configure-driver.js";
 import { loadEnv, type Env } from "./config/env.js";
 import { openDb } from "./db/client.js";
 import { createRepositories } from "./db/repositories/index.js";
@@ -40,6 +41,7 @@ export async function startServer(
 ): Promise<StartedServer> {
   const merged = { ...process.env, ...options.envOverrides };
   const env = loadEnv(merged);
+  configureKeychainDriverFromEnv(merged);
   assertBindAllowed(env.HOST, env.ALLOW_REMOTE_BIND);
 
   const dbClient = openDb({ filePath: env.DB_PATH });

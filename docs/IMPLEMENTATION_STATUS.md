@@ -76,6 +76,36 @@ and streaming-text memory retention. One logical commit per fix ID with prefix
 
 ---
 
+## CLI Embedded Keychain Fallback — 2026-05-28
+
+### Summary
+
+Fixed the CLI failing to load its embedded server on Linux/headless hosts where
+`keytar`/libsecret cannot connect to D-Bus (`Could not connect: Connection
+refused`). CSRF secret creation during `buildApp` blocked startup before the TUI
+could render.
+
+### Changes delivered
+
+- Added a file-backed `KeychainDriver` at `apps/server/src/keychain/file-driver.ts`.
+- Wired `HARNESS_KEYCHAIN_DIR` through server env + `startServer()` so embedded
+  CLI boot selects the file driver instead of libsecret.
+- Pointed the CLI embedded server at `~/.harness-cli/keychain` (override via
+  `HARNESS_CLI_KEYCHAIN_DIR`), alongside the existing CLI-owned SQLite DB.
+- Added regression tests for the file driver, programmatic boot with
+  `HARNESS_KEYCHAIN_DIR`, and the CLI env override.
+
+### Verification
+
+- Reproduced the failure: `resolveCliBackend({})` threw `Could not connect:
+  Connection refused` before the fix.
+- After the fix: embedded server boots, CSRF token fetch succeeds, and
+  `harness agents list` returns an empty table instead of exiting.
+- `pnpm typecheck`, `pnpm lint`, and `pnpm test` all passed.
+- Desktop rebuild skipped on Cloud Agent Linux VM (no `/Applications` target).
+
+---
+
 ## CLI/App Session Isolation — 2026-05-27
 
 ### Summary

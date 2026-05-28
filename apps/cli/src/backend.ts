@@ -1,6 +1,6 @@
 import { HarnessHttpClient } from "./client/http.js";
 import { HarnessWsClient } from "./client/ws.js";
-import { resolveCliDbPath, resolveExplicitServerUrl, resolveWebOrigin } from "./config.js";
+import { resolveCliDbPath, resolveCliKeychainDir, resolveExplicitServerUrl, resolveWebOrigin } from "./config.js";
 import type { CliHttpPort, CliStreamPort } from "./types.js";
 
 export interface BackendOptions {
@@ -66,6 +66,9 @@ export function buildEmbeddedServerEnvOverrides(origin: string): NodeJS.ProcessE
     // persistent run history. Explicit --server/HARNESS_SERVER_URL still opts
     // into whichever external server the user selected.
     DB_PATH: resolveCliDbPath(),
+    // libsecret/keytar is unavailable on many Linux/headless hosts; store secrets
+    // beside the CLI-owned SQLite DB instead of blocking embedded-server boot.
+    HARNESS_KEYCHAIN_DIR: resolveCliKeychainDir(),
     // Keep the server's allowed Origin aligned with the header the WS client
     // sends, so the loopback upgrade passes the origin policy even when the
     // user overrides --origin.
