@@ -91,6 +91,19 @@ export function buildServerFrame(
           payload: row.payload as never,
         },
       };
+    case "system.cancel_unavailable":
+      return {
+        id: frameId,
+        type: "sdk.system",
+        sent_at: sentAt,
+        ...replayedFlag,
+        event: {
+          ...base,
+          sdk_type: "system",
+          kind: "system.cancel_unavailable",
+          payload: row.payload as never,
+        },
+      };
     case "user.message":
       return {
         id: frameId,
@@ -304,6 +317,7 @@ export function buildServerFrame(
  */
 const KNOWN_KINDS: Record<CanonicalEventKind, true> = {
   "system.init": true,
+  "system.cancel_unavailable": true,
   "system.unknown_sdk_message": true, // intentionally non-broadcast
   "user.message": true,
   "assistant.delta": true,

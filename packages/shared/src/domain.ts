@@ -154,6 +154,7 @@ export type EventSdkType = z.infer<typeof eventSdkTypeSchema>;
  */
 export const canonicalEventKindSchema = z.enum([
   "system.init",
+  "system.cancel_unavailable",
   "system.unknown_sdk_message",
   "user.message",
   "assistant.delta",

@@ -258,6 +258,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     searchService,
     modelRouter,
     shutdownGraceMs: env.HARNESS_SHUTDOWN_GRACE_MS,
+    perfCounters,
   });
 
   const approvalResponder =
