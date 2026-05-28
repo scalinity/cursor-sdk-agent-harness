@@ -20,7 +20,12 @@
  * kept separate because it is a user action, not subscription state.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { serverFrameSchema, type ClientFrame, type ServerFrame } from "@harness/shared";
+import {
+  createFrameValidationTracker,
+  serverFrameSchema,
+  type ClientFrame,
+  type ServerFrame,
+} from "@harness/shared";
 import { clientPerf } from "../lib/perf-counters.js";
 import type { ConnectionState } from "../state/ui-store.js";
 
@@ -55,6 +60,7 @@ interface InternalState {
   disposed: boolean;
   /** Count of swallowed heartbeat-ack send errors. Exposed via console for debugging. */
   missedHeartbeatAcks: number;
+  frameValidation: ReturnType<typeof createFrameValidationTracker>;
 }
 
 function backoffMs(attempt: number): number {
@@ -123,16 +129,21 @@ function enqueue(internal: InternalState, frame: ClientFrame): void {
 export function useWebSocket(config: UseWebSocketConfig): UseWebSocketResult {
   const { url, csrfToken, onFrame, onStateChange } = config;
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
-  const internalRef = useRef<InternalState>({
-    socket: null,
-    socketAbort: null,
-    attempt: 0,
-    outboundQueue: [],
-    reconnectTimer: null,
-    staleTimer: null,
-    disposed: false,
-    missedHeartbeatAcks: 0,
-  });
+  const onDegradedRef = useRef<() => void>(() => {});
+  const internalRef = useRef<InternalState | null>(null);
+  if (internalRef.current === null) {
+    internalRef.current = {
+      socket: null,
+      socketAbort: null,
+      attempt: 0,
+      outboundQueue: [],
+      reconnectTimer: null,
+      staleTimer: null,
+      disposed: false,
+      missedHeartbeatAcks: 0,
+      frameValidation: createFrameValidationTracker(() => onDegradedRef.current()),
+    };
+  }
   // Stable refs for the callbacks so the connect loop never tears down on
   // every parent render.
   const onFrameRef = useRef(onFrame);
@@ -144,6 +155,11 @@ export function useWebSocket(config: UseWebSocketConfig): UseWebSocketResult {
     setConnectionState(next);
     onStateChangeRef.current?.(next);
   }, []);
+  onDegradedRef.current = () => {
+    const internal = internalRef.current;
+    if (!internal || internal.disposed) return;
+    transition("error");
+  };
 
   const resetStaleTimer = useCallback(() => {
     const internal = internalRef.current;
@@ -238,6 +254,7 @@ export function useWebSocket(config: UseWebSocketConfig): UseWebSocketResult {
             "client_frame_validation_ms",
             performance.now() - validateStart,
           );
+          internal.frameValidation.recordValidationFailure("unknown");
           return;
         }
         const result = serverFrameSchema.safeParse(parsed);
@@ -245,7 +262,11 @@ export function useWebSocket(config: UseWebSocketConfig): UseWebSocketResult {
           "client_frame_validation_ms",
           performance.now() - validateStart,
         );
-        if (!result.success) return;
+        if (!result.success) {
+          internal.frameValidation.recordValidationFailure(parsed);
+          return;
+        }
+        internal.frameValidation.recordValidationSuccess();
         const frame = result.data;
         // Auto-ack heartbeats. Drive everything else through the consumer.
         if (frame.type === "heartbeat") {

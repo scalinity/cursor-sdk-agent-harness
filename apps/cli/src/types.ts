@@ -50,6 +50,8 @@ export interface CliStreamPort {
   cancelRun?(runId: string): boolean;
   sendApproval?(runId: string, requestId: string, decision: "approve" | "deny", reason?: string): void;
   close?(): void;
+  /** Called after consecutive inbound frame validation failures cross the threshold. */
+  setFrameValidationDegradedHandler?(handler: ((message: string) => void) | null): void;
 }
 
 export interface CommandDeps {
