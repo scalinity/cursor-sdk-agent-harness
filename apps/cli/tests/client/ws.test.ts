@@ -1,6 +1,7 @@
 import type { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
-import { describe, expect, it } from "vitest";
+import { FRAME_VALIDATION_FAILURE_THRESHOLD } from "@harness/shared";
+import { describe, expect, it, vi } from "vitest";
 import { buildWsUrl, CliStreamError, HarnessWsClient, isRunStatusTerminalFrame, isTerminalFrame } from "../../src/client/ws.js";
 import type { ServerFrame } from "@harness/shared";
 
@@ -112,6 +113,26 @@ describe("HarnessWsClient contracts", () => {
     await close();
 
     expect(received).toEqual(["sdk.status"]);
+  });
+
+  it("surfaces frame validation degradation after consecutive invalid frames", async () => {
+    const { server, serverUrl, close } = await createWsServer();
+    const onDegraded = vi.fn();
+    server.once("connection", (socket) => {
+      socket.once("message", () => {
+        for (let i = 0; i < FRAME_VALIDATION_FAILURE_THRESHOLD; i++) {
+          socket.send(JSON.stringify({ type: "not-a-real-frame", sent_at: new Date().toISOString() }));
+        }
+        socket.send(JSON.stringify(finalFrame));
+      });
+    });
+
+    const client = new HarnessWsClient({ serverUrl, csrfToken: "csrf-token" });
+    client.setFrameValidationDegradedHandler(onDegraded);
+    await client.subscribeToRun("run-1", () => undefined);
+    await close();
+
+    expect(onDegraded).toHaveBeenCalledTimes(1);
   });
 
   it("rejects when the socket closes before a terminal frame", async () => {

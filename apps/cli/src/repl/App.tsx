@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import type { AgentSummary, ContextChip, ContextSearchResult, ServerFrame, TokenUsage } from "@harness/shared";
 import { isRunStatusTerminalFrame, isTerminalFrame } from "../client/ws.js";
@@ -201,6 +201,14 @@ export function App({
   const appendUser = (text: string) => setBuffer((current) => ({ items: [...current.items, { type: "user", text, at: formatTurnClock() }] }));
   const appendSystem = (text: string) => setBuffer((current) => ({ items: [...current.items, { type: "system", text }] }));
   const appendError = (message: string) => setBuffer((current) => ({ items: [...current.items, { type: "error", message }] }));
+  const appendErrorRef = useRef(appendError);
+  appendErrorRef.current = appendError;
+  useEffect(() => {
+    stream.setFrameValidationDegradedHandler?.((message) => appendErrorRef.current(message));
+    return () => {
+      stream.setFrameValidationDegradedHandler?.(null);
+    };
+  }, [stream]);
   const promptSnapshot = (text: string, overrides?: { mentions?: Array<ContextChip["mention"]>; images?: ImageAttachment[] }): PromptRequest => ({
     text,
     agentId: activeAgent.id,

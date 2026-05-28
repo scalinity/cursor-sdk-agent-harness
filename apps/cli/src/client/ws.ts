@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
-import { serverFrameSchema, type ClientFrame, type ServerFrame } from "@harness/shared";
+import {
+  createFrameValidationTracker,
+  FRAME_VALIDATION_FAILURE_THRESHOLD,
+  serverFrameSchema,
+  type ClientFrame,
+  type ServerFrame,
+} from "@harness/shared";
 import type { CliStreamPort } from "../types.js";
 
 export interface HarnessWsClientOptions {
@@ -25,11 +31,51 @@ export class HarnessWsClient implements CliStreamPort {
   private readonly url: string;
   private readonly origin: string;
   private readonly terminalStatusGraceMs: number;
+  private frameValidationDegradedHandler: ((message: string) => void) | null = null;
+  private readonly frameValidation = createFrameValidationTracker(() => {
+    this.frameValidationDegradedHandler?.(
+      `WebSocket stream degraded: ${FRAME_VALIDATION_FAILURE_THRESHOLD} consecutive invalid server frames.`,
+    );
+  });
 
   constructor(options: HarnessWsClientOptions) {
     this.url = buildWsUrl(options.serverUrl, options.csrfToken);
     this.origin = options.origin ?? "http://127.0.0.1:5173";
     this.terminalStatusGraceMs = options.terminalStatusGraceMs ?? 750;
+  }
+
+  setFrameValidationDegradedHandler(handler: ((message: string) => void) | null): void {
+    this.frameValidationDegradedHandler = handler;
+  }
+
+  private handleInboundMessage(
+    raw: string,
+    onFrame: (frame: ServerFrame) => void,
+  ): void {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      this.frameValidation.recordValidationFailure("unknown");
+      return;
+    }
+    const result = serverFrameSchema.safeParse(parsed);
+    if (!result.success) {
+      this.frameValidation.recordValidationFailure(parsed);
+      return;
+    }
+    this.frameValidation.recordValidationSuccess();
+    const frame = result.data;
+    if (frame.type === "heartbeat") {
+      this.send({
+        id: frameId("hb"),
+        type: "heartbeat_ack",
+        sent_at: new Date().toISOString(),
+        server_heartbeat_id: frame.heartbeat_id,
+      });
+      return;
+    }
+    onFrame(frame);
   }
 
   async connect(onFrame: (frame: ServerFrame) => void): Promise<void> {
@@ -48,25 +94,7 @@ export class HarnessWsClient implements CliStreamPort {
       socket.once("close", rejectClosed);
       socket.on("message", (data) => {
         const raw = typeof data === "string" ? data : data.toString("utf8");
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(raw);
-        } catch {
-          return;
-        }
-        const result = serverFrameSchema.safeParse(parsed);
-        if (!result.success) return;
-        const frame = result.data;
-        if (frame.type === "heartbeat") {
-          this.send({
-            id: frameId("hb"),
-            type: "heartbeat_ack",
-            sent_at: new Date().toISOString(),
-            server_heartbeat_id: frame.heartbeat_id,
-          });
-          return;
-        }
-        onFrame(frame);
+        this.handleInboundMessage(raw, onFrame);
       });
     });
   }

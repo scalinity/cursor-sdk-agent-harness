@@ -23,6 +23,12 @@ export {
 } from "./constants.js";
 export { desktopMenuChannels } from "./desktop-menu.js";
 export type { DesktopMenuChannel } from "./desktop-menu.js";
+export {
+  createFrameValidationTracker,
+  FRAME_VALIDATION_FAILURE_THRESHOLD,
+  frameDiscriminator,
+} from "./ws-frame-validation.js";
+export type { FrameValidationTracker } from "./ws-frame-validation.js";
 export type {
   AgentId,
   CallId,
