@@ -189,8 +189,13 @@ export function createPersistAndBroadcast(
         return;
       }
 
-      if (!prepareSubagentLifecycleRows(deps, drafts, args)) {
-        return;
+      const { persistable, forensic } = partitionSubagentLifecycleDrafts(
+        deps,
+        drafts,
+        args,
+      );
+      for (const entry of forensic) {
+        persistSubagentLifecycleForensic(deps, args, entry);
       }
 
       // Persist each draft. EventsRepo.appendCanonicalEvent owns the
@@ -200,7 +205,7 @@ export function createPersistAndBroadcast(
       // durable event log would permanently miss an SDK event while the run
       // continues toward a false successful finish.
       const persisted: EventRow[] = [];
-      for (const draft of drafts) {
+      for (const draft of persistable) {
         const commitStart = performance.now();
         try {
           const row = deps.events.appendCanonicalEvent({
@@ -353,32 +358,105 @@ function terminalSubagentStatus(status: SdkRunStatus | undefined): Extract<SdkRu
   return "FINISHED";
 }
 
-function prepareSubagentLifecycleRows(
+type NormalizedDraft = {
+  kind: string;
+  payload: unknown;
+  sdkType: string;
+  callId: string | null;
+  requestId: string | null;
+  status: string | null;
+  raw: unknown;
+  occurredAt: string;
+  receivedAt: string;
+};
+
+type SubagentForensicEntry = {
+  draft: NormalizedDraft;
+  reason: "invalid_payload" | "parent_not_found";
+  parentRunId?: string;
+  issues?: unknown;
+};
+
+function partitionSubagentLifecycleDrafts(
   deps: PipelineDeps,
-  drafts: Array<{ kind: string; payload: unknown }>,
+  drafts: NormalizedDraft[],
   args: IngestArgs,
-): boolean {
-  if (!deps.runs) return true;
+): { persistable: NormalizedDraft[]; forensic: SubagentForensicEntry[] } {
+  if (!deps.runs) {
+    return { persistable: drafts, forensic: [] };
+  }
+  const persistable: NormalizedDraft[] = [];
+  const forensic: SubagentForensicEntry[] = [];
   for (const draft of drafts) {
-    if (draft.kind !== "subagent.spawned" && draft.kind !== "subagent.completed") continue;
+    if (draft.kind !== "subagent.spawned" && draft.kind !== "subagent.completed") {
+      persistable.push(draft);
+      continue;
+    }
     const parsed = subagentLifecyclePayloadSchema.safeParse(draft.payload);
     if (!parsed.success) {
-      deps.logger.error(
+      deps.logger.warn(
         { runId: args.runId, kind: draft.kind, issues: parsed.error.issues },
-        "persist-and-broadcast: invalid subagent lifecycle payload; skipping draft batch",
+        "persist-and-broadcast: invalid subagent lifecycle payload; persisting forensic row",
       );
-      return false;
+      forensic.push({
+        draft,
+        reason: "invalid_payload",
+        issues: parsed.error.issues,
+      });
+      continue;
     }
     const parent = deps.runs.getById(parsed.data.parent_run_id);
     if (!parent) {
       deps.logger.warn(
-        { runId: args.runId, parentRunId: parsed.data.parent_run_id },
-        "persist-and-broadcast: subagent parent run not found; skipping draft batch",
+        { runId: args.runId, parentRunId: parsed.data.parent_run_id, kind: draft.kind },
+        "persist-and-broadcast: subagent parent run not found; persisting forensic row",
       );
-      return false;
+      forensic.push({
+        draft,
+        reason: "parent_not_found",
+        parentRunId: parsed.data.parent_run_id,
+      });
+      continue;
     }
+    persistable.push(draft);
   }
-  return true;
+  return { persistable, forensic };
+}
+
+function persistSubagentLifecycleForensic(
+  deps: PipelineDeps,
+  args: IngestArgs,
+  entry: SubagentForensicEntry,
+): void {
+  const receivedAt = args.receivedAt ?? new Date().toISOString();
+  const occurredAt = args.occurredAt ?? receivedAt;
+  try {
+    deps.events.appendCanonicalEvent({
+      runId: args.runId,
+      agentId: args.agentId,
+      sdkType: "system",
+      kind: "system.unknown_sdk_message",
+      callId: null,
+      requestId: null,
+      status: null,
+      payload: {
+        reason: "SUBAGENT_LIFECYCLE_INVALID",
+        failure: entry.reason,
+        kind: entry.draft.kind,
+        ...(entry.parentRunId !== undefined ? { parent_run_id: entry.parentRunId } : {}),
+        ...(entry.issues !== undefined ? { issues: entry.issues } : {}),
+        draft_payload: entry.draft.payload,
+      },
+      raw: entry.draft.raw,
+      occurredAt,
+      receivedAt,
+    });
+  } catch (err) {
+    deps.logger.error(
+      { err, runId: args.runId, kind: entry.draft.kind },
+      "persist-and-broadcast: failed to persist subagent lifecycle forensic row",
+    );
+  }
 }
 
 function subagentLifecycleSync(
