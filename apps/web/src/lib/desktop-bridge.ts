@@ -4,18 +4,14 @@
  * picker and menu-action subscriptions; in browser mode the export is null and
  * every caller falls back to its text-input UI.
  */
-export type MenuActionChannel =
-  | "menu:new-agent"
-  | "menu:new-session"
-  | "menu:open-workspace"
-  | "menu:toggle-code-pane"
-  | "menu:preferences";
-
 import type {
   BrowserInvokeRequest,
   BrowserInvokeResult,
   BrowserPushEvent,
+  DesktopMenuChannel,
 } from "@harness/shared";
+
+export type MenuActionChannel = DesktopMenuChannel;
 
 /**
  * Browser-pane control surface. Present only in the desktop app (the embedded
