@@ -1,4 +1,13 @@
-import { Agent as CursorAgent, type SDKAgent, type Run, type AgentOptions, type SendOptions, type SDKUserMessage } from "@cursor/sdk";
+import {
+  Agent as CursorAgent,
+  CursorSdkError,
+  wrapSdkError,
+  type SDKAgent,
+  type Run,
+  type AgentOptions,
+  type SendOptions,
+  type SDKUserMessage,
+} from "@cursor/sdk";
 import type { SdkImage } from "@harness/shared";
 
 /**
@@ -50,16 +59,28 @@ export interface SdkAdapter {
   send(agent: SDKAgent, message: string | SdkUserMessageInput, sendOptions: SendOptions): Promise<Run>;
 }
 
+async function invokeSdk<T>(operation: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof CursorSdkError) throw err;
+    throw wrapSdkError(err, { operation });
+  }
+}
+
 export function createCursorSdkAdapter(): SdkAdapter {
   return {
-    createAgent: (options) => CursorAgent.create(options),
-    resumeAgent: (agentId, options) => CursorAgent.resume(agentId, options),
+    createAgent: (options) => invokeSdk("createAgent", () => CursorAgent.create(options)),
+    resumeAgent: (agentId, options) =>
+      invokeSdk("resumeAgent", () => CursorAgent.resume(agentId, options)),
     send: (agent, message, sendOptions) =>
-      agent.send(
-        // SDK-boundary cast: harness SdkImage → SDK SDKImage (see
-        // SdkUserMessageInput doc — zod-optional vs exactOptionalPropertyTypes).
-        typeof message === "string" ? message : (message as SDKUserMessage),
-        sendOptions,
+      invokeSdk("send", () =>
+        agent.send(
+          // SDK-boundary cast: harness SdkImage → SDK SDKImage (see
+          // SdkUserMessageInput doc — zod-optional vs exactOptionalPropertyTypes).
+          typeof message === "string" ? message : (message as SDKUserMessage),
+          sendOptions,
+        ),
       ),
   };
 }

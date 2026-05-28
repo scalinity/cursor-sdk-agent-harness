@@ -236,9 +236,12 @@ describe("StreamView helpers", () => {
     } satisfies ServerFrame);
 
     const output = renderStreamItems(buffer.items);
-    expect(output).toContain("subagent scroll reviewer spawned");
-    expect(output).toContain("subagent-scroll-review-1234567890abcdef");
-    expect(output).toContain("subagent scroll reviewer finished");
+    expect(output).toContain("◆ subagent");
+    expect(output).toContain("scroll reviewer");
+    expect(output).toContain("▸ spawned");
+    expect(output).toContain("✓ finished");
+    expect(output).toContain("╭─");
+    expect(output).toContain("╰─");
   });
 
   it("renders sdk.task progress text instead of dropping it", () => {

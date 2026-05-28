@@ -32,6 +32,7 @@ export interface Styles {
   diffContext(s: string): string;
   frame(s: string): string;
   match(s: string): string;
+  subagentName(s: string): string;
 }
 
 export function createStyles(theme: TuiTheme = createTuiTheme()): Styles {
@@ -43,7 +44,7 @@ export function createStyles(theme: TuiTheme = createTuiTheme()): Styles {
       system: identity, error: identity, approval: identity, muted: identity,
       bold: identity, italic: identity, code: identity, link: identity, url: identity,
       quote: identity, diffAdd: identity, diffDel: identity, diffMeta: identity,
-      diffContext: identity, frame: identity, match: identity,
+      diffContext: identity, frame: identity, match: identity, subagentName: identity,
     };
   }
   const fallback = createTuiTheme({});
@@ -85,6 +86,7 @@ export function createStyles(theme: TuiTheme = createTuiTheme()): Styles {
     diffContext: (s) => chalk.hex(c.muted)(s),
     frame: (s) => chalk.hex(c.muted)(s),
     match: (s) => chalk.inverse(s),
+    subagentName: (s) => chalk.hex(c.text).bold(s),
   };
 }
 

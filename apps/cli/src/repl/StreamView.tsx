@@ -184,18 +184,20 @@ export function renderStreamItems(items: readonly StreamItem[], width = 80): str
   return lines.join("\n");
 }
 
-type StreamBlock = "user" | "assistant" | "thinking" | "tool-sequence" | "meta";
+type StreamBlock = "user" | "assistant" | "thinking" | "tool-sequence" | "subagent-card" | "meta";
 
 function classifyStreamBlock(item: StreamItem): StreamBlock {
   if (item.type === "user") return "user";
   if (item.type === "assistant") return "assistant";
   if (item.type === "thinking") return "thinking";
-  if (item.type === "tool" || item.type === "task" || item.type === "subagent" || item.type === "diff") return "tool-sequence";
+  if (item.type === "subagent") return "subagent-card";
+  if (item.type === "tool" || item.type === "task" || item.type === "diff") return "tool-sequence";
   return "meta";
 }
 
 function shouldInsertBlockGap(current: StreamBlock, next: StreamBlock): boolean {
-  return current !== next && !(current === "tool-sequence" && next === "tool-sequence");
+  if (current === "tool-sequence" && next === "tool-sequence") return false;
+  return current !== next;
 }
 
 export function renderViewportLines(text: string, width: number, height: number, scrollOffset: number): string[] {
@@ -364,7 +366,7 @@ function renderStreamItem(item: StreamItem, width: number): string {
     case "task":
       return formatTaskLine(item);
     case "subagent":
-      return formatSubagentLine(item);
+      return formatSubagentCard(item, width);
     case "diff":
       return renderFileEdit(item);
     case "approval":
@@ -391,12 +393,36 @@ function formatTaskLine(item: Extract<StreamItem, { type: "task" }>): string {
   return styles.tool(`task ${status}${text ? ` ${text}` : ""}`);
 }
 
-function formatSubagentLine(item: Extract<StreamItem, { type: "subagent" }>): string {
-  const terminal = item.phase === "spawned" ? "spawned" : formatSubagentStatus(item.status);
-  const icon = item.phase === "spawned" ? styles.glyphRun(glyph.running) : item.status === "ERROR" ? styles.glyphErr(glyph.failed) : styles.glyphOk(glyph.done);
+function formatSubagentCard(item: Extract<StreamItem, { type: "subagent" }>, width: number): string {
   const name = cleanInline(item.name) || "unspecified";
-  const childRunId = cleanInline(item.childRunId);
-  return `${icon} ${styles.tool(`subagent ${name} ${terminal}${childRunId ? ` ${childRunId}` : ""}`)}`;
+  const isSpawned = item.phase === "spawned";
+  const isError = item.status === "ERROR";
+  const isMuted = item.status === "CANCELLED" || item.status === "EXPIRED";
+
+  const terminal = isSpawned ? "spawned" : formatSubagentStatus(item.status);
+  const statusGlyph = isSpawned ? glyph.running : isError ? glyph.failed : isMuted ? glyph.paused : glyph.done;
+
+  const border = isMuted ? styles.muted : isSpawned ? styles.glyphRun : isError ? styles.glyphErr : styles.glyphOk;
+  const nameStyle = isMuted ? styles.muted : styles.subagentName;
+  const statusStyle = border;
+
+  const safeWidth = Math.max(30, width);
+
+  const topLabel = `╭─ ${glyph.agent} subagent `;
+  const topFill = Math.max(0, safeWidth - topLabel.length - 1);
+  const topLine = border(`${topLabel}${"─".repeat(topFill)}╮`);
+
+  const statusPill = `${statusGlyph} ${terminal}`;
+  const innerWidth = safeWidth - 5;
+  const maxNameWidth = Math.max(1, innerWidth - statusPill.length - 1);
+  const displayName = name.length > maxNameWidth ? truncateMiddle(name, maxNameWidth) : name;
+  const gap = Math.max(1, innerWidth - displayName.length - statusPill.length);
+  const bodyLine = `${border("│")}  ${nameStyle(displayName)}${" ".repeat(gap)}${statusStyle(statusPill)} ${border("│")}`;
+
+  const bottomFill = Math.max(0, safeWidth - 2);
+  const bottomLine = border(`╰${"─".repeat(bottomFill)}╯`);
+
+  return `${topLine}\n${bodyLine}\n${bottomLine}`;
 }
 
 function formatSubagentStatus(status: string): string {

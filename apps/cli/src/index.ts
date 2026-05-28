@@ -12,7 +12,7 @@ import { searchWorkspace } from "./commands/search.js";
 import { resolveCliBackend, type CliBackend } from "./backend.js";
 import { CliHttpError } from "./client/http.js";
 import { DEFAULT_MODEL_ID, readPreferences, readPromptHistory, resolveExplicitServerUrl, resolveServerUrl, writePreferences } from "./config.js";
-import { CliUsageError, formatCliError } from "./errors.js";
+import { CliUsageError, formatCliError, installFatalErrorHandlers, registerFatalShutdownHook } from "./errors.js";
 import { App } from "./repl/App.js";
 import { BootScreen } from "./repl/BootScreen.js";
 import { createTuiTheme } from "./repl/theme.js";
@@ -195,6 +195,11 @@ async function runChat(options: GlobalOptions & { agent?: string; mode?: CliMode
       })();
     },
   });
+  const unregisterFatalShutdown = registerFatalShutdownHook(async () => {
+    await persistSession();
+    session.dispose();
+    await cleanup();
+  });
   try {
     let exited = false;
     void session.waitUntilExit().then(() => {
@@ -249,6 +254,7 @@ async function runChat(options: GlobalOptions & { agent?: string; mode?: CliMode
     }));
     await session.waitUntilExit();
   } finally {
+    unregisterFatalShutdown();
     await persistSession();
     session.dispose();
     await cleanup();
@@ -382,6 +388,7 @@ program.command("history").option("--agent <id>", "Filter by agent").option("--l
 });
 
 if (isEntrypoint()) {
+  installFatalErrorHandlers();
   await program.parseAsync(process.argv);
 }
 
