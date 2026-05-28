@@ -3,6 +3,7 @@ import {
   createMarkdownProjector,
   type MarkdownBlock,
 } from "../lib/streaming-markdown-projector.js";
+import { deriveTextForSeqRangeFromRunState } from "../lib/timeline-segments.js";
 import { publishStreamingText } from "../lib/streaming-text-channel.js";
 import { useRunStore } from "../state/run-store.js";
 import { useErrorReporter } from "./useErrorReporter.js";
@@ -10,6 +11,9 @@ import { useErrorReporter } from "./useErrorReporter.js";
 export interface UseStreamingMarkdownInput {
   runId: string;
   source: "assistant" | "thinking";
+  /** When set, only text from events in [startSeq, endSeq] is rendered. */
+  startSeq?: number | undefined;
+  endSeq?: number | undefined;
 }
 
 export interface UseStreamingMarkdownResult {
@@ -17,14 +21,21 @@ export interface UseStreamingMarkdownResult {
   fallbackText: string | null;
 }
 
-function textForRun(runId: string, source: "assistant" | "thinking"): string {
-  const state = useRunStore.getState().eventsByRunId[runId];
+function textForRun(input: UseStreamingMarkdownInput): string {
+  const state = useRunStore.getState().eventsByRunId[input.runId];
   if (!state) return "";
-  return source === "assistant" ? state.assistantText : state.thinkingText;
+  if (input.startSeq !== undefined && input.endSeq !== undefined) {
+    return deriveTextForSeqRangeFromRunState(state, input.source, input.startSeq, input.endSeq);
+  }
+  return input.source === "assistant" ? state.assistantText : state.thinkingText;
 }
 
 function streamIdFor(input: UseStreamingMarkdownInput, id: string): string {
-  return `${input.runId}:${input.source}:${id}`;
+  const range =
+    input.startSeq !== undefined && input.endSeq !== undefined
+      ? `:${input.startSeq}-${input.endSeq}`
+      : "";
+  return `${input.runId}:${input.source}${range}:${id}`;
 }
 
 function publishBlockText(input: UseStreamingMarkdownInput, block: MarkdownBlock): void {
@@ -67,8 +78,13 @@ function includesCodeBlock(blocks: MarkdownBlock[], ids: readonly string[]): boo
 export function useStreamingMarkdown(input: UseStreamingMarkdownInput): UseStreamingMarkdownResult {
   const projector = useMemo(() => createMarkdownProjector(), []);
   const scope = useMemo(
-    () => ({ runId: input.runId, source: input.source }),
-    [input.runId, input.source],
+    () => ({
+      runId: input.runId,
+      source: input.source,
+      startSeq: input.startSeq,
+      endSeq: input.endSeq,
+    }),
+    [input.endSeq, input.runId, input.source, input.startSeq],
   );
   const lastTextRef = useRef("");
   const fallbackModeRef = useRef(false);
@@ -143,14 +159,18 @@ export function useStreamingMarkdown(input: UseStreamingMarkdownInput): UseStrea
       }
     };
 
-    applyText(textForRun(scope.runId, scope.source));
+    applyText(textForRun(scope));
     const unsubscribe = useRunStore.subscribe((state, prevState) => {
       const nextRun = state.eventsByRunId[scope.runId];
       const prevRun = prevState.eventsByRunId[scope.runId];
-      const nextText = scope.source === "assistant" ? nextRun?.assistantText : nextRun?.thinkingText;
-      const prevText = scope.source === "assistant" ? prevRun?.assistantText : prevRun?.thinkingText;
-      if ((nextText ?? "") === (prevText ?? "")) return;
-      applyText(nextText ?? "");
+      if (scope.startSeq !== undefined && scope.endSeq !== undefined) {
+        if ((nextRun?.eventsVersion ?? 0) === (prevRun?.eventsVersion ?? 0)) return;
+      } else {
+        const nextText = scope.source === "assistant" ? nextRun?.assistantText : nextRun?.thinkingText;
+        const prevText = scope.source === "assistant" ? prevRun?.assistantText : prevRun?.thinkingText;
+        if ((nextText ?? "") === (prevText ?? "")) return;
+      }
+      applyText(textForRun(scope));
     });
     return () => {
       unsubscribe();

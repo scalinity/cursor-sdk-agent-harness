@@ -12,9 +12,7 @@
     "package:mac": "node scripts/package-mac.mjs",
     "test": "vitest run"
   },
-  "dependencies": {
-    "@harness/server": "workspace:*"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@harness/shared": "workspace:*",
     "@types/node": "22.10.5",

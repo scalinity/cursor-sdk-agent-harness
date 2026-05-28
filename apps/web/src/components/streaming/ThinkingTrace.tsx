@@ -1,10 +1,16 @@
-import { useState } from "react";
-import { useRunStore } from "../../state/run-store.js";
+import { useMemo, useState } from "react";
+import {
+  deriveTextForSeqRangeFromRunState,
+  deriveThinkingDurationForSeqRange,
+} from "../../lib/timeline-segments.js";
+import { flattenEventChunks, useRunStore } from "../../state/run-store.js";
 import { StreamingMarkdown } from "./StreamingMarkdown.js";
 import { StreamingText } from "./StreamingText.js";
 
 export interface ThinkingTraceProps {
   runId: string;
+  startSeq?: number | undefined;
+  endSeq?: number | undefined;
 }
 
 function isTerminal(status: string | null | undefined): boolean {
@@ -21,16 +27,46 @@ function formatDuration(ms: number | null): string | null {
   return `${(ms / 1_000).toFixed(1)}s`;
 }
 
-export function ThinkingTrace({ runId }: ThinkingTraceProps) {
-  const thinkingText = useRunStore((s) => s.eventsByRunId[runId]?.thinkingText ?? "");
-  const assistantText = useRunStore((s) => s.eventsByRunId[runId]?.assistantText ?? "");
+export function ThinkingTrace({ runId, startSeq, endSeq }: ThinkingTraceProps) {
+  const runEvents = useRunStore((s) => s.eventsByRunId[runId] ?? null);
+  const eventChunks = runEvents?.eventChunks ?? null;
+  const runThinkingText = runEvents?.thinkingText ?? "";
+  const runAssistantText = runEvents?.assistantText ?? "";
   const status = useRunStore((s) => s.byId[runId]?.status ?? null);
-  const durationMs = useRunStore((s) => s.eventsByRunId[runId]?.thinkingDurationMs ?? null);
+  const runDurationMs = runEvents?.thinkingDurationMs ?? null;
   const [overrideExpanded, setOverrideExpanded] = useState<boolean | null>(null);
+
+  const thinkingText = useMemo(() => {
+    if (!runEvents) return "";
+    if (startSeq !== undefined && endSeq !== undefined) {
+      return deriveTextForSeqRangeFromRunState(runEvents, "thinking", startSeq, endSeq);
+    }
+    return runThinkingText;
+  }, [endSeq, runEvents, runThinkingText, startSeq]);
+
+  const durationMs = useMemo(() => {
+    if (!runEvents) return null;
+    if (startSeq !== undefined && endSeq !== undefined) {
+      return deriveThinkingDurationForSeqRange(runEvents, startSeq, endSeq);
+    }
+    return runDurationMs;
+  }, [endSeq, runDurationMs, runEvents, startSeq]);
+
+  const hasAssistantAfter = useMemo(() => {
+    if (startSeq === undefined || endSeq === undefined || !eventChunks) {
+      return runAssistantText.length > 0;
+    }
+    for (const evt of flattenEventChunks(eventChunks)) {
+      if (evt.seq <= endSeq) continue;
+      if (evt.sdk_type === "user") break;
+      if (evt.sdk_type === "assistant") return true;
+    }
+    return false;
+  }, [endSeq, eventChunks, runAssistantText, startSeq]);
 
   if (!thinkingText) return null;
 
-  const defaultExpanded = !isTerminal(status) && assistantText.length === 0;
+  const defaultExpanded = !isTerminal(status) && !hasAssistantAfter;
   const expanded = overrideExpanded ?? defaultExpanded;
   const duration = formatDuration(durationMs);
 
@@ -47,9 +83,16 @@ export function ThinkingTrace({ runId }: ThinkingTraceProps) {
       {expanded ? (
         <div className="think__body">
           {hasMarkdownLikeStructure(thinkingText) ? (
-            <StreamingMarkdown runId={runId} source="thinking" />
+            <StreamingMarkdown runId={runId} source="thinking" startSeq={startSeq} endSeq={endSeq} />
           ) : (
-            <StreamingText text={thinkingText} streamId={`thinking-${runId}`} />
+            <StreamingText
+              text={thinkingText}
+              streamId={
+                startSeq !== undefined && endSeq !== undefined
+                  ? `thinking-${runId}:${startSeq}-${endSeq}`
+                  : `thinking-${runId}`
+              }
+            />
           )}
         </div>
       ) : null}

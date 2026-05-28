@@ -200,7 +200,7 @@ function ensureRunRecord(byId: Record<string, RunRecord>, runId: string, agentId
  * therefore treats every snapshot as a replacement and every delta as an
  * append; if the contract widens, this is the place to grow the branch.
  */
-function applyTextEvent(
+export function applyTextEvent(
   prev: string,
   kind: string,
   payload: { text_delta?: string | undefined } | null,

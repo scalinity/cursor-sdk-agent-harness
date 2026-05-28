@@ -125,9 +125,13 @@ export function useEnsureDefaultAgent(input: UseEnsureDefaultAgentInput): void {
     const managedDefaultIds = new Set(Object.values(defaultsMap));
 
     // Invariant holds: the active agent is exactly this (workspace, model)'s
-    // managed default.
+    // managed default and is ready to run. A remembered id that landed in
+    // `error` (e.g. a transient NetworkError during Agent.create) must not
+    // short-circuit provisioning — that left the composer "ready" while sends
+    // failed and no fresh default was minted.
     if (
       activeAgent &&
+      activeAgent.status === "active" &&
       activeAgent.id === rememberedForKey &&
       activeAgent.modelId === modelId
     ) {
@@ -142,6 +146,7 @@ export function useEnsureDefaultAgent(input: UseEnsureDefaultAgentInput): void {
     // model-only behaviour, which is acceptable for that edge.
     if (
       activeAgent &&
+      activeAgent.status === "active" &&
       activeAgent.modelId === modelId &&
       !managedDefaultIds.has(activeAgent.id)
     ) {
