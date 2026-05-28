@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pino } from "pino";
 import type { Database as BetterSqlite3Database } from "better-sqlite3";
 import type { EventRow, SDKMessage } from "@harness/shared";
@@ -342,6 +342,49 @@ describe("persist-and-broadcast pipeline", () => {
     // get nothing.
     await new Promise((r) => setImmediate(r));
     expect(seen).toHaveLength(0);
+  });
+
+  it("persists forensic row and sibling drafts when subagent parent run is missing (CA-P25-C1)", async () => {
+    const pipeline = createPersistAndBroadcast({ events, runs, bus, logger: silentLogger });
+    const seen: EventRow[] = [];
+    bus.subscribe(runId, (e) => seen.push(e));
+
+    const getById = runs.getById.bind(runs);
+    vi.spyOn(runs, "getById").mockImplementation((id: string) => {
+      if (id === runId) return undefined;
+      return getById(id);
+    });
+
+    pipeline.ingestSDKMessage({
+      raw: {
+        type: "tool_call",
+        agent_id: agentId,
+        run_id: runId,
+        call_id: "subagent-call-missing-parent",
+        name: "task",
+        status: "running",
+        args: { subagentType: { kind: "reviewer", name: "Reviewer" } },
+      },
+      runId,
+      agentId,
+      agentMode: "local",
+    });
+
+    const rows = events.getByRunIdAfterSeq(runId, 0, 100);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.kind)).toContain("tool_call.running");
+    expect(rows.map((r) => r.kind)).toContain("system.unknown_sdk_message");
+    const forensic = rows.find((r) => r.kind === "system.unknown_sdk_message");
+    expect(forensic?.payload).toMatchObject({
+      reason: "SUBAGENT_LIFECYCLE_INVALID",
+      failure: "parent_not_found",
+      kind: "subagent.spawned",
+      parent_run_id: runId,
+    });
+
+    await new Promise((r) => setImmediate(r));
+    expect(seen.map((r) => r.kind)).toEqual(["tool_call.running"]);
+    vi.restoreAllMocks();
   });
 
   it("dropRun forgets the text buffer so a recycled runId starts fresh", () => {
