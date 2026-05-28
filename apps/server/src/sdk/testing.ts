@@ -35,6 +35,8 @@ export interface StubRunInit {
    */
   deltasOnce?: ReadonlyArray<unknown>;
   supportsCancel?: boolean;
+  /** After `events` are yielded, block until `cancel()` until the stream ends. */
+  holdStreamAfterEvents?: boolean;
 }
 
 export class StubRun implements Run {
@@ -64,9 +66,11 @@ export class StubRun implements Run {
     this._deltas = init.deltasBeforeEach ?? [];
     this._deltasOnce = init.deltasOnce ?? [];
     this._finalStatus = init.finalResult?.status ?? "finished";
+    this._holdStreamAfterEvents = init.holdStreamAfterEvents ?? false;
   }
 
   private readonly _supportsCancel: boolean;
+  private readonly _holdStreamAfterEvents: boolean;
   private readonly _events: ReadonlyArray<unknown>;
   private readonly _deltas: ReadonlyArray<unknown>;
   private readonly _deltasOnce: ReadonlyArray<unknown>;
@@ -97,6 +101,11 @@ export class StubRun implements Run {
         if (this.onDelta) await this.onDelta({ update: delta });
       }
       yield event as never;
+    }
+    if (this._holdStreamAfterEvents) {
+      while (!this.cancelled) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
     }
   }
 

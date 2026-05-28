@@ -30,6 +30,8 @@ const envSchema = z
       .string()
       .transform((v) => v === "1")
       .default("0"),
+    /** Grace period for in-flight runs to settle during process shutdown. */
+    HARNESS_SHUTDOWN_GRACE_MS: z.coerce.number().int().positive().default(5000),
   })
   .superRefine((val, ctx) => {
     if (val.HOST !== "127.0.0.1" && val.HOST !== "localhost" && !val.ALLOW_REMOTE_BIND) {
