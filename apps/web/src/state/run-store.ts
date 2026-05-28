@@ -24,6 +24,7 @@ import type {
   UsageSource,
 } from "@harness/shared";
 import { create } from "zustand";
+import { deleteRunBuffers } from "../lib/streaming-text-channel.js";
 import { parseCodeEditPayload } from "../lib/code-edit-events.js";
 import { clientPerf } from "../lib/perf-counters.js";
 import {
@@ -142,6 +143,8 @@ export interface RunState {
   ingestServerFrame: (frame: ServerFrame, options?: { replayed?: boolean }) => void;
   upsertRunSummary: (summary: RunSummary) => void;
   setActiveRunId: (runId: string | null) => void;
+  /** Drop in-memory run state and streaming-text buffers for an explicit deletion. */
+  removeRun: (runId: string) => void;
   resetRun: (runId: string) => void;
   setRunStatus: (runId: string, status: SdkRunStatus | null) => void;
 }
@@ -604,6 +607,23 @@ export const useRunStore = create<RunState>((set) => ({
   },
 
   setActiveRunId: (runId) => set({ activeRunId: runId }),
+
+  removeRun: (runId) => {
+    deleteRunBuffers(runId);
+    set((state) => {
+      const nextById = { ...state.byId };
+      delete nextById[runId];
+      const nextEvents = { ...state.eventsByRunId };
+      delete nextEvents[runId];
+      const activeRunId = state.activeRunId === runId ? null : state.activeRunId;
+      return {
+        ...state,
+        byId: nextById,
+        eventsByRunId: nextEvents,
+        activeRunId,
+      };
+    });
+  },
 
   resetRun: (runId) => {
     set((state) => {

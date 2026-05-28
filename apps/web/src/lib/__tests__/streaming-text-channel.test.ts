@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
+  deleteRunBuffers,
   publishStreamingText,
   subscribeStreamingText,
   __resetForTests,
@@ -102,5 +103,19 @@ describe("streaming-text-channel — F-006", () => {
       oldSeen = u.text;
     })();
     expect(oldSeen).toBe("v2");
+  });
+
+  it("deleteRunBuffers removes all prefixed stream ids for a run (CA-P25-C6)", () => {
+    for (let i = 0; i < 100; i++) {
+      publishStreamingText(`run-${i}:assistant:block`, { text: `t${i}`, isReplacement: false });
+    }
+    for (let i = 0; i < 100; i++) {
+      deleteRunBuffers(`run-${i}`);
+    }
+    let late: string | null = null;
+    subscribeStreamingText("run-99:assistant:block", (u) => {
+      late = u.text;
+    })();
+    expect(late).toBeNull();
   });
 });

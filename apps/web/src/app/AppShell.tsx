@@ -46,6 +46,7 @@ export function AppShell() {
   const [newAgentOpen, setNewAgentOpen] = useState(false);
   const activeRunId = useRunStore((s) => s.activeRunId);
   const setActiveRunId = useRunStore((s) => s.setActiveRunId);
+  const removeRun = useRunStore((s) => s.removeRun);
   const activeRunLiveStatus = useRunStore((s) =>
     activeRunId ? (s.byId[activeRunId]?.status ?? null) : null,
   );
@@ -122,14 +123,12 @@ export function AppShell() {
     async (runId: string) => {
       try {
         await deleteRun(runId);
-        // Only drop the selection once the run is actually gone — a failed
-        // delete keeps the run, so it should stay selected.
-        if (runId === activeRunId) setActiveRunId(null);
+        removeRun(runId);
       } catch (e) {
         report(e);
       }
     },
-    [deleteRun, activeRunId, setActiveRunId, report],
+    [deleteRun, removeRun, report],
   );
 
   const onSubmit = useCallback(
