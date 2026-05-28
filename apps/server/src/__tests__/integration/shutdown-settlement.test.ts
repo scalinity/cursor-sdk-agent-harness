@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { AddressInfo } from "node:net";
 import { buildApp } from "../../app.js";
 import { loadEnv } from "../../config/env.js";
 import { openTestDb } from "../../db/__tests__/helpers.js";
@@ -75,8 +74,6 @@ describe("agent runtime shutdown settlement", () => {
       skipStartupRecovery: true,
     });
     await built.app.listen({ host: "127.0.0.1", port: 0 });
-    const port = (built.app.server.address() as AddressInfo).port;
-
     closeApp = async () => {
       await built.app.close();
       dbClient.raw.close();

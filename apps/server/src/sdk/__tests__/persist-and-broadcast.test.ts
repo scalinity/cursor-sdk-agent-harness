@@ -351,7 +351,7 @@ describe("persist-and-broadcast pipeline", () => {
 
     const getById = runs.getById.bind(runs);
     vi.spyOn(runs, "getById").mockImplementation((id: string) => {
-      if (id === runId) return undefined;
+      if (id === runId) return null;
       return getById(id);
     });
 

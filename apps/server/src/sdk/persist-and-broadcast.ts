@@ -1,5 +1,11 @@
 import type { FastifyBaseLogger } from "fastify";
-import type { AgentMode, EventRow, SDKMessage, SdkRunStatus } from "@harness/shared";
+import type {
+  AgentMode,
+  EventRow,
+  EventSdkType,
+  SDKMessage,
+  SdkRunStatus,
+} from "@harness/shared";
 import { sdkMessageSchema, subagentLifecyclePayloadSchema } from "@harness/shared";
 import type { EventsRepo } from "../db/repositories/events.repo.js";
 import type { RunsRepo } from "../db/repositories/runs.repo.js";
@@ -361,7 +367,7 @@ function terminalSubagentStatus(status: SdkRunStatus | undefined): Extract<SdkRu
 type NormalizedDraft = {
   kind: string;
   payload: unknown;
-  sdkType: string;
+  sdkType: EventSdkType;
   callId: string | null;
   requestId: string | null;
   status: string | null;
