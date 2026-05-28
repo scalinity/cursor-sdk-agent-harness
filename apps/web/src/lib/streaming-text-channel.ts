@@ -37,6 +37,17 @@ export function publishStreamingText(streamId: string, update: StreamingTextUpda
   }
 }
 
+/** Remove all buffered stream state for a run (keys prefixed with `${runId}:`). */
+export function deleteRunBuffers(runId: string): void {
+  const prefix = `${runId}:`;
+  for (const key of [...latestUpdateById.keys()]) {
+    if (key.startsWith(prefix)) latestUpdateById.delete(key);
+  }
+  for (const key of [...listenersById.keys()]) {
+    if (key.startsWith(prefix)) listenersById.delete(key);
+  }
+}
+
 export function subscribeStreamingText(streamId: string, listener: Listener): () => void {
   const existing = listenersById.get(streamId);
   const listeners = existing ?? new Set<Listener>();
