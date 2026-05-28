@@ -17,6 +17,8 @@ const envSchema = z
     DB_PATH: z.string().min(1).default(path.join(DEFAULT_DB_DIR, "harness.sqlite")),
     LOG_LEVEL: z.enum(["silent", "debug", "info", "warn", "error"]).default("info"),
     KEYCHAIN_SERVICE: z.string().min(1).default("cursor-sdk-agent-harness"),
+    /** When set, secrets are stored in this directory instead of libsecret/keytar. */
+    HARNESS_KEYCHAIN_DIR: z.string().min(1).optional(),
     CURSOR_API_KEY: z.string().min(1).optional(),
     ALLOW_REMOTE_BIND: z
       .string()

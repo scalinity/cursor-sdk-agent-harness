@@ -9,6 +9,7 @@ export const CONFIG_DIR = path.join(homedir(), ".harness-cli");
 export const HISTORY_PATH = path.join(CONFIG_DIR, "history");
 export const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
 export const CLI_DB_PATH = path.join(CONFIG_DIR, "harness.sqlite");
+export const CLI_KEYCHAIN_DIR = path.join(CONFIG_DIR, "keychain");
 
 export interface CliPreferences {
   lastAgentId?: string;
@@ -37,6 +38,10 @@ export function resolveWebOrigin(flagValue?: string): string {
 
 export function resolveCliDbPath(): string {
   return process.env.HARNESS_CLI_DB_PATH ?? CLI_DB_PATH;
+}
+
+export function resolveCliKeychainDir(): string {
+  return process.env.HARNESS_CLI_KEYCHAIN_DIR ?? CLI_KEYCHAIN_DIR;
 }
 
 export async function ensureConfigDir(): Promise<void> {
