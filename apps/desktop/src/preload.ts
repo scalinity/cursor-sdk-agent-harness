@@ -6,10 +6,11 @@ import type {
   BrowserPushEvent,
 } from "@harness/shared" with { "resolution-mode": "import" };
 
-// The main process passes the external harness server's resolved origin via an
+// The main process passes the embedded server's resolved origin via an
 // `--harness-server-origin=<url>` additionalArgument (see main.ts). The
 // packaged renderer loads from app://harness and needs this absolute origin
-// to reach the API/WS; dev mode loads Vite same-origin and omits the flag.
+// to reach the API/WS; reading it from argv keeps it available across
+// client-side navigations (unlike a one-shot query param).
 const SERVER_ORIGIN_FLAG = "--harness-server-origin=";
 function readServerOrigin(): string | null {
   const arg = process.argv.find((a) => a.startsWith(SERVER_ORIGIN_FLAG));

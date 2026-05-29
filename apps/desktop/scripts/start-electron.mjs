@@ -17,6 +17,18 @@ import process from "node:process";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = join(__dirname, "..");
 
+// 1. Build the server first so @harness/server/dist/programmatic.js exists
+// when the desktop TypeScript build resolves the packaged-only dynamic import.
+const serverBuild = spawnSync(
+  "pnpm",
+  ["--filter", "@harness/server", "run", "build"],
+  { stdio: "inherit" },
+);
+if (serverBuild.status !== 0) {
+  process.exit(serverBuild.status ?? 1);
+}
+
+// 2. Build the desktop TS sources so dist/ exists.
 const build = spawnSync(
   "pnpm",
   ["--filter", "@harness/desktop", "run", "build"],
@@ -26,6 +38,7 @@ if (build.status !== 0) {
   process.exit(build.status ?? 1);
 }
 
+// 3. Launch Electron pointed at dist/main.js.
 const electron = spawn(
   join(desktopRoot, "node_modules", ".bin", "electron"),
   [join(desktopRoot, "dist", "main.js")],

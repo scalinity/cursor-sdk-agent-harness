@@ -38,6 +38,7 @@ export function AppShell() {
   const {
     agents,
     activeAgent,
+    agentsLoaded,
     selectAgent,
     createAgent,
     updateAgentModel,
@@ -70,6 +71,7 @@ export function AppShell() {
     modelId: selectedModelId,
     agents,
     activeAgent,
+    agentsLoaded,
     createAgent,
     selectAgent,
   });

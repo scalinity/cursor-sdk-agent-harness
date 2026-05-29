@@ -27,10 +27,11 @@ export interface HarnessBridge {
   platform: string;
   onMenuAction: (channel: MenuActionChannel, handler: () => void) => () => void;
   /**
-   * Absolute origin of the standalone harness server (e.g.
-   * `http://127.0.0.1:4783`), injected by the Electron main process when the
-   * packaged renderer loads from `app://harness`. Null in dev where Vite
-   * proxies API/WS same-origin.
+   * Absolute origin of the embedded Fastify server (e.g.
+   * `http://127.0.0.1:4783`), injected by the Electron main process. The
+   * packaged renderer loads from `app://harness` and must call this origin
+   * cross-origin for API/WS. Null when the main process didn't supply it
+   * (older preload, or a launch path that couldn't resolve the URL).
    */
   serverOrigin: string | null;
   /** Embedded-browser control surface; null when the preload didn't expose it. */

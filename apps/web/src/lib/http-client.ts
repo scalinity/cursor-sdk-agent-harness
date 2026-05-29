@@ -9,7 +9,7 @@
  * retries via the hook that owns the call (e.g. `useRunHistory.reload`).
  */
 import type { ZodTypeAny, z } from "zod";
-import { apiUrl, API_BASE } from "./api-base.js";
+import { apiUrl } from "./api-base.js";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -106,10 +106,7 @@ export async function httpRequest<TResp extends ZodTypeAny | undefined = undefin
   const init: RequestInit = {
     method,
     headers,
-    // Cross-origin desktop calls (app://harness → loopback server) must not
-    // send cookies; CSRF rides in X-CSRF-Token. Explicit omit avoids CORS edge
-    // cases with Access-Control-Allow-Credentials on the server.
-    credentials: API_BASE ? "omit" : "same-origin",
+    credentials: "same-origin",
   };
   if (options.body !== undefined) {
     init.body = JSON.stringify(options.body);

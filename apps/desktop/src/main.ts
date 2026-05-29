@@ -14,7 +14,6 @@ import { registerAppProtocol } from "./app-protocol.js";
 import { loadWindowState, saveWindowState } from "./window-state.js";
 import { BrowserController } from "./browser-controller.js";
 import { registerBrowserIpc } from "./browser-ipc.js";
-import { rendererServerOrigin, resolveHarnessServerUrl } from "./server-url.js";
 
 // On-device Whisper dictation prefers the WebGPU backend (≈10x faster than
 // WASM). Enable it explicitly so `navigator.gpu` is exposed to the renderer and
@@ -24,11 +23,10 @@ app.commandLine.appendSwitch("enable-unsafe-webgpu");
 
 // Register `app://` as a STANDARD, secure, fetch/CORS-capable scheme BEFORE
 // app ready. Without `standard: true`, Chromium serializes the renderer's
-// origin as the opaque string "null" — cross-origin API requests to the
-// standalone harness server would arrive with `Origin: null`, which the
-// server's origin policy rejects (403). Marking it standard gives the renderer
-// a real `app://harness` origin, which the server allowlists when
-// `HARNESS_DESKTOP=1`.
+// origin as the opaque string "null" — so the cross-origin API requests to
+// the embedded server arrive with `Origin: null`, which the server's origin
+// policy rejects (403). Marking it standard gives the renderer a real
+// `app://harness` origin, which the server allowlists in desktop mode.
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "app",
@@ -42,35 +40,83 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let mainWindow: BrowserWindow | null = null;
+let serverClose: (() => Promise<void>) | null = null;
+let browserMcpClose: (() => Promise<void>) | null = null;
 // Owns the embedded Chromium views (one isolated session per agent). Created
 // once; the host window is (re)attached on each window creation.
 const browserController = new BrowserController();
-// External harness server origin for packaged mode (app://harness). Null in dev
-// where the renderer loads from Vite and the proxy handles API/WS.
-const serverOrigin = rendererServerOrigin(process.env.HARNESS_DEV === "1");
+// Resolved origin of the embedded server (e.g. http://127.0.0.1:4783). Passed
+// to the renderer via preload so the app://harness renderer can reach the
+// API/WS cross-origin. Null until the server starts (or if it fails to).
+let serverOrigin: string | null = null;
 
 const isDev = process.env.HARNESS_DEV === "1";
 const DEV_URL = process.env.HARNESS_DEV_URL ?? "http://127.0.0.1:5173";
 
-async function warnIfServerUnreachable(): Promise<void> {
-  if (isDev || !serverOrigin) return;
-  const healthUrl = `${serverOrigin}/api/health/live`;
+async function startEmbeddedServer(): Promise<void> {
+  // @harness/server emits ESM (`apps/server` has `"type": "module"`); the
+  // desktop main is CJS (`"type": "commonjs"`). Native dynamic `import()`
+  // is the only supported bridge — `require()` of ESM throws ERR_REQUIRE_ESM.
+  const mod = (await import("@harness/server/dist/programmatic.js")) as {
+    startServer: (
+      opts?: { envOverrides?: NodeJS.ProcessEnv; listenPort?: number },
+    ) => Promise<{ close: () => Promise<void>; url: string }>;
+    registerBrowserBackend: (backend: unknown) => void;
+    startBrowserMcpServer: () => Promise<{ baseUrl: string; urlForAgent: (id: string) => string; close: () => Promise<void> }>;
+  };
+  const started = await mod.startServer({
+    envOverrides: { HARNESS_DESKTOP: "1" },
+    listenPort: 0,
+  });
+  serverClose = started.close;
+  serverOrigin = started.url;
+
+  // Phase 18 M2: inject the BrowserController as the server's BrowserBackend
+  // so the built-in browser MCP tools reach the real Electron views. The
+  // adapter wraps the sync/async mismatch and maps return shapes. Agent-only
+  // methods (click/type/snapshot/screenshot/evaluate/waitFor) throw until
+  // implemented on BrowserController (task #8).
+  mod.registerBrowserBackend({
+    navigate: async (agentId: string, url: string) => {
+      const s = await browserController.navigate(agentId, url);
+      return { url: s.url, status: null, redirected: false };
+    },
+    back: async (agentId: string) => ({ url: browserController.back(agentId).url }),
+    forward: async (agentId: string) => ({ url: browserController.forward(agentId).url }),
+    reload: async (agentId: string) => ({ url: browserController.reload(agentId).url }),
+    state: async (agentId: string) => browserController.snapshotState(agentId),
+    consoleMessages: async (agentId: string, levels?: string[], since?: number) => {
+      const all = browserController.consoleMessages(agentId, since);
+      return levels ? all.filter((m) => levels.includes(m.level)) : all;
+    },
+    networkRequests: async (agentId: string, filter?: string, since?: number) => {
+      const all = browserController.networkRequests(agentId, since);
+      return filter ? all.filter((r) => r.url.includes(filter)) : all;
+    },
+    waitFor: async (agentId: string, input: { text?: string; ref?: string; ms?: number; timeoutMs?: number }) =>
+      browserController.waitFor(agentId, input),
+    click: async (agentId: string, ref: string) =>
+      browserController.click(agentId, ref),
+    type: async (agentId: string, ref: string, text: string, submit?: boolean) =>
+      browserController.type(agentId, ref, text, submit),
+    snapshot: async (agentId: string) =>
+      browserController.snapshot(agentId),
+    screenshot: async (agentId: string, fullPage?: boolean) =>
+      browserController.screenshot(agentId, fullPage),
+    evaluate: async (agentId: string, expression: string) =>
+      browserController.evaluate(agentId, expression),
+  });
+
+  const mcpServer = await mod.startBrowserMcpServer();
+  browserMcpClose = mcpServer.close;
+  console.log(`[harness-desktop] browser MCP server at ${mcpServer.baseUrl}`);
+}
+
+async function startEmbeddedServerSafe(): Promise<void> {
   try {
-    const res = await fetch(healthUrl, {
-      headers: { Origin: "app://harness" },
-      signal: AbortSignal.timeout(2_000),
-    });
-    if (!res.ok) {
-      console.warn(
-        `[harness-desktop] harness server at ${serverOrigin} returned ${res.status}. ` +
-          "Start it with: HARNESS_DESKTOP=1 pnpm start:server",
-      );
-    }
+    await startEmbeddedServer();
   } catch (err: unknown) {
-    console.warn(
-      `[harness-desktop] cannot reach harness server at ${serverOrigin} (${err instanceof Error ? err.message : String(err)}). ` +
-        "Start it with: HARNESS_DESKTOP=1 pnpm start:server",
-    );
+    console.error("[harness-desktop] failed to start embedded server:", err);
   }
 }
 
@@ -114,8 +160,9 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      // Packaged renderer (app://harness) reaches the external server cross-
-      // origin. Dev loads Vite same-origin — no flag needed.
+      // Hand the embedded server's origin to the preload so the packaged
+      // (app://harness) renderer can call the API/WS cross-origin. Empty in
+      // dev where the renderer is same-origin behind the Vite proxy.
       additionalArguments: serverOrigin
         ? [`--harness-server-origin=${serverOrigin}`]
         : [],
@@ -180,11 +227,7 @@ async function onReady(): Promise<void> {
   }
 
   if (!isDev) {
-    console.log(
-      `[harness-desktop] using external harness server at ${resolveHarnessServerUrl()} ` +
-        "(override with HARNESS_SERVER_URL)",
-    );
-    await warnIfServerUnreachable();
+    await startEmbeddedServerSafe();
   }
 
   createWindow();
@@ -201,4 +244,27 @@ app.on("window-all-closed", () => {
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
+});
+
+app.on("before-quit", (event: Electron.Event) => {
+  if (serverClose) {
+    event.preventDefault();
+    const close = serverClose;
+    const mcpClose = browserMcpClose;
+    serverClose = null;
+    browserMcpClose = null;
+    void (async () => {
+      try {
+        if (mcpClose) await mcpClose();
+      } catch (err: unknown) {
+        console.error("[harness-desktop] browser MCP close failed:", err);
+      }
+      try {
+        await close();
+      } catch (err: unknown) {
+        console.error("[harness-desktop] server close failed:", err);
+      }
+      app.quit();
+    })();
+  }
 });
