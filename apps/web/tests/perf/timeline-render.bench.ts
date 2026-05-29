@@ -84,6 +84,7 @@ function buildSeededEventState(total: number): RunEventState {
     byEventId,
     eventChunks: chunkEvents(events),
     eventsVersion: total,
+    replayGeneration: 0,
     lastSeq: total,
     lastReceivedAt: TIMESTAMP,
     assistantText,
