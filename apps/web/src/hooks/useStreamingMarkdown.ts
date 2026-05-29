@@ -77,6 +77,9 @@ function includesCodeBlock(blocks: MarkdownBlock[], ids: readonly string[]): boo
 
 export function useStreamingMarkdown(input: UseStreamingMarkdownInput): UseStreamingMarkdownResult {
   const projector = useMemo(() => createMarkdownProjector(), []);
+  const replayGeneration = useRunStore(
+    (s) => s.eventsByRunId[input.runId]?.replayGeneration ?? 0,
+  );
   const scope = useMemo(
     () => ({
       runId: input.runId,
@@ -175,7 +178,7 @@ export function useStreamingMarkdown(input: UseStreamingMarkdownInput): UseStrea
     return () => {
       unsubscribe();
     };
-  }, [projector, report, scope]);
+  }, [projector, report, scope, replayGeneration]);
 
   return { blocks, fallbackText };
 }

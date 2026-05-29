@@ -45,6 +45,7 @@ export function useStreamingQaFixture(input: StreamingQaFixtureInput): void {
           byEventId: new Map(input.events.map((item) => [item.event_id, item])),
           eventChunks: input.events.length > 0 ? [input.events] : [],
           eventsVersion: input.events.length,
+          replayGeneration: 0,
           lastSeq: input.events.at(-1)?.seq ?? 0,
           lastReceivedAt: input.events.at(-1)?.received_at ?? null,
           assistantText: input.assistantText,

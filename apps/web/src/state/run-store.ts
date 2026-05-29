@@ -105,6 +105,12 @@ export interface RunEventState {
   eventChunks: CanonicalRunEvent[][];
   /** Bumps whenever eventChunks changes; useful for memo keys. */
   eventsVersion: number;
+  /**
+   * Incremented on {@link RunState.resetRun} so streaming surfaces can
+   * drop stale incremental state even when a batched replay re-ingest ends
+   * at the same {@link eventsVersion} as the prior live session.
+   */
+  replayGeneration: number;
   lastSeq: number;
   lastReceivedAt: string | null;
   /** Concatenated assistant text from delta/snapshot events. */
@@ -156,6 +162,7 @@ function emptyEventState(): RunEventState {
     byEventId: new Map(),
     eventChunks: [],
     eventsVersion: 0,
+    replayGeneration: 0,
     lastSeq: 0,
     lastReceivedAt: null,
     assistantText: "",
@@ -376,6 +383,7 @@ export const useRunStore = create<RunState>((set) => ({
             byEventId: prevEvents.byEventId,
             eventChunks: prevEvents.eventChunks,
             eventsVersion: prevEvents.eventsVersion,
+            replayGeneration: prevEvents.replayGeneration,
             lastSeq: prevEvents.lastSeq,
             lastReceivedAt: prevEvents.lastReceivedAt,
             assistantText: prevEvents.assistantText,
@@ -626,10 +634,20 @@ export const useRunStore = create<RunState>((set) => ({
   },
 
   resetRun: (runId) => {
+    deleteRunBuffers(runId);
     set((state) => {
-      const nextEvents = { ...state.eventsByRunId };
-      delete nextEvents[runId];
-      return { ...state, eventsByRunId: nextEvents };
+      const prev = state.eventsByRunId[runId];
+      const replayGeneration = (prev?.replayGeneration ?? 0) + 1;
+      return {
+        ...state,
+        eventsByRunId: {
+          ...state.eventsByRunId,
+          [runId]: {
+            ...emptyEventState(),
+            replayGeneration,
+          },
+        },
+      };
     });
   },
 

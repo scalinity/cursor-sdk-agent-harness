@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { ServerFrame } from "@harness/shared";
+import {
+  publishStreamingText,
+  subscribeStreamingText,
+} from "../../lib/streaming-text-channel.js";
 import { flattenEventChunks, useRunStore, type RunEventState } from "../run-store.js";
 
 function eventsFor(state: RunEventState) {
@@ -156,10 +160,32 @@ describe("run-store", () => {
     });
   });
 
-  it("resetRun clears the per-run buffer", () => {
-    useRunStore.getState().ingestServerFrame(assistantFrame(1, "x"));
+  it("resetRun clears event state, bumps replayGeneration, and drops streaming buffers", () => {
+    publishStreamingText("run-1:assistant:1-1:p0", { text: "STREAM", isReplacement: true });
+    useRunStore.getState().ingestServerFrame(assistantFrame(1, "STREAM"));
+    useRunStore.getState().ingestServerFrame(assistantFrame(2, "ING WORKS"));
+    const before = useRunStore.getState().eventsByRunId["run-1"]!;
+    expect(before.assistantText).toBe("STREAMING WORKS");
+    expect(before.eventsVersion).toBe(2);
+
     useRunStore.getState().resetRun("run-1");
-    expect(useRunStore.getState().eventsByRunId["run-1"]).toBeUndefined();
+    const afterReset = useRunStore.getState().eventsByRunId["run-1"]!;
+    expect(afterReset.assistantText).toBe("");
+    expect(afterReset.eventsVersion).toBe(0);
+    expect(afterReset.replayGeneration).toBe(1);
+
+    let stale: string | null = null;
+    subscribeStreamingText("run-1:assistant:1-1:p0", (u) => {
+      stale = u.text;
+    })();
+    expect(stale).toBeNull();
+
+    useRunStore.getState().ingestServerFrame(assistantFrame(1, "STREAM"));
+    useRunStore.getState().ingestServerFrame(assistantFrame(2, "ING WORKS"));
+    const afterReplay = useRunStore.getState().eventsByRunId["run-1"]!;
+    expect(afterReplay.assistantText).toBe("STREAMING WORKS");
+    expect(afterReplay.eventsVersion).toBe(2);
+    expect(afterReplay.replayGeneration).toBe(1);
   });
 
   it("stores chunked events in seq order without relying on a flat ingest array", () => {
