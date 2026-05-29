@@ -34,6 +34,7 @@ export interface UseAgentsResult {
   agents: AgentSummary[];
   activeAgent: AgentSummary | null;
   loading: boolean;
+  agentsLoaded: boolean;
   error: string | null;
   reload: () => Promise<void>;
   selectAgent: (agentId: string | null) => void;
@@ -47,6 +48,15 @@ function compareIsoDesc(a: string | null, b: string | null): number {
   const at = a ? new Date(a).getTime() : 0;
   const bt = b ? new Date(b).getTime() : 0;
   return bt - at;
+}
+
+export function chooseInitialAgentForAutoSelect(items: AgentSummary[]): AgentSummary | null {
+  if (items.length === 0) return null;
+  const byRecentActivity = (a: AgentSummary, b: AgentSummary): number =>
+    compareIsoDesc(a.lastActiveAt ?? a.createdAt, b.lastActiveAt ?? b.createdAt);
+  const active = items.filter((item) => item.status === "active").sort(byRecentActivity);
+  if (active.length > 0) return active[0]!;
+  return [...items].sort(byRecentActivity)[0] ?? null;
 }
 
 export function useAgents(): UseAgentsResult {
@@ -92,10 +102,8 @@ export function useAgents(): UseAgentsResult {
       // not made an explicit choice this session.
       const current = useAgentStore.getState();
       if (!current.hasUserSelected && !current.activeAgentId && res.items.length > 0) {
-        const sorted = [...res.items].sort((a, b) =>
-          compareIsoDesc(a.lastActiveAt ?? a.createdAt, b.lastActiveAt ?? b.createdAt),
-        );
-        setActiveAgentId(sorted[0]!.id);
+        const initial = chooseInitialAgentForAutoSelect(res.items);
+        if (initial) setActiveAgentId(initial.id);
       }
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
@@ -173,6 +181,7 @@ export function useAgents(): UseAgentsResult {
     agents,
     activeAgent,
     loading,
+    agentsLoaded: lastFetchedAt !== null,
     error: lastError,
     reload,
     selectAgent: setActiveAgentId,

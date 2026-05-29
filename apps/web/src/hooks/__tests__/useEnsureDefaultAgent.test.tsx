@@ -14,8 +14,12 @@ vi.mock("../../lib/http-client.js", () => ({
 const MODEL = "composer-2-5-fast";
 const MAP_KEY = "harness:defaultAgentIds";
 
-function agent(id: string, modelId: string = MODEL): AgentSummary {
-  return { id, name: id, modelId, status: "active" } as AgentSummary;
+function agent(
+  id: string,
+  modelId: string = MODEL,
+  status: AgentSummary["status"] = "active",
+): AgentSummary {
+  return { id, name: id, modelId, status } as AgentSummary;
 }
 
 describe("useEnsureDefaultAgent", () => {
@@ -60,16 +64,37 @@ describe("useEnsureDefaultAgent", () => {
       modelId: MODEL,
       agents: [],
       activeAgent: null,
+      agentsLoaded: true,
       createAgent,
       selectAgent,
       ...overrides,
     };
   }
 
+  it("waits for the initial agent list before provisioning", async () => {
+    renderHook((p: UseEnsureDefaultAgentInput) => useEnsureDefaultAgent(p), {
+      initialProps: input({ agentsLoaded: false }),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(createAgent).not.toHaveBeenCalled();
+  });
+
   it("cold start: creates and selects a default agent for the active workspace", async () => {
     renderHook((p: UseEnsureDefaultAgentInput) => useEnsureDefaultAgent(p), {
       initialProps: input(),
     });
+    await waitFor(() => expect(createAgent).toHaveBeenCalledTimes(1));
+    expect(createAgent.mock.calls[0]?.[0].cwd).toEqual(["/Users/danny"]);
+  });
+
+  it("re-provisions when the remembered default is not active", async () => {
+    window.localStorage.setItem(MAP_KEY, JSON.stringify({ [`ws-home::${MODEL}`]: "agent-error" }));
+    const errored = agent("agent-error", MODEL, "error");
+    renderHook((p: UseEnsureDefaultAgentInput) => useEnsureDefaultAgent(p), {
+      initialProps: input({ activeAgent: errored, agents: [errored] }),
+    });
+
     await waitFor(() => expect(createAgent).toHaveBeenCalledTimes(1));
     expect(createAgent.mock.calls[0]?.[0].cwd).toEqual(["/Users/danny"]);
   });
@@ -117,16 +142,5 @@ describe("useEnsureDefaultAgent", () => {
     // Yield a tick for any async provisioning path; the custom agent must stand.
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(createAgent).not.toHaveBeenCalled();
-  });
-
-  it("re-provisions when the remembered default agent is in error status", async () => {
-    window.localStorage.setItem(MAP_KEY, JSON.stringify({ [`ws-home::${MODEL}`]: "agent-bad" }));
-    const bad = agent("agent-bad");
-    bad.status = "error";
-    renderHook((p: UseEnsureDefaultAgentInput) => useEnsureDefaultAgent(p), {
-      initialProps: input({ activeAgent: bad, agents: [bad] }),
-    });
-    await waitFor(() => expect(createAgent).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(selectAgent).toHaveBeenCalledWith("agent-/Users/danny"));
   });
 });

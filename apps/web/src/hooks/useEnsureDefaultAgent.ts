@@ -74,6 +74,7 @@ export interface UseEnsureDefaultAgentInput {
   modelId: string;
   agents: AgentSummary[];
   activeAgent: AgentSummary | null;
+  agentsLoaded: boolean;
   createAgent: (request: CreateAgentRequest) => Promise<AgentSummary>;
   selectAgent: (agentId: string | null) => void;
 }
@@ -85,6 +86,7 @@ export function useEnsureDefaultAgent(input: UseEnsureDefaultAgentInput): void {
     modelId,
     agents,
     activeAgent,
+    agentsLoaded,
     createAgent,
     selectAgent,
   } = input;
@@ -112,7 +114,7 @@ export function useEnsureDefaultAgent(input: UseEnsureDefaultAgentInput): void {
   }, []);
 
   useEffect(() => {
-    if (!activeWorkspaceId || !workspacePath) return;
+    if (!agentsLoaded || !activeWorkspaceId || !workspacePath) return;
 
     // Re-provision when the active agent isn't the managed default for THIS
     // (workspace, model). Matching on model alone would ignore a workspace
@@ -193,6 +195,7 @@ export function useEnsureDefaultAgent(input: UseEnsureDefaultAgentInput): void {
     activeWorkspaceId,
     workspacePath,
     modelId,
+    agentsLoaded,
     activeAgent,
     agents,
     createAgent,

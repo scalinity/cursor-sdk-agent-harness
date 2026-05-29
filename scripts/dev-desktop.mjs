@@ -4,10 +4,13 @@
  *
  * - Loads repo-root `.env` so CURSOR_API_KEY reaches the standalone Fastify
  *   server (the same one-shot import path the browser-mode dev script uses).
- * - Spawns the harness server with `HARNESS_DESKTOP=1` so `app://harness` is
- *   accepted alongside the Vite dev origin.
+ * - Spawns the harness server with `HARNESS_DESKTOP=1` so desktop-specific
+ *   origins remain accepted during dev.
  * - Spawns the Vite dev server (127.0.0.1:5173) so the renderer can hot-reload.
- * - Spawns Electron, which loads the Vite URL (same-origin via proxy).
+ * - Spawns Electron via `@harness/desktop`'s `dev` script, which compiles the
+ *   main process TS and launches a window pointed at Vite. Packaged builds boot
+ *   Fastify in-process; dev keeps Fastify in Node to avoid Electron/Node native
+ *   module ABI churn.
  */
 import { spawn } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
@@ -61,7 +64,7 @@ process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
 // Standalone harness server (desktop origin policy). Electron loads Vite, which
-// proxies /api and /ws to this process.
+// proxies /api and /ws to this Node process.
 run("server", "pnpm", ["--filter", "@harness/server", "run", "dev"], "36", {
   HARNESS_DESKTOP: "1",
 });
@@ -70,7 +73,7 @@ run("server", "pnpm", ["--filter", "@harness/server", "run", "dev"], "36", {
 // http://127.0.0.1:5173 so HMR keeps working.
 run("vite", "pnpm", ["--filter", "@harness/web", "run", "dev"], "35");
 
-// Give the server a moment to bind before Electron opens the renderer.
+// Give the server and Vite a moment to bind before Electron opens the renderer.
 setTimeout(() => {
   run("electron", "pnpm", ["--filter", "@harness/desktop", "run", "dev"], "34", {
     HARNESS_DEV: "1",

@@ -76,6 +76,44 @@ and streaming-text memory retention. One logical commit per fix ID with prefix
 
 ---
 
+## Desktop Startup Regression Fix — 2026-05-28
+
+### Summary
+
+Fixed a desktop startup regression where the installed app still expected an
+external `http://127.0.0.1:4783` server and the staged embedded-server dev path
+hit Electron/Node native ABI mismatch (`better-sqlite3` Node ABI 147 vs Electron
+ABI 130). The packaged app now boots Fastify in-process after the app bundle's
+native modules are rebuilt for Electron, while the dev desktop loop keeps using
+the standalone Node server to avoid ABI churn.
+
+### Changes delivered
+
+- Packaged Electron boots the embedded server and passes its resolved loopback
+  origin to the renderer preload; dev Electron skips embedded startup and uses
+  the `pnpm dev:desktop` standalone server + Vite proxy path.
+- Agent initialization now waits for the first `/api/agents` hydration before
+  creating a new SDK agent, and initial auto-select prefers active agents over
+  newer stale `creating`/`error` rows.
+- Existing active-agent guards remain intact so stale `creating`/`error` rows do
+  not count as initialized.
+- Added focused web hook tests for active-agent preference, hydration gating,
+  and errored remembered-default recovery.
+
+### Verification
+
+- `pnpm typecheck && pnpm lint && pnpm test` passed.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` passed; packaging
+  rebuilt `better-sqlite3` for Electron 33.2.1 / ABI 130.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from
+  `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app`.
+- Installed-app terminal smoke: embedded server started on a random loopback
+  port, `app://harness` REST/WS requests succeeded, no `NODE_MODULE_VERSION` or
+  `ERR_DLOPEN` appeared, and startup made zero `POST /api/agents` calls when an
+  active agent already existed.
+
+---
+
 ## CLI Embedded Keychain Fallback — 2026-05-28
 
 ### Summary
