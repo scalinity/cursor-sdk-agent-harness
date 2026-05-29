@@ -4555,3 +4555,36 @@ Reconciled the visible remote branches back into `main`.
 - `pnpm lint` — pass.
 - `pnpm test` — pass.
 - `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` — partial: web, server, and desktop TypeScript/build stages passed; mac packaging is blocked in this Linux Cloud VM because `electron-builder` cannot resolve its optional DMG dependency `dmg-license` even after installing `python3.12-venv` and rerunning `pnpm install --optional`.
+
+---
+
+## Terminal AI Button Removal — 2026-05-29
+
+### Summary
+
+Removed the bottom-left AI command affordance from the embedded terminal so the
+terminal surface is back to a plain xterm host. React owns the pane/container,
+xterm.js owns terminal display and emulation, node-pty owns the local shell, and
+the local WebSocket remains only the byte pipe between them.
+
+### Changes delivered
+
+- Removed the terminal AI command trigger, helper dialog, command generation
+  state, and Cmd+K terminal-surface shortcut from `TerminalSurface`.
+- Deleted the unused terminal AI CSS block while keeping the xterm host and
+  reconnect status styles.
+- Reworked terminal surface tests to assert the AI command controls stay absent
+  and the reconnect status still renders.
+
+### Verification
+
+- `pnpm -F @harness/web exec vitest run src/components/shell/TerminalSurface.test.tsx src/components/shell/__tests__/TerminalSurface.test.tsx` passed.
+- `pnpm typecheck` passed.
+- `pnpm lint` passed.
+- `pnpm test` passed.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build:desktop` passed and emitted
+  `apps/desktop/dist-electron/native-abi-report.json` plus
+  `apps/desktop/dist-electron/packaged-server-smoke.json`.
+- Reinstalled `/Applications/Cursor SDK Agent Harness.app` from
+  `apps/desktop/dist-electron/mac-arm64/Cursor SDK Agent Harness.app`.
+- `pnpm smoke:desktop:installed` passed.
