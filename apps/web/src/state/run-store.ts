@@ -626,6 +626,7 @@ export const useRunStore = create<RunState>((set) => ({
   },
 
   resetRun: (runId) => {
+    deleteRunBuffers(runId);
     set((state) => {
       const nextEvents = { ...state.eventsByRunId };
       delete nextEvents[runId];
