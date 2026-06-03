@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { ServerFrame } from "@harness/shared";
+import {
+  publishStreamingText,
+  subscribeStreamingText,
+  __resetForTests,
+} from "../../lib/streaming-text-channel.js";
 import { flattenEventChunks, useRunStore, type RunEventState } from "../run-store.js";
 
 function eventsFor(state: RunEventState) {
@@ -156,10 +161,19 @@ describe("run-store", () => {
     });
   });
 
-  it("resetRun clears the per-run buffer", () => {
+  it("resetRun clears the per-run event state and streaming-text buffers", () => {
+    publishStreamingText("run-1:assistant:block-0", {
+      text: "stale live text",
+      isReplacement: true,
+    });
     useRunStore.getState().ingestServerFrame(assistantFrame(1, "x"));
     useRunStore.getState().resetRun("run-1");
     expect(useRunStore.getState().eventsByRunId["run-1"]).toBeUndefined();
+    let replayed: string | null = null;
+    subscribeStreamingText("run-1:assistant:block-0", (u) => {
+      replayed = u.text;
+    })();
+    expect(replayed).toBeNull();
   });
 
   it("stores chunked events in seq order without relying on a flat ingest array", () => {
