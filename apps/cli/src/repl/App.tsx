@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import type { AgentSummary, ContextChip, ContextSearchResult, ServerFrame, TokenUsage } from "@harness/shared";
+import { CLI_DISPLAY_NAME } from "@harness/shared";
 import { isRunStatusTerminalFrame, isTerminalFrame } from "../client/ws.js";
 import { appendPromptHistory, writePreferences } from "../config.js";
 import {
@@ -560,7 +561,7 @@ export function App({
 function TooSmallTerminal({ columns, rows, theme }: { columns: number; rows: number; theme: ReturnType<typeof createTuiTheme> }) {
   return (
     <Box flexDirection="column" paddingX={1} {...bg(theme.background)}>
-      <Text {...fg(theme.brand)}>Cursor Harness</Text>
+      <Text {...fg(theme.brand)}>{CLI_DISPLAY_NAME}</Text>
       <Text {...fg(theme.state?.error)}>terminal too small: {columns}x{rows}</Text>
       <Text {...fg(theme.muted)}>minimum supported size is {MIN_COLUMNS}x{MIN_ROWS}</Text>
     </Box>

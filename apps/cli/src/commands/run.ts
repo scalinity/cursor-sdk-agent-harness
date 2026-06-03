@@ -83,7 +83,7 @@ export async function runPrompt(options: RunCommandOptions, deps: CommandDeps): 
       return 1;
     }
     if (error instanceof CliHttpError && error.code === "NETWORK_ERROR") {
-      deps.writeError?.(`Cannot connect to harness server. Start it with: pnpm start:server`);
+      deps.writeError?.(`Cannot connect to Orrery server. Start it with: pnpm start:server`);
       return 2;
     }
     deps.writeError?.(error instanceof Error ? error.message : String(error));

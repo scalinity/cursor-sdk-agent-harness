@@ -1,3 +1,4 @@
+import { CLI_NAME } from "@harness/shared";
 import { Command } from "commander";
 import { describe, expect, it } from "vitest";
 import { CliHttpError } from "../src/client/http.js";
@@ -13,7 +14,7 @@ function createRootProgram(onDefault: (options: GlobalOptions) => Promise<void> 
   let output = "";
   const program = new Command();
   program
-    .name("harness")
+    .name(CLI_NAME)
     .exitOverride()
     .configureOutput({
       writeOut: (value) => {
@@ -24,7 +25,7 @@ function createRootProgram(onDefault: (options: GlobalOptions) => Promise<void> 
       },
     })
     .option("-r, --resume", "Resume the most recently closed chat session")
-    .option("--server <url>", "Attach to an external Harness server instead of the embedded one")
+    .option("--server <url>", "Attach to an external Orrery server instead of the embedded one")
     .option("--origin <url>", "Origin header for WebSocket upgrades (advanced)");
   attachDefaultChatAction(program, async (options) => {
     await onDefault(options);
@@ -33,7 +34,7 @@ function createRootProgram(onDefault: (options: GlobalOptions) => Promise<void> 
 }
 
 describe("CLI root command parsing", () => {
-  it("launches the default chat action for harness -r", async () => {
+  it("launches the default chat action for orrery -r", async () => {
     const calls: GlobalOptions[] = [];
     const { program, output } = createRootProgram((options) => {
       calls.push(options);
@@ -42,7 +43,7 @@ describe("CLI root command parsing", () => {
       throw new Error("chat subcommand should not run");
     });
 
-    await program.parseAsync(["node", "harness", "-r"]);
+    await program.parseAsync(["node", CLI_NAME, "-r"]);
 
     expect(output()).toBe("");
     expect(calls).toHaveLength(1);
@@ -60,7 +61,7 @@ describe("CLI root command parsing", () => {
 
     await program.parseAsync([
       "node",
-      "harness",
+      CLI_NAME,
       "--server",
       "http://127.0.0.1:4783",
       "--origin",
@@ -87,7 +88,7 @@ describe("CLI root command parsing", () => {
       chatCalls += 1;
     });
 
-    await program.parseAsync(["node", "harness", "chat"]);
+    await program.parseAsync(["node", CLI_NAME, "chat"]);
 
     expect(calls).toEqual([]);
     expect(chatCalls).toBe(1);
@@ -118,8 +119,8 @@ describe("CLI root command parsing", () => {
     expect(shouldCreateFreshAgentForSavedSession(new Error("boom"))).toBe(false);
   });
 
-  it("rejects harness run with no prompt when stdin is a TTY", () => {
-    expect(() => assertRunPromptInput([], true)).toThrow(/harness run <prompt>/i);
+  it("rejects orrery run with no prompt when stdin is a TTY", () => {
+    expect(() => assertRunPromptInput([], true)).toThrow(new RegExp(`${CLI_NAME} run <prompt>`, "i"));
     expect(() => assertRunPromptInput([], false)).not.toThrow();
     expect(() => assertRunPromptInput(["hello"], true)).not.toThrow();
   });

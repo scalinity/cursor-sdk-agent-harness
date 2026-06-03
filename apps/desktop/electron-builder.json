@@ -1,7 +1,7 @@
 {
-  "appId": "com.danny.harness",
-  "productName": "Cursor SDK Agent Harness",
-  "artifactName": "CursorSDKAgentHarness-${version}-${arch}.${ext}",
+  "appId": "com.danny.orrery",
+  "productName": "Orrery",
+  "artifactName": "Orrery-${version}-${arch}.${ext}",
   "directories": {
     "buildResources": "build",
     "output": "dist-electron"

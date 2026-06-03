@@ -375,6 +375,12 @@ export class EventsRepo {
     return row.n;
   }
 
+  /** Total canonical events across all runs (Observatory stats). */
+  countAll(): number {
+    const row = this.raw.prepare("SELECT COUNT(*) AS n FROM events").get() as { n: number };
+    return row.n;
+  }
+
   getAllByRunId(runId: string): EventRow[] {
     const rows = this.raw
       .prepare("SELECT * FROM events WHERE run_id = ? ORDER BY seq ASC")

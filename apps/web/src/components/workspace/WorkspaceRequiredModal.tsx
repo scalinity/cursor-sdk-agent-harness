@@ -43,8 +43,8 @@ export function WorkspaceRequiredModal() {
         </h2>
         <p className="m-0 mb-4 text-md text-text-tertiary">
           {isDesktop
-            ? "Choose a folder on disk. The harness will sandbox agents to this path and its children."
-            : "Enter an absolute path. The harness will sandbox agents to this path and its children."}
+            ? "Choose a folder on disk. Orrery will sandbox agents to this path and its children."
+            : "Enter an absolute path. Orrery will sandbox agents to this path and its children."}
         </p>
         {error ? (
           <p className="mono mb-4 text-sm text-warning">{errorCopy(error)}</p>

@@ -1,3 +1,4 @@
+import { CLI_NAME } from "@harness/shared";
 import { readFile } from "node:fs/promises";
 import { CliUsageError } from "../errors.js";
 import { writeJsonLine } from "../output/json.js";
@@ -62,7 +63,7 @@ export async function createSkillCommand(
 ): Promise<CreatedSkill> {
   const description = options.description?.trim();
   if (!description) {
-    throw new CliUsageError("Usage: harness skills create <name> --description <text>");
+    throw new CliUsageError(`Usage: ${CLI_NAME} skills create <name> --description <text>`);
   }
 
   let content = options.content;

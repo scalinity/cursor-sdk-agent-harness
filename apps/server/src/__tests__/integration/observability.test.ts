@@ -40,6 +40,8 @@ const BASE_ENV: NodeJS.ProcessEnv = {
 interface Harness {
   app: FastifyInstance;
   perfCounters: PerfCounters;
+  dbPath: string;
+  repos: ReturnType<typeof createRepositories>;
   close: () => Promise<void>;
 }
 
@@ -58,6 +60,8 @@ async function buildHarness(): Promise<Harness> {
   return {
     app,
     perfCounters,
+    dbPath: env.DB_PATH,
+    repos,
     close: async () => {
       await app.close();
       dbClient.raw.close();
@@ -128,5 +132,48 @@ describe("GET /api/observability/perf", () => {
       headers: { origin: "http://127.0.0.1:5173" },
     });
     expect(res.statusCode).toBe(200);
+  });
+});
+
+describe("GET /api/observability/stats", () => {
+  let h: Harness;
+
+  beforeEach(async () => {
+    setKeychainDriver(createInMemoryKeychainDriver());
+    h = await buildHarness();
+  });
+  afterEach(async () => {
+    await h.close();
+    resetKeychainDriverForTests();
+  });
+
+  it("returns 200 with run/event counts, retention days, and capturedAt", async () => {
+    const res = await h.app.inject({
+      method: "GET",
+      url: "/api/observability/stats",
+      headers: { origin: "http://127.0.0.1:5173" },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      runCount: number;
+      eventCount: number;
+      dbBytes: number | null;
+      rawEventRetentionDays: number;
+      capturedAt: string;
+    };
+    expect(body.runCount).toBeGreaterThanOrEqual(0);
+    expect(body.eventCount).toBeGreaterThanOrEqual(0);
+    expect(body.rawEventRetentionDays).toBeGreaterThanOrEqual(1);
+    expect(body.capturedAt).toMatch(/T.*Z$/);
+  });
+
+  it("rejects cross-origin requests with ORIGIN_FORBIDDEN", async () => {
+    const res = await h.app.inject({
+      method: "GET",
+      url: "/api/observability/stats",
+      headers: { origin: "http://evil.example.com" },
+    });
+    expect(res.statusCode).toBe(403);
+    expect((res.json() as { code?: string }).code).toBe("ORIGIN_FORBIDDEN");
   });
 });

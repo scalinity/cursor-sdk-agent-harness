@@ -1,3 +1,4 @@
+import { CLI_DISPLAY_NAME, CLI_DISPLAY_NAME_NARROW } from "@harness/shared";
 import React from "react";
 import { Box, Text } from "ink";
 import { normalizePath } from "../render/path.js";
@@ -31,7 +32,7 @@ export function HeaderBar({
   const leftWidth = Math.max(18, Math.floor(width * 0.56));
   const rightWidth = Math.max(12, width - leftWidth - 4);
   const cwdLabel = formatHeaderCwdLabel(workspace, cwdBase, leftWidth);
-  const title = width < 84 ? "HARNESS" : "Cursor Harness";
+  const title = width < 84 ? CLI_DISPLAY_NAME_NARROW : CLI_DISPLAY_NAME;
   const queuedLabel = queuedPrompts > 0 ? `${queuedPrompts} queued` : "";
   const modelLabel = truncateMiddle(
     formatChromeIndicator(modelId, accountLabel, chromeState),

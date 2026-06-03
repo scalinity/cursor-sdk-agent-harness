@@ -120,7 +120,7 @@ export function EventTimeline({ runId, onApprovalResolve }: EventTimelineProps) 
               <div key={segment.key} className="agent-message">
                 <div className="agent-message__head">
                   <span className="agent-message__glyph mono">A</span>
-                  <span className="font-semibold text-accent-primary">Harness</span>
+                  <span className="font-semibold text-accent-primary">Orrery</span>
                   <span className="mono text-xs text-text-tertiary">
                     {new Date(segment.anchorEvent.occurred_at).toLocaleTimeString()}
                   </span>

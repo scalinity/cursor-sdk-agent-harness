@@ -337,7 +337,15 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     usage: { runsRepo: repos.runs, settingsRepo: repos.settings },
     mcpServers: { mcpServers: repos.mcpServers, mcpSecretStore },
     subagents: { subagents: repos.subagents, mcpServers: repos.mcpServers },
-    observability: { perfCounters },
+    observability: {
+      perfCounters,
+      stats: {
+        dbPath: env.DB_PATH,
+        runs: repos.runs,
+        events: repos.events,
+        settings: repos.settings,
+      },
+    },
     git: {
       settingsRepo: repos.settings,
       workspaceAllowlist: repos.workspaceAllowlist,

@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "bin": {
-    "harness": "./bin/harness"
+    "harness": "./bin/harness",
+    "orrery": "./bin/orrery"
   },
   "engines": {
     "node": ">=22.0.0",

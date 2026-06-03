@@ -746,3 +746,31 @@ export type RunPatch = z.infer<typeof runPatchSchema>;
 export const csrfTokenResponseSchema = z.object({
   token: z.string(),
 });
+
+// ============================================================================
+// Observability — perf + event-log stats (Orrery Observatory)
+// ============================================================================
+
+export const observabilityPerfResponseSchema = z.object({
+  counters: z.record(
+    z.string(),
+    z.object({
+      count: z.number().int().nonnegative(),
+      p50: z.number().nullable(),
+      p95: z.number().nullable(),
+      p99: z.number().nullable(),
+      max: z.number().nullable(),
+    }),
+  ),
+  capturedAt: isoDateTimeSchema,
+});
+export type ObservabilityPerfResponse = z.infer<typeof observabilityPerfResponseSchema>;
+
+export const observabilityStatsResponseSchema = z.object({
+  runCount: z.number().int().nonnegative(),
+  eventCount: z.number().int().nonnegative(),
+  dbBytes: z.number().int().nonnegative().nullable(),
+  rawEventRetentionDays: z.number().int().min(1).max(3650),
+  capturedAt: isoDateTimeSchema,
+});
+export type ObservabilityStatsResponse = z.infer<typeof observabilityStatsResponseSchema>;

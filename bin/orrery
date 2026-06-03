@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+
+ROOT_DIR="$(cd -P "$(dirname "$SOURCE")/.." >/dev/null 2>&1 && pwd)"
+CLI_ENTRY="$ROOT_DIR/apps/cli/dist/index.js"
+SERVER_ENTRY="$ROOT_DIR/apps/server/dist/programmatic.js"
+
+build_pkg() {
+  local filter="$1" label="$2" log
+  log="$(mktemp -t orrery-build)"
+  printf 'Building %s...\n' "$label" >&2
+  if ! (cd "$ROOT_DIR" && pnpm --filter "$filter" build) >"$log" 2>&1; then
+    printf 'Failed to build %s:\n' "$label" >&2
+    cat "$log" >&2
+    rm -f "$log"
+    exit 1
+  fi
+  rm -f "$log"
+}
+
+# The CLI boots the Orrery server in-process — no separate daemon, pid file, or
+# readiness polling. We only need the compiled artifacts to exist. The server's
+# dist is required because the CLI dynamically imports it for the embedded server
+# (skipped when the user attaches to an external server via --server).
+if [ ! -f "$SERVER_ENTRY" ]; then
+  build_pkg "@harness/server" "Orrery server"
+fi
+if [ ! -x "$CLI_ENTRY" ]; then
+  build_pkg "@harness/cli" "Orrery CLI"
+fi
+
+exec node "$CLI_ENTRY" "$@"

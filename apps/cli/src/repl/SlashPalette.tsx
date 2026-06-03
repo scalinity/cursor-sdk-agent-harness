@@ -15,7 +15,7 @@ export const SLASH_COMMANDS = [
   { command: "skill", args: "create <name> <desc> | list", description: "create or list Cursor skills" },
   { command: "history", description: "show recent runs inline" },
   { command: "clear", description: "clear scrollback" },
-  { command: "exit", description: "quit harness" },
+  { command: "exit", description: "quit Orrery" },
   { command: "agent", args: "<id>", description: "advanced: attach a specific backing agent" },
 ] as const satisfies readonly SlashPaletteItem[];
 

@@ -1,6 +1,13 @@
 import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ExecutionMode } from "@harness/shared";
+import {
+  CURSOR_SDK_CREDIT,
+  CURSOR_SDK_DOCS_URL,
+  ORRERY_VERSION,
+  PRODUCT_NAME,
+  PRODUCT_TAGLINE,
+} from "@harness/shared";
 import { useAgentStore } from "../state/agent-store.js";
 import { useUiStore } from "../state/ui-store.js";
 import { useCsrfToken } from "../hooks/useCsrfToken.js";
@@ -149,6 +156,39 @@ export function Settings() {
         <ProvidersSettings />
         <DocsSettings />
         <CommandsSettings />
+
+        <section className="settings-section">
+          <h2 className="settings-section__title">About {PRODUCT_NAME}</h2>
+          <p className="settings-section__desc">{PRODUCT_TAGLINE}</p>
+          <dl className="settings-mode-descriptions">
+            <div className="settings-mode-descriptions__item">
+              <dt>Version</dt>
+              <dd className="mono">{ORRERY_VERSION}</dd>
+            </div>
+            <div className="settings-mode-descriptions__item">
+              <dt>SDK</dt>
+              <dd>
+                {CURSOR_SDK_CREDIT}.{" "}
+                <a className="text-accent-primary hover:underline" href={CURSOR_SDK_DOCS_URL} target="_blank" rel="noreferrer">
+                  Documentation
+                </a>
+              </dd>
+            </div>
+            <div className="settings-mode-descriptions__item">
+              <dt>Design</dt>
+              <dd>UI follows Cursor&apos;s clean design language; observatory features (replay, forensic log, usage analytics) are Orrery-specific.</dd>
+            </div>
+          </dl>
+          <div className="settings-section__links">
+            <button
+              type="button"
+              onClick={() => navigate("/observatory")}
+              className="settings-link"
+            >
+              Observatory →
+            </button>
+          </div>
+        </section>
       </div>
     </div>
   );

@@ -34,6 +34,6 @@ export function describeModel(
   }
   return {
     modelLabel: `${activeAgent.modelId} (unknown)`,
-    modelTitle: `Unknown model id "${activeAgent.modelId}" set on agent ${activeAgent.name}. Update the harness MODEL_LABELS map to render a friendly name.`,
+    modelTitle: `Unknown model id "${activeAgent.modelId}" set on agent ${activeAgent.name}. Update the Orrery MODEL_LABELS map to render a friendly name.`,
   };
 }

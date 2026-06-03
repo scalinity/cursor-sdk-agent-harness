@@ -13,7 +13,7 @@ export function AgentMessage({ text }: AgentMessageProps) {
         <span className="grid size-5 place-items-center rounded-sm bg-accent-bg font-mono text-xs font-bold text-accent-primary">
           A
         </span>
-        <span className="font-semibold text-accent-primary">Harness</span>
+        <span className="font-semibold text-accent-primary">Orrery</span>
       </div>
       <pre className="whitespace-pre-wrap text-base leading-relaxed text-text-secondary">
         {text || "(streaming…)"}

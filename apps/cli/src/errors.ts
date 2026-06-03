@@ -1,3 +1,4 @@
+import { CLI_NAME } from "@harness/shared";
 import { CliHttpError } from "./client/http.js";
 import { restoreTerminal } from "./repl/tui-lifecycle.js";
 
@@ -11,7 +12,7 @@ export class CliUsageError extends Error {
 }
 
 const CURSOR_CONNECTION_RESET_MESSAGE =
-  "Lost connection to Cursor while the agent was running. This is usually a transient network issue — check your internet connection, disable VPN/proxy if enabled, and run `harness` again.";
+  `Lost connection to Cursor while the agent was running. This is usually a transient network issue — check your internet connection, disable VPN/proxy if enabled, and run \`${CLI_NAME}\` again.`;
 
 const SDK_FAILURE_CODES = new Set(["SDK_SEND_FAILED", "SDK_CREATE_FAILED", "SDK_RESUME_FAILED"]);
 
@@ -35,8 +36,8 @@ export function formatCliError(error: unknown, serverUrl?: string, embedded = fa
   if (error instanceof CliHttpError && error.code === "NETWORK_ERROR") {
     return {
       message: embedded
-        ? "The embedded harness server stopped responding. Re-run `harness`, or pass --server <url> to attach to an external server."
-        : `Cannot connect to harness server at ${serverUrl ?? "the configured URL"}. Start it with: pnpm start:server`,
+        ? `The embedded Orrery server stopped responding. Re-run \`${CLI_NAME}\`, or pass --server <url> to attach to an external server.`
+        : `Cannot connect to Orrery server at ${serverUrl ?? "the configured URL"}. Start it with: pnpm start:server`,
       exitCode: 2,
     };
   }

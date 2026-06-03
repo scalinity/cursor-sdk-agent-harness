@@ -64,7 +64,7 @@ export async function startServer(
 
   built.app.log.info(
     { host: env.HOST, port, configuredPort: env.PORT, webOrigin: env.WEB_ORIGIN },
-    "cursor-sdk-agent-harness server listening",
+    "orrery server listening",
   );
 
   return {

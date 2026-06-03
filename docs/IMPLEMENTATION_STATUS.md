@@ -144,7 +144,30 @@ could render.
 
 ---
 
-## CLI/App Session Isolation — 2026-05-27
+## Orrery Rebrand + Observatory Consolidation — 2026-06-03
+
+### Summary
+
+Pragmatic product rebrand from **Cursor SDK Agent Harness** to **Orrery** — a local observatory for AI coding agents built on the Cursor SDK. User-visible strings, desktop bundle (`Orrery.app`), web title, CLI chrome (`orrery` primary command, `harness` alias), and assistant persona label updated. Internal slugs intentionally unchanged: `@harness/*` packages, keychain service `cursor-sdk-agent-harness`, SQLite data dir, `~/.harness-cli`, `app://harness` origin.
+
+### What shipped
+
+- **Brand constants** — `packages/shared/src/brand.ts` (`PRODUCT_NAME`, `PRODUCT_TAGLINE`, `CURSOR_SDK_CREDIT`, `CLI_NAME`, etc.).
+- **Observatory page** — `/observatory` consolidates event-log stats (`GET /api/observability/stats`), pipeline perf (`GET /api/observability/perf`), 7-day usage summary, sub-agent monitor, links to run history/replay/usage.
+- **About Orrery** — Settings section with SDK credit and Observatory link.
+- **CLI** — `bin/orrery` wrapper + root/cli package bin entries; Commander program name `orrery`.
+
+### Checks run
+
+- `apps/server` + `apps/cli` typecheck: pass (via local `tsc`).
+- `apps/cli` tests (`cli-program`, `errors`): pass.
+- Full `pnpm typecheck && pnpm lint && pnpm test` + `build:desktop`: run locally (agent sandbox lacked `pnpm` and had a Node/better-sqlite3 ABI mismatch on integration tests).
+
+### Next
+
+- Continue Phase 18 browser Milestone 2 when resuming phase work.
+
+---
 
 ### Summary
 

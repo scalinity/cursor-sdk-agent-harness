@@ -525,4 +525,23 @@ export type {
   ListModelsResponse,
 } from "./providers.js";
 
-export const HARNESS_VERSION = "0.0.0" as const;
+export {
+  CLI_DISPLAY_NAME,
+  CLI_DISPLAY_NAME_NARROW,
+  CLI_NAME,
+  CLI_NAME_ALIAS,
+  CURSOR_SDK_CREDIT,
+  CURSOR_SDK_DOCS_URL,
+  HARNESS_VERSION,
+  ORRERY_VERSION,
+  PRODUCT_NAME,
+  PRODUCT_TAGLINE,
+} from "./brand.js";
+export {
+  observabilityPerfResponseSchema,
+  observabilityStatsResponseSchema,
+} from "./rest-contracts.js";
+export type {
+  ObservabilityPerfResponse,
+  ObservabilityStatsResponse,
+} from "./rest-contracts.js";

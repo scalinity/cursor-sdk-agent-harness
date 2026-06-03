@@ -11,6 +11,11 @@ import { createSkillCommand, listSkillsCommand, parseSkillPaths } from "./comman
 import { searchWorkspace } from "./commands/search.js";
 import { resolveCliBackend, type CliBackend } from "./backend.js";
 import { CliHttpError } from "./client/http.js";
+import {
+  CLI_NAME,
+  CLI_NAME_ALIAS,
+  PRODUCT_TAGLINE,
+} from "@harness/shared";
 import { DEFAULT_MODEL_ID, readPreferences, readPromptHistory, resolveExplicitServerUrl, resolveServerUrl, writePreferences } from "./config.js";
 import { CliUsageError, formatCliError, installFatalErrorHandlers, registerFatalShutdownHook } from "./errors.js";
 import { App } from "./repl/App.js";
@@ -68,7 +73,7 @@ export function shouldCreateFreshAgentForSavedSession(error: unknown): boolean {
 
 export function assertRunPromptInput(promptParts: readonly string[], stdinIsTty: boolean | undefined): void {
   if (promptParts.length === 0 && stdinIsTty === true) {
-    throw new CliUsageError("Usage: harness run <prompt>. Pipe stdin for non-interactive prompts, or run `harness` for chat.");
+    throw new CliUsageError(`Usage: ${CLI_NAME} run <prompt>. Pipe stdin for non-interactive prompts, or run \`${CLI_NAME}\` for chat.`);
   }
 }
 
@@ -149,11 +154,11 @@ async function withBackend(
 
 async function runChat(options: GlobalOptions & { agent?: string; mode?: CliMode; model?: string; workspace?: string }): Promise<void> {
   if (input.isTTY !== true || output.isTTY !== true) {
-    throw new Error("Interactive chat requires a TTY. Pipe prompts to `harness run` or run `harness` with no args on a terminal.");
+    throw new Error(`Interactive chat requires a TTY. Pipe prompts to \`${CLI_NAME} run\` or run \`${CLI_NAME}\` with no args on a terminal.`);
   }
   const savedSession = options.resume ? await readLastSession() : null;
   if (options.resume && !savedSession) {
-    throw new CliUsageError("No saved chat session found. Start a chat with `harness` first.");
+    throw new CliUsageError(`No saved chat session found. Start a chat with \`${CLI_NAME}\` first.`);
   }
 
   const theme = createTuiTheme();
@@ -269,16 +274,16 @@ async function readStdin(): Promise<string> {
 
 const program = new Command();
 program
-  .name("harness")
-  .description("Terminal-native Cursor SDK Agent Harness client")
+  .name(CLI_NAME)
+  .description(`Terminal-native ${PRODUCT_TAGLINE}`)
   .option("-r, --resume", "Resume the most recently closed chat session")
-  .option("--server <url>", "Attach to an external Harness server instead of the embedded one")
+  .option("--server <url>", `Attach to an external Orrery server instead of the embedded one (${CLI_NAME_ALIAS} alias still works)`)
   .option("--origin <url>", "Origin header for WebSocket upgrades (advanced)");
 
 attachDefaultChatAction(program, async (options) => runCommand(async () => {
   if (input.isTTY !== true) {
     if (options.resume) {
-      throw new CliUsageError("Interactive resume requires a TTY. Run `harness -r` in a terminal.");
+      throw new CliUsageError(`Interactive resume requires a TTY. Run \`${CLI_NAME} -r\` in a terminal.`);
     }
     const prompt = await readStdin();
     await withBackend(options, { stream: true }, async (deps) => {
