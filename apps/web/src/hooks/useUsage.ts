@@ -33,14 +33,12 @@ const DEFAULT_FRESHNESS: PricingFreshness = {
   staleness: "never_verified",
 };
 
-function queryFor(input: UseUsageInput): Record<string, string | undefined> {
-  return {
-    from: input.from.toISOString(),
-    to: input.to.toISOString(),
-    agentId: input.agentId,
-    modelId: input.modelId,
-  };
-}
+type UsageQuery = {
+  from: string;
+  to: string;
+  agentId?: string | undefined;
+  modelId?: string | undefined;
+};
 
 export function useUsage(input: UseUsageInput): UseUsageResult {
   const [summary, setSummary] = useState<UsageSummary | null>(null);
@@ -55,10 +53,9 @@ export function useUsage(input: UseUsageInput): UseUsageResult {
   const { agentId, modelId } = input;
 
   const reload = useCallback(async () => {
-    const input: UseUsageInput = { from: new Date(fromIso), to: new Date(toIso) };
-    if (agentId !== undefined) input.agentId = agentId;
-    if (modelId !== undefined) input.modelId = modelId;
-    const query = queryFor(input);
+    const query: UsageQuery = { from: fromIso, to: toIso };
+    if (agentId !== undefined) query.agentId = agentId;
+    if (modelId !== undefined) query.modelId = modelId;
     setLoading(true);
     setError(null);
     try {

@@ -1,7 +1,6 @@
 import type { CodeEditExtractor } from "./types.js";
-import { getNestedString, getString, hasToolName, isRecord } from "./utils.js";
+import { getNestedString, getString, hasToolName, isRecord, makeSingleEdit } from "./utils.js";
 import { parseUnifiedDiff } from "./unified-diff.js";
-import { makeSingleEdit } from "./utils.js";
 
 const SUMMARY_PATTERN = /\b\d+\s+insertions?\b.*\b\d+\s+deletions?\b|\b\d+\s+deletions?\b.*\b\d+\s+insertions?\b/i;
 const SUMMARY_TOOL_NAMES = new Set(["edit", "edit_file", "write", "write_file", "apply_diff", "str_replace", "replace"]);

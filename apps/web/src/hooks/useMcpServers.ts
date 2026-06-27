@@ -16,10 +16,9 @@ import {
   type McpServerSummary,
   type UpdateMcpServerRequest,
 } from "@harness/shared";
-import { httpRequest, mutatingRequest } from "../lib/http-client.js";
-import { useUiStore } from "../state/ui-store.js";
-import { useCsrfToken } from "./useCsrfToken.js";
+import { httpRequest } from "../lib/http-client.js";
 import { useMountEffect } from "./useMountEffect.js";
+import { useMutatingRequest } from "./useMutatingRequest.js";
 
 export interface UseMcpServersResult {
   servers: McpServerSummary[];
@@ -38,7 +37,7 @@ export function useMcpServers(): UseMcpServersResult {
   const [servers, setServers] = useState<McpServerSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { refresh: refreshCsrfToken } = useCsrfToken();
+  const mutate = useMutatingRequest();
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -57,93 +56,75 @@ export function useMcpServers(): UseMcpServersResult {
 
   const create = useCallback(
     async (input: CreateMcpServerRequest) => {
-      const created = await mutatingRequest("/api/mcp-servers", {
+      const created = await mutate("/api/mcp-servers", {
         method: "POST",
         body: input,
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken,
         responseSchema: mcpServerSummarySchema,
       });
       setServers((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
       return created;
     },
-    [refreshCsrfToken],
+    [mutate],
   );
 
   const replace = useCallback(
     async (id: string, input: CreateMcpServerRequest) => {
-      const updated = await mutatingRequest(
-        `/api/mcp-servers/${encodeURIComponent(id)}`,
-        {
-          method: "PUT",
-          body: input,
-          getCsrfToken: () => useUiStore.getState().csrfToken,
-          refreshCsrfToken,
-          responseSchema: mcpServerSummarySchema,
-        },
-      );
+      const updated = await mutate(`/api/mcp-servers/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: input,
+        responseSchema: mcpServerSummarySchema,
+      });
       setServers((prev) => prev.map((s) => (s.id === id ? updated : s)));
       return updated;
     },
-    [refreshCsrfToken],
+    [mutate],
   );
 
   const patch = useCallback(
     async (id: string, input: UpdateMcpServerRequest) => {
-      const updated = await mutatingRequest(
-        `/api/mcp-servers/${encodeURIComponent(id)}`,
-        {
-          method: "PATCH",
-          body: input,
-          getCsrfToken: () => useUiStore.getState().csrfToken,
-          refreshCsrfToken,
-          responseSchema: mcpServerSummarySchema,
-        },
-      );
+      const updated = await mutate(`/api/mcp-servers/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: input,
+        responseSchema: mcpServerSummarySchema,
+      });
       setServers((prev) => prev.map((s) => (s.id === id ? updated : s)));
       return updated;
     },
-    [refreshCsrfToken],
+    [mutate],
   );
 
   const remove = useCallback(
     async (id: string) => {
-      await mutatingRequest(`/api/mcp-servers/${encodeURIComponent(id)}`, {
+      await mutate(`/api/mcp-servers/${encodeURIComponent(id)}`, {
         method: "DELETE",
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken,
       });
       setServers((prev) => prev.filter((s) => s.id !== id));
     },
-    [refreshCsrfToken],
+    [mutate],
   );
 
   const revalidate = useCallback(
     async (id: string) => {
-      const updated = await mutatingRequest(
+      const updated = await mutate(
         `/api/mcp-servers/${encodeURIComponent(id)}/revalidate`,
         {
           method: "POST",
-          getCsrfToken: () => useUiStore.getState().csrfToken,
-          refreshCsrfToken,
           responseSchema: mcpServerSummarySchema,
         },
       );
       setServers((prev) => prev.map((s) => (s.id === id ? updated : s)));
       return updated;
     },
-    [refreshCsrfToken],
+    [mutate],
   );
 
   const reveal = useCallback(
     async (id: string) =>
-      mutatingRequest(`/api/mcp-servers/${encodeURIComponent(id)}/reveal`, {
+      mutate(`/api/mcp-servers/${encodeURIComponent(id)}/reveal`, {
         method: "POST",
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken,
         responseSchema: mcpServerRevealResponseSchema,
       }),
-    [refreshCsrfToken],
+    [mutate],
   );
 
   // REVIEW-S7: explicit mount-only hydration via useMountEffect wrapper.

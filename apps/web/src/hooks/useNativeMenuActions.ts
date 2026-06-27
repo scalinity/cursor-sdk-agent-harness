@@ -31,14 +31,14 @@ export function useNativeMenuActions(handlers: MenuActionHandlers): void {
     const bridge = desktopBridge;
     if (!bridge) return;
     const channels: MenuActionChannel[] = [...desktopMenuChannels];
-    const unsubs = channels.map((channel) =>
+    const unsubscribes = channels.map((channel) =>
       bridge.onMenuAction(channel, () => {
-        const h = ref.current[channel];
-        if (h) h();
+        const handler = ref.current[channel];
+        if (handler) handler();
       }),
     );
     return () => {
-      for (const u of unsubs) u();
+      for (const unsubscribe of unsubscribes) unsubscribe();
     };
   }, []);
 }

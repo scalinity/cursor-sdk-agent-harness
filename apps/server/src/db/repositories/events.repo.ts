@@ -68,11 +68,31 @@ interface ReplayEventDbRow extends EventDbRow {
 interface ToolCallReplayPayload {
   call_id: string;
   name: string;
-  status: "running" | "completed" | "error";
+  status: ToolCallStatus;
   args?: unknown;
   result?: unknown;
   truncated?: { args?: boolean; result?: boolean };
   timing?: { started_at?: string; completed_at?: string; duration_ms?: number };
+}
+
+// Computed columns appended to a `SELECT *` from events so that oversized
+// tool_call rows can be slimmed for replay without shipping the heavy
+// args/result payloads. Each column is gated on the same large-payload
+// threshold (`@threshold`); the matching binding must be supplied by the
+// caller. Shared verbatim by `getReplayByRunIdAfterSeq` and
+// `getReplayByRunIdRange`.
+const REPLAY_SLIM_COLUMNS = `CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.call_id') END AS replay_call_id,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.name') END AS replay_name,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.status') END AS replay_status,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.truncated') END AS replay_truncated_json,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.timing') END AS replay_timing_json,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold AND json_type(payload_json, '$.args') IS NOT NULL THEN 1 ELSE 0 END AS replay_has_args,
+                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold AND json_type(payload_json, '$.result') IS NOT NULL THEN 1 ELSE 0 END AS replay_has_result`;
+
+type ToolCallStatus = "running" | "completed" | "error";
+
+function isToolCallStatus(value: unknown): value is ToolCallStatus {
+  return value === "running" || value === "completed" || value === "error";
 }
 
 function parseReplayJsonObject<T extends object>(json: string | null): T | undefined {
@@ -128,13 +148,12 @@ function previewPayloadFromRow(row: {
       name?: unknown;
       status?: unknown;
     };
-    const status = parsed.status;
-    const normalizedStatus =
-      status === "running" || status === "completed" || status === "error"
-        ? status
-        : row.status === "running" || row.status === "completed" || row.status === "error"
-          ? row.status
-          : "error";
+    let normalizedStatus: ToolCallStatus = "error";
+    if (isToolCallStatus(parsed.status)) {
+      normalizedStatus = parsed.status;
+    } else if (isToolCallStatus(row.status)) {
+      normalizedStatus = row.status;
+    }
     return {
       call_id: typeof parsed.call_id === "string" ? parsed.call_id : row.call_id ?? "unknown",
       name: typeof parsed.name === "string" ? parsed.name : "unknown",
@@ -155,45 +174,33 @@ function rowToReplayDomain(row: ReplayEventDbRow): EventRow {
     row.payload_bytes > LARGE_PAYLOAD_THRESHOLD_BYTES;
   if (!shouldSlim) return rowToDomain(row);
 
-  const status = row.replay_status;
-  if (
-    typeof row.replay_call_id !== "string" ||
-    typeof row.replay_name !== "string" ||
-    (status !== "running" && status !== "completed" && status !== "error")
-  ) {
-    const fallbackStatus =
-      status === "running" || status === "completed" || status === "error"
-        ? status
-        : "error";
-    const payload: ToolCallReplayPayload = {
-      call_id: typeof row.replay_call_id === "string" ? row.replay_call_id : row.call_id ?? "unknown",
-      name: typeof row.replay_name === "string" ? row.replay_name : "unknown",
-      status: fallbackStatus,
-    };
-    if (row.replay_has_args === 1) payload.args = null;
-    if (row.replay_has_result === 1) payload.result = null;
-    return {
-      ...rowMetadata(row),
-      payload,
-      raw: row.raw_bytes > 0 ? {} : null,
-    };
-  }
+  // A "fully decoded" slim row has a valid call_id, name, and status extracted
+  // by the SQL projection. When any of those is missing we fall back to the
+  // row-level columns and skip the optional truncated/timing fields, which are
+  // only meaningful alongside a complete tool-call shape.
+  const fullyDecoded =
+    typeof row.replay_call_id === "string" &&
+    typeof row.replay_name === "string" &&
+    isToolCallStatus(row.replay_status);
 
   const payload: ToolCallReplayPayload = {
-    call_id: row.replay_call_id,
-    name: row.replay_name,
-    status,
+    call_id: typeof row.replay_call_id === "string" ? row.replay_call_id : row.call_id ?? "unknown",
+    name: typeof row.replay_name === "string" ? row.replay_name : "unknown",
+    status: isToolCallStatus(row.replay_status) ? row.replay_status : "error",
   };
   if (row.replay_has_args === 1) payload.args = null;
   if (row.replay_has_result === 1) payload.result = null;
-  const truncated = parseReplayJsonObject<ToolCallReplayPayload["truncated"] & object>(
-    row.replay_truncated_json,
-  );
-  if (truncated !== undefined) payload.truncated = truncated;
-  const timing = parseReplayJsonObject<ToolCallReplayPayload["timing"] & object>(
-    row.replay_timing_json,
-  );
-  if (timing !== undefined) payload.timing = timing;
+
+  if (fullyDecoded) {
+    const truncated = parseReplayJsonObject<ToolCallReplayPayload["truncated"] & object>(
+      row.replay_truncated_json,
+    );
+    if (truncated !== undefined) payload.truncated = truncated;
+    const timing = parseReplayJsonObject<ToolCallReplayPayload["timing"] & object>(
+      row.replay_timing_json,
+    );
+    if (timing !== undefined) payload.timing = timing;
+  }
 
   return {
     ...rowMetadata(row),
@@ -352,13 +359,7 @@ export class EventsRepo {
     const rows = this.raw
       .prepare(
         `SELECT *,
-                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.call_id') END AS replay_call_id,
-                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.name') END AS replay_name,
-                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.status') END AS replay_status,
-                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.truncated') END AS replay_truncated_json,
-                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.timing') END AS replay_timing_json,
-                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold AND json_type(payload_json, '$.args') IS NOT NULL THEN 1 ELSE 0 END AS replay_has_args,
-                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold AND json_type(payload_json, '$.result') IS NOT NULL THEN 1 ELSE 0 END AS replay_has_result
+                ${REPLAY_SLIM_COLUMNS}
            FROM events
           WHERE run_id = @runId AND seq > @afterSeq
           ORDER BY seq ASC
@@ -487,13 +488,7 @@ export class EventsRepo {
     const rows = this.raw
       .prepare(
         `SELECT *,
-                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.call_id') END AS replay_call_id,
-                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.name') END AS replay_name,
-                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.status') END AS replay_status,
-                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.truncated') END AS replay_truncated_json,
-                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold THEN json_extract(payload_json, '$.timing') END AS replay_timing_json,
-                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold AND json_type(payload_json, '$.args') IS NOT NULL THEN 1 ELSE 0 END AS replay_has_args,
-                CASE WHEN sdk_type = 'tool_call' AND payload_bytes > @threshold AND json_type(payload_json, '$.result') IS NOT NULL THEN 1 ELSE 0 END AS replay_has_result
+                ${REPLAY_SLIM_COLUMNS}
            FROM events
           WHERE run_id = @runId AND seq >= @fromSeq AND seq <= @toSeq
           ORDER BY seq ${direction}

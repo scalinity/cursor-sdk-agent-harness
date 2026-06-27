@@ -8,10 +8,9 @@ import {
   type RunSummary,
   type SdkRunStatus,
 } from "@harness/shared";
-import { httpRequest, mutatingRequest } from "../lib/http-client.js";
+import { httpRequest } from "../lib/http-client.js";
 import { useRunStore } from "../state/run-store.js";
-import { useUiStore } from "../state/ui-store.js";
-import { useCsrfToken } from "./useCsrfToken.js";
+import { useMutatingRequest } from "./useMutatingRequest.js";
 
 export type RunHistoryCostFilter = "any" | "available" | "unavailable" | "none";
 export type RunHistorySort =
@@ -68,7 +67,7 @@ export function useRunHistory({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const upsertRunSummary = useRunStore((s) => s.upsertRunSummary);
-  const { refresh: refreshCsrfToken } = useCsrfToken();
+  const mutate = useMutatingRequest();
 
   const statusParam = joinParam(status);
   const modelParam = joinParam(modelId);
@@ -104,30 +103,27 @@ export function useRunHistory({
     }
   }, [agentParam, from, hasCost, limit, modelParam, page, pageSize, sort, statusParam, to, upsertRunSummary]);
 
+  const sendDelete = useCallback(
+    (runId: string) => mutate(`/api/runs/${runId}`, { method: "DELETE" }),
+    [mutate],
+  );
+
   const deleteRun = useCallback(
     async (runId: string) => {
-      await mutatingRequest(`/api/runs/${runId}`, {
-        method: "DELETE",
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken,
-      });
+      await sendDelete(runId);
       await reload();
     },
-    [refreshCsrfToken, reload],
+    [reload, sendDelete],
   );
 
   const deleteRuns = useCallback(
     async (runIds: string[]) => {
       for (const runId of runIds) {
-        await mutatingRequest(`/api/runs/${runId}`, {
-          method: "DELETE",
-          getCsrfToken: () => useUiStore.getState().csrfToken,
-          refreshCsrfToken,
-        });
+        await sendDelete(runId);
       }
       await reload();
     },
-    [refreshCsrfToken, reload],
+    [reload, sendDelete],
   );
 
   useEffect(() => {

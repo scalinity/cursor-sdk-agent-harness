@@ -176,45 +176,22 @@ export function applyPricingUpdate(
   now: Date = new Date(),
 ): SettingsSnapshot {
   const writes: SettingWrite[] = [];
-  if (patch.composer25Fast?.inputPerMillionUsdMicros !== undefined) {
-    writes.push({
-      key: PRICING_SETTING_KEYS.fastInput,
-      value: patch.composer25Fast.inputPerMillionUsdMicros,
-    });
-  }
-  if (patch.composer25Fast?.outputPerMillionUsdMicros !== undefined) {
-    writes.push({
-      key: PRICING_SETTING_KEYS.fastOutput,
-      value: patch.composer25Fast.outputPerMillionUsdMicros,
-    });
-  }
-  if (patch.composer25Fast?.cachedInputPerMillionUsdMicros !== undefined) {
-    writes.push({
-      key: PRICING_SETTING_KEYS.fastCachedInput,
-      value: patch.composer25Fast.cachedInputPerMillionUsdMicros,
-    });
-  }
-  if (patch.composer25?.inputPerMillionUsdMicros !== undefined) {
-    writes.push({
-      key: PRICING_SETTING_KEYS.standardInput,
-      value: patch.composer25.inputPerMillionUsdMicros,
-    });
-  }
-  if (patch.composer25?.outputPerMillionUsdMicros !== undefined) {
-    writes.push({
-      key: PRICING_SETTING_KEYS.standardOutput,
-      value: patch.composer25.outputPerMillionUsdMicros,
-    });
-  }
-  if (patch.composer25?.cachedInputPerMillionUsdMicros !== undefined) {
-    writes.push({
-      key: PRICING_SETTING_KEYS.standardCachedInput,
-      value: patch.composer25.cachedInputPerMillionUsdMicros,
-    });
-  }
-  if (patch.promoMultiplier !== undefined) {
-    writes.push({ key: PRICING_SETTING_KEYS.promoMultiplier, value: patch.promoMultiplier });
-  }
+  const pushIfSet = (key: string, value: number | undefined): void => {
+    if (value !== undefined) writes.push({ key, value });
+  };
+  pushIfSet(PRICING_SETTING_KEYS.fastInput, patch.composer25Fast?.inputPerMillionUsdMicros);
+  pushIfSet(PRICING_SETTING_KEYS.fastOutput, patch.composer25Fast?.outputPerMillionUsdMicros);
+  pushIfSet(
+    PRICING_SETTING_KEYS.fastCachedInput,
+    patch.composer25Fast?.cachedInputPerMillionUsdMicros,
+  );
+  pushIfSet(PRICING_SETTING_KEYS.standardInput, patch.composer25?.inputPerMillionUsdMicros);
+  pushIfSet(PRICING_SETTING_KEYS.standardOutput, patch.composer25?.outputPerMillionUsdMicros);
+  pushIfSet(
+    PRICING_SETTING_KEYS.standardCachedInput,
+    patch.composer25?.cachedInputPerMillionUsdMicros,
+  );
+  pushIfSet(PRICING_SETTING_KEYS.promoMultiplier, patch.promoMultiplier);
   if (patch.markVerified === true) {
     writes.push({ key: PRICING_SETTING_KEYS.lastVerifiedAt, value: now.toISOString() });
   }

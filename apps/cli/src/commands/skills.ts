@@ -9,6 +9,7 @@ import {
   type CreatedSkill,
   type SkillSummary,
 } from "../lib/skills.js";
+import { isKnownSlashCommand } from "../repl/SlashPalette.js";
 import type { CommandDeps } from "../types.js";
 
 export interface SkillsListOptions {
@@ -59,7 +60,7 @@ export async function listSkillsCommand(
 
 export async function createSkillCommand(
   options: SkillCreateOptions,
-  deps: Pick<CommandDeps, "write">,
+  deps: Pick<CommandDeps, "write" | "writeError">,
 ): Promise<CreatedSkill> {
   const description = options.description?.trim();
   if (!description) {
@@ -84,6 +85,13 @@ export async function createSkillCommand(
     ...(options.workspace !== undefined ? { workspace: options.workspace } : {}),
     ...(options.force !== undefined ? { force: options.force } : {}),
   });
+
+  // Goes to stderr so it never corrupts JSONL stdout.
+  if (isKnownSlashCommand(created.name)) {
+    deps.writeError?.(
+      `Warning: "/${created.name}" is a built-in REPL command and will shadow this skill — it can't be invoked as a slash command.`,
+    );
+  }
 
   if (options.json) {
     writeJsonLine(deps.write, { type: "skill_created", skill: created });

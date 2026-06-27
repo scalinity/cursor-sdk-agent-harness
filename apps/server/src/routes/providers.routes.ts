@@ -11,6 +11,7 @@ import type {
 import type { ProviderKeyStore } from "../keychain/index.js";
 import type { ModelRouter } from "../providers/model-router.js";
 import type { ProviderKind } from "@harness/shared";
+import { send422 } from "./route-errors.js";
 
 /**
  * Phase 23 — BYOK provider CRUD + unified model list. API keys never appear
@@ -76,9 +77,7 @@ export async function registerProvidersRoutes(
 
   app.post("/api/providers", async (request, reply) => {
     const parsed = addProviderRequestSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(422).send({ code: "VALIDATION_ERROR", details: parsed.error.issues });
-    }
+    if (!parsed.success) return send422(reply, parsed.error);
     const { name, provider, apiKey, baseUrl } = parsed.data;
     if (baseUrl) {
       try {
@@ -118,12 +117,10 @@ export async function registerProvidersRoutes(
     return reply.code(201).send(await toSummary(fresh, deps.providerKeyStore));
   });
 
-  app.patch("/api/providers/:id", async (request, reply) => {
-    const { id } = request.params as { id: string };
+  app.patch<{ Params: { id: string } }>("/api/providers/:id", async (request, reply) => {
+    const { id } = request.params;
     const parsed = updateProviderRequestSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(422).send({ code: "VALIDATION_ERROR", details: parsed.error.issues });
-    }
+    if (!parsed.success) return send422(reply, parsed.error);
     if (!deps.modelProvidersRepo.getById(id)) {
       return reply.code(404).send({ code: "NOT_FOUND", message: "Provider not found" });
     }
@@ -131,8 +128,8 @@ export async function registerProvidersRoutes(
     return reply.send(await toSummary(deps.modelProvidersRepo.getById(id)!, deps.providerKeyStore));
   });
 
-  app.delete("/api/providers/:id", async (request, reply) => {
-    const { id } = request.params as { id: string };
+  app.delete<{ Params: { id: string } }>("/api/providers/:id", async (request, reply) => {
+    const { id } = request.params;
     const row = deps.modelProvidersRepo.getById(id);
     if (!row) return reply.code(404).send({ code: "NOT_FOUND", message: "Provider not found" });
     deps.modelProvidersRepo.delete(id);
@@ -140,8 +137,8 @@ export async function registerProvidersRoutes(
     return reply.code(204).send();
   });
 
-  app.post("/api/providers/:id/test", async (request, reply) => {
-    const { id } = request.params as { id: string };
+  app.post<{ Params: { id: string } }>("/api/providers/:id/test", async (request, reply) => {
+    const { id } = request.params;
     const row = deps.modelProvidersRepo.getById(id);
     if (!row) return reply.code(404).send({ code: "NOT_FOUND", message: "Provider not found" });
     const provider = await deps.modelRouter.buildProvider(id);

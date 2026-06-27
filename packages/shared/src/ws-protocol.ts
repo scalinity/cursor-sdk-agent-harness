@@ -284,12 +284,29 @@ export const taskEventFrameSchema = frameBaseSchema.extend({
   }),
 });
 
+/**
+ * One compact entry per tool call a sub-agent made, extracted from the
+ * `task` tool result's `conversationSteps` on completion. The Cursor SDK
+ * does NOT stream a sub-agent's internal tool calls live — they exist only
+ * in the completed `task` result (verified: SDK_VERIFICATION_LEDGER OQ-32),
+ * so these are populated on `subagent.completed`, never on `spawned`. We
+ * store only a summary (name + primary arg + ok), not the full result, to
+ * keep the lifecycle payload small.
+ */
+export const subagentToolCallSummarySchema = z.object({
+  name: z.string().min(1).max(64),
+  detail: z.string().max(256).default(""),
+  ok: z.boolean(),
+});
+export type SubagentToolCallSummary = z.infer<typeof subagentToolCallSummarySchema>;
+
 export const subagentLifecyclePayloadSchema = z.object({
   parent_run_id: runIdSchema,
   child_run_id: runIdSchema,
   subagent_name: z.string().trim().min(1).max(256),
   source_call_id: callIdSchema,
   status: sdkRunStatusSchema.optional(),
+  tool_calls: z.array(subagentToolCallSummarySchema).max(500).optional(),
 });
 
 export const subagentSpawnedFrameSchema = frameBaseSchema.extend({

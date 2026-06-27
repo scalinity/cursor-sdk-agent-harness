@@ -11,10 +11,10 @@ import {
   type CreateWorkspaceAllowlistRequest,
   type WorkspaceAllowlistRow,
 } from "@harness/shared";
-import { httpRequest, mutatingRequest } from "../lib/http-client.js";
+import { httpRequest } from "../lib/http-client.js";
 import { useUiStore } from "../state/ui-store.js";
-import { useCsrfToken } from "./useCsrfToken.js";
 import { useMountEffect } from "./useMountEffect.js";
+import { useMutatingRequest } from "./useMutatingRequest.js";
 
 const listResponseSchema = z.object({
   items: z.array(workspaceAllowlistRowSchema),
@@ -61,7 +61,7 @@ export function useWorkspaceAllowlist(): UseWorkspaceAllowlistResult {
   const entries = useUiStore((s) => s.workspaceAllowlist);
   const loading = useUiStore((s) => s.workspaceAllowlistLoading);
   const error = useUiStore((s) => s.workspaceAllowlistError);
-  const { refresh: refreshCsrfToken } = useCsrfToken();
+  const mutate = useMutatingRequest();
 
   const reload = useCallback(async (): Promise<void> => {
     if (reloadInFlight) return reloadInFlight;
@@ -91,49 +91,43 @@ export function useWorkspaceAllowlist(): UseWorkspaceAllowlistResult {
 
   const add = useCallback(
     async (input: CreateWorkspaceAllowlistRequest) => {
-      const created = await mutatingRequest("/api/workspace-allowlist", {
+      const created = await mutate("/api/workspace-allowlist", {
         method: "POST",
         body: input,
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken,
         responseSchema: workspaceAllowlistRowSchema,
       });
       useUiStore.getState().addWorkspaceAllowlistEntry(created);
       return created;
     },
-    [refreshCsrfToken],
+    [mutate],
   );
 
   const remove = useCallback(
     async (id: string) => {
       // Server requires an explicit ?confirm=true to delete; it also clears the
       // active-workspace pointer first when the removed entry was active.
-      await mutatingRequest(`/api/workspace-allowlist/${id}`, {
+      await mutate(`/api/workspace-allowlist/${id}`, {
         method: "DELETE",
         query: { confirm: true },
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken,
       });
       useUiStore.getState().removeWorkspaceAllowlistEntry(id);
     },
-    [refreshCsrfToken],
+    [mutate],
   );
 
   const validateMany = useCallback(
     async (paths: ReadonlyArray<string>): Promise<Map<string, CwdDecision>> => {
       const result = new Map<string, CwdDecision>();
       if (paths.length === 0) return result;
-      const res = await mutatingRequest("/api/workspace-allowlist/validate", {
+      const res = await mutate("/api/workspace-allowlist/validate", {
         method: "POST",
         body: { paths: [...paths] },
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken,
         responseSchema: validateBatchResponseSchema,
       });
       for (const item of res.results) result.set(item.input, item.decision);
       return result;
     },
-    [refreshCsrfToken],
+    [mutate],
   );
 
   // REVIEW-S7: explicit mount-only hydration via useMountEffect wrapper.

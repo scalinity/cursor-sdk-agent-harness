@@ -72,6 +72,36 @@ description: Demo skill for tests.
     });
   });
 
+  it("warns on stderr when a skill name shadows a built-in command", async () => {
+    const workspace = await makeWorkspace();
+    const out: string[] = [];
+    const err: string[] = [];
+
+    await createSkillCommand({
+      name: "history",
+      description: "Collides with the built-in /history command.",
+      workspace,
+    }, { write: (line) => out.push(line), writeError: (line) => err.push(line) });
+
+    expect(err.join("\n")).toContain("built-in");
+    expect(err.join("\n")).toContain("history");
+    // The success line still goes to stdout.
+    expect(out.join("\n")).toContain("Created skill history");
+  });
+
+  it("does not warn for a non-colliding skill name", async () => {
+    const workspace = await makeWorkspace();
+    const err: string[] = [];
+
+    await createSkillCommand({
+      name: "summarize-diff",
+      description: "No collision here.",
+      workspace,
+    }, { write: vi.fn(), writeError: (line) => err.push(line) });
+
+    expect(err).toHaveLength(0);
+  });
+
   it("requires a description", async () => {
     await expect(createSkillCommand({ name: "missing-description" }, { write: vi.fn() }))
       .rejects.toThrow(/description/i);

@@ -28,6 +28,12 @@ function positiveModulo(value: number, divisor: number): number {
   return ((value % divisor) + divisor) % divisor;
 }
 
+function colorForGradientDistance(distance: number, colors: ThinkingGradientColors): string | undefined {
+  if (distance === 0) return colors.bright;
+  if (distance === 1) return colors.mid;
+  return colors.dim;
+}
+
 export function formatThinkingIndicatorText(frameIndex: number): string {
   const phase = Math.floor(Math.max(0, frameIndex) / THINKING_DOT_FRAME_HOLD);
   return THINKING_DOT_FRAMES[positiveModulo(phase, THINKING_DOT_FRAMES.length)] ?? "Thinking...";
@@ -52,7 +58,7 @@ export function formatThinkingGradientSegments(
 ): ThinkingGradientSegment[] {
   return Array.from(text).map((character, index) => {
     const distance = Math.abs(index - peakIndex);
-    const color = distance === 0 ? colors.bright : distance === 1 ? colors.mid : colors.dim;
+    const color = colorForGradientDistance(distance, colors);
     return color === undefined ? { text: character } : { text: character, color };
   });
 }

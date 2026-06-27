@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { SDKMessage } from "@harness/shared";
+import type { SDKMessage, SubagentToolCallSummary } from "@harness/shared";
 import type { CanonicalRunEventDraft } from "./normalizer.js";
 
 export interface DetectedSubagent {
@@ -109,6 +109,106 @@ export function detectSubagentToolCall(
     name: boundedSubagentName(name),
     status: lifecycleStatus(raw.status),
   };
+}
+
+/**
+ * Hard cap on how many sub-agent tool-call summaries we extract from a
+ * single completed `task` result. A thorough sub-agent can emit dozens of
+ * tool calls; we keep a generous ceiling so the lifecycle payload stays
+ * small and well under the 256 KiB large-payload threshold.
+ */
+const MAX_SUBAGENT_TOOL_CALLS = 500;
+const DETAIL_MAX_LENGTH = 256;
+
+/**
+ * Argument keys, in priority order, that carry the "primary" detail worth
+ * showing for a sub-agent tool call (the file read, the pattern grepped,
+ * the command run). The Cursor SDK names these inconsistently across tool
+ * variants, so we probe several. `args` is `unknown` per the ledger — parse
+ * defensively.
+ */
+const PRIMARY_DETAIL_KEYS = [
+  "command",
+  "path",
+  "filePath",
+  "file_path",
+  "targetFile",
+  "pattern",
+  "globPattern",
+  "query",
+  "url",
+  "targetDirectory",
+] as const;
+
+/** Keys whose value is a filesystem path — shown as a basename, not in full. */
+const PATH_DETAIL_KEYS = new Set<string>(["path", "filePath", "file_path", "targetFile", "targetDirectory"]);
+
+/** Result keys that signal a failed tool call (vs. the `success` variant). */
+const FAILURE_RESULT_KEYS = ["error", "permissionDenied", "failure", "rejected", "timeout"];
+
+function toolNameFromVariant(variantKey: string): string {
+  const name = variantKey.replace(/ToolCall$/u, "");
+  return name.length > 0 ? name : variantKey;
+}
+
+function basenameish(value: string): string {
+  // Show the trailing path segment for path-like details; leave others as-is.
+  if (!value.includes("/")) return value;
+  const trimmed = value.replace(/\/+$/u, "");
+  const idx = trimmed.lastIndexOf("/");
+  const tail = idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
+  return tail.length > 0 ? tail : trimmed;
+}
+
+function primaryDetail(args: unknown): string {
+  if (!isRecord(args)) return "";
+  for (const key of PRIMARY_DETAIL_KEYS) {
+    const raw = args[key];
+    if (typeof raw === "string" && raw.trim().length > 0) {
+      const trimmed = raw.trim();
+      const detail = PATH_DETAIL_KEYS.has(key) ? basenameish(trimmed) : trimmed;
+      return detail.slice(0, DETAIL_MAX_LENGTH);
+    }
+  }
+  return "";
+}
+
+function toolCallSucceeded(result: unknown): boolean {
+  if (!isRecord(result)) return true; // no result shape → assume it ran
+  if ("success" in result) return true;
+  return !FAILURE_RESULT_KEYS.some((key) => key in result);
+}
+
+/**
+ * Extract a compact per-tool-call summary from a completed `task` tool
+ * result. The transcript lives at `result.value.conversationSteps[]`, where
+ * each step is one of `{ thinkingMessage }`, `{ assistantMessage }`, or
+ * `{ toolCall: { <name>ToolCall: { args, result } } }`. We keep only the
+ * `toolCall` steps. Shapes are SDK-defined and treated as `unknown` (ledger
+ * OQ-01/OQ-32) — every access is guarded.
+ */
+export function extractSubagentToolCalls(result: unknown): SubagentToolCallSummary[] {
+  const value = isRecord(result) ? result.value : undefined;
+  const steps = isRecord(value) ? value.conversationSteps : undefined;
+  if (!Array.isArray(steps)) return [];
+
+  const out: SubagentToolCallSummary[] = [];
+  for (const step of steps) {
+    if (out.length >= MAX_SUBAGENT_TOOL_CALLS) break;
+    if (!isRecord(step)) continue;
+    const toolCall = step.toolCall;
+    if (!isRecord(toolCall)) continue;
+    // The toolCall is a protobuf oneof: exactly one `<name>ToolCall` key.
+    const variantKey = Object.keys(toolCall).find((key) => isRecord(toolCall[key]));
+    if (variantKey === undefined) continue;
+    const variant = toolCall[variantKey] as Record<string, unknown>;
+    out.push({
+      name: toolNameFromVariant(variantKey),
+      detail: primaryDetail(variant.args),
+      ok: toolCallSucceeded(variant.result),
+    });
+  }
+  return out;
 }
 
 export function detectSubagentSpawn(

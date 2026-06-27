@@ -71,6 +71,34 @@ function normalizeLargePayloadRefs(
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
+/**
+ * Fold a later event for the same call_id into an existing projection,
+ * mutating it in place. Shared by the full-derive and incremental-upsert
+ * paths so both stay in lockstep.
+ */
+function applyEventToProjection(
+  existing: ToolCallProjection,
+  event: CanonicalRunEvent,
+  payload: z.infer<typeof toolPayloadSchema>,
+): void {
+  existing.status = payload.status;
+  existing.name = payload.name || existing.name;
+  if (payload.args !== undefined) existing.args = payload.args;
+  if (payload.result !== undefined) existing.result = payload.result;
+  if (payload.truncated !== undefined) existing.truncated = payload.truncated;
+  const largePayloadRefs = normalizeLargePayloadRefs(payload.large_payload_refs);
+  if (largePayloadRefs !== undefined) existing.largePayloadRefs = largePayloadRefs;
+  if (payload.status !== "running") {
+    existing.completedAtSeq = event.seq;
+    existing.completedAt = payload.timing?.completed_at ?? event.occurred_at;
+    existing.durationMs =
+      payload.timing?.duration_ms ?? durationFromDates(existing.startedAt, existing.completedAt);
+  }
+  if (payload.status === "error") {
+    existing.errorMessage = typeof payload.result === "string" ? payload.result : "Tool call failed.";
+  }
+}
+
 function projectionFromEvent(event: CanonicalRunEvent, payload: z.infer<typeof toolPayloadSchema>): ToolCallProjection {
   const base: ToolCallProjection = {
     callId: payload.call_id,
@@ -112,23 +140,7 @@ export function deriveToolCallProjections(events: readonly CanonicalRunEvent[]):
       order.push(payload.call_id);
       continue;
     }
-
-    existing.status = payload.status;
-    existing.name = payload.name || existing.name;
-    if (payload.args !== undefined) existing.args = payload.args;
-    if (payload.result !== undefined) existing.result = payload.result;
-    if (payload.truncated !== undefined) existing.truncated = payload.truncated;
-    const largePayloadRefs = normalizeLargePayloadRefs(payload.large_payload_refs);
-    if (largePayloadRefs !== undefined) existing.largePayloadRefs = largePayloadRefs;
-    if (payload.status !== "running") {
-      existing.completedAtSeq = event.seq;
-      existing.completedAt = payload.timing?.completed_at ?? event.occurred_at;
-      existing.durationMs =
-        payload.timing?.duration_ms ?? durationFromDates(existing.startedAt, existing.completedAt);
-    }
-    if (payload.status === "error") {
-      existing.errorMessage = typeof payload.result === "string" ? payload.result : "Tool call failed.";
-    }
+    applyEventToProjection(existing, event, payload);
   }
 
   return order.map((callId) => byCallId.get(callId)).filter((p): p is ToolCallProjection => p !== undefined);
@@ -150,22 +162,7 @@ export function upsertToolCallProjection(
   }
 
   const existing = { ...projections[index]! };
-  existing.status = payload.status;
-  existing.name = payload.name || existing.name;
-  if (payload.args !== undefined) existing.args = payload.args;
-  if (payload.result !== undefined) existing.result = payload.result;
-  if (payload.truncated !== undefined) existing.truncated = payload.truncated;
-  const largePayloadRefs = normalizeLargePayloadRefs(payload.large_payload_refs);
-  if (largePayloadRefs !== undefined) existing.largePayloadRefs = largePayloadRefs;
-  if (payload.status !== "running") {
-    existing.completedAtSeq = event.seq;
-    existing.completedAt = payload.timing?.completed_at ?? event.occurred_at;
-    existing.durationMs =
-      payload.timing?.duration_ms ?? durationFromDates(existing.startedAt, existing.completedAt);
-  }
-  if (payload.status === "error") {
-    existing.errorMessage = typeof payload.result === "string" ? payload.result : "Tool call failed.";
-  }
+  applyEventToProjection(existing, event, payload);
 
   const next = projections.slice();
   next[index] = existing;

@@ -146,6 +146,25 @@ export interface SubagentRunListItem {
   costMicros: number | null;
 }
 
+/**
+ * Per-agent run aggregates used by the Agent Picker and `/api/agents`.
+ *
+ * Precision note: better-sqlite3 returns `SUM(cost_usd_micros)` as a JS
+ * `number`. Cost is stored in integer micro-USD, so the safe-integer cap
+ * (2^53 ≈ 9.007e15) corresponds to roughly $9.007 billion in total cost per
+ * agent. Single-user local workloads are nowhere near this, so we treat the
+ * precision as acceptable for v1; if the harness ever grows to multi-tenant or
+ * aggregate-across-tenants reporting, swap to better-sqlite3's `safeIntegers`
+ * mode and BigInt arithmetic.
+ */
+export interface AgentAggregates {
+  runCount: number;
+  activeRunCount: number;
+  totalCostUsdMicros: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+}
+
 function historyRowToDomain(row: RunHistoryDbRow): RunHistoryRow {
   return {
     ...rowToDomain(row),
@@ -208,6 +227,46 @@ function cacheUnavailableSql(alias = "r"): string {
   return `CASE WHEN ${alias}.usage_source IS NULL OR ${alias}.usage_source = 'unavailable' OR ${alias}.input_tokens IS NULL OR ${alias}.cached_input_tokens IS NULL THEN 1 ELSE 0 END`;
 }
 
+// Shared SUM/COALESCE projection used by every usage aggregate query. Sums the
+// raw token + cost columns plus the cost/token unavailable counts; callers
+// append their own grouping columns and (where needed) the cache-unavailable
+// count.
+const USAGE_TOTALS_COLUMNS = `COALESCE(SUM(r.cost_usd_micros), 0) AS total_cost,
+                COALESCE(SUM(r.input_tokens), 0) AS total_input,
+                COALESCE(SUM(r.output_tokens), 0) AS total_output,
+                COALESCE(SUM(r.cached_input_tokens), 0) AS total_cached,
+                COALESCE(SUM(r.reasoning_tokens), 0) AS total_reasoning,
+                SUM(${costUnavailableSql()}) AS cost_unavailable_count,
+                SUM(${tokenUnavailableSql()}) AS token_unavailable_count`;
+
+interface UsageTotalsDbRow {
+  total_cost: number | null;
+  total_input: number | null;
+  total_output: number | null;
+  total_cached: number | null;
+  total_reasoning: number | null;
+  cost_unavailable_count: number | null;
+  token_unavailable_count: number | null;
+}
+
+interface UsageBreakdownDbRow extends UsageTotalsDbRow {
+  id: string;
+  name: string;
+  runs: number;
+}
+
+function breakdownRowToDomain(row: UsageBreakdownDbRow): UsageBreakdownAggregate {
+  return {
+    id: row.id,
+    name: row.name,
+    runs: rowNumber(row.runs),
+    cost: rowNumber(row.total_cost),
+    tokens: rowToUsageTokens(row),
+    costUnavailableCount: rowNumber(row.cost_unavailable_count),
+    tokenUnavailableCount: rowNumber(row.token_unavailable_count),
+  };
+}
+
 function orderByForRunHistory(sort: NonNullable<RunHistoryListOptions["sort"]>, alias = "r"): string {
   switch (sort) {
     case "started_asc":
@@ -258,6 +317,22 @@ function buildRunHistoryWhere(opts: RunHistoryListOptions): { clause: string; pa
   return { clause: parts.length > 0 ? `WHERE ${parts.join(" AND ")}` : "", params };
 }
 
+function buildRunListFilter(opts: {
+  agentId?: string;
+  includeSubagents?: boolean;
+}): { clause: string; params: unknown[] } {
+  const parts: string[] = [];
+  const params: unknown[] = [];
+  if (opts.agentId !== undefined) {
+    parts.push("agent_id = ?");
+    params.push(opts.agentId);
+  }
+  if (opts.includeSubagents !== true) {
+    parts.push("parent_run_id IS NULL");
+  }
+  return { clause: parts.length > 0 ? `WHERE ${parts.join(" AND ")}` : "", params };
+}
+
 function buildUsageWhere(opts: UsageRangeOptions): { clause: string; params: unknown[] } {
   const parts: string[] = [];
   const params: unknown[] = [];
@@ -266,6 +341,32 @@ function buildUsageWhere(opts: UsageRangeOptions): { clause: string; params: unk
   }
   appendUsageRange(parts, params, opts);
   return { clause: parts.length > 0 ? `WHERE ${parts.join(" AND ")}` : "", params };
+}
+
+// Shared SELECT column block for per-agent run aggregates. Both
+// `aggregatesForAgent` and `aggregatesByAgent` project the same five values.
+const AGENT_AGGREGATE_COLUMNS = `COUNT(*)                                            AS run_count,
+                SUM(CASE WHEN status IN ('CREATING','RUNNING') THEN 1 ELSE 0 END) AS active_run_count,
+                COALESCE(SUM(cost_usd_micros), 0)                   AS total_cost,
+                COALESCE(SUM(input_tokens), 0)                      AS total_input,
+                COALESCE(SUM(output_tokens), 0)                     AS total_output`;
+
+interface AgentAggregateDbRow {
+  run_count: number;
+  active_run_count: number;
+  total_cost: number;
+  total_input: number;
+  total_output: number;
+}
+
+function aggregateRowToDomain(row: AgentAggregateDbRow): AgentAggregates {
+  return {
+    runCount: row.run_count,
+    activeRunCount: row.active_run_count,
+    totalCostUsdMicros: row.total_cost,
+    totalInputTokens: row.total_input,
+    totalOutputTokens: row.total_output,
+  };
 }
 
 function rowToSource(value: unknown): UsageSource {
@@ -363,54 +464,26 @@ export class RunsRepo {
    * underlying set. Cheap (`COUNT(*)` over the runs PK index).
    */
   count(opts: { agentId?: string; includeSubagents?: boolean } = {}): number {
-    const includeSubagents = opts.includeSubagents === true;
-    if (opts.agentId !== undefined) {
-      const row = this.raw
-        .prepare(
-          `SELECT COUNT(*) AS n
-             FROM runs
-            WHERE agent_id = ?
-              ${includeSubagents ? "" : "AND parent_run_id IS NULL"}`,
-        )
-        .get(opts.agentId) as { n: number };
-      return row.n;
-    }
+    const filter = buildRunListFilter(opts);
     const row = this.raw
-      .prepare(
-        `SELECT COUNT(*) AS n
-           FROM runs
-          ${includeSubagents ? "" : "WHERE parent_run_id IS NULL"}`,
-      )
-      .get() as { n: number };
+      .prepare(`SELECT COUNT(*) AS n FROM runs ${filter.clause}`)
+      .get(...filter.params) as { n: number };
     return row.n;
   }
 
   list(opts: { agentId?: string; limit?: number; offset?: number; includeSubagents?: boolean } = {}): RunRow[] {
     const limit = opts.limit ?? 100;
     const offset = opts.offset ?? 0;
-    const includeSubagents = opts.includeSubagents === true;
-    if (opts.agentId !== undefined) {
-      const rows = this.raw
-        .prepare(
-          `SELECT *
-             FROM runs
-            WHERE agent_id = ?
-              ${includeSubagents ? "" : "AND parent_run_id IS NULL"}
-            ORDER BY started_at DESC
-            LIMIT ? OFFSET ?`,
-        )
-        .all(opts.agentId, limit, offset) as RunDbRow[];
-      return rows.map(rowToDomain);
-    }
+    const filter = buildRunListFilter(opts);
     const rows = this.raw
       .prepare(
         `SELECT *
            FROM runs
-          ${includeSubagents ? "" : "WHERE parent_run_id IS NULL"}
+          ${filter.clause}
           ORDER BY started_at DESC
           LIMIT ? OFFSET ?`,
       )
-      .all(limit, offset) as RunDbRow[];
+      .all(...filter.params, limit, offset) as RunDbRow[];
     return rows.map(rowToDomain);
   }
 
@@ -518,28 +591,15 @@ export class RunsRepo {
     const row = this.raw
       .prepare(
         `SELECT COUNT(*) AS total_runs,
-                COALESCE(SUM(cost_usd_micros), 0) AS total_cost,
-                COALESCE(SUM(input_tokens), 0) AS total_input,
-                COALESCE(SUM(output_tokens), 0) AS total_output,
-                COALESCE(SUM(cached_input_tokens), 0) AS total_cached,
-                COALESCE(SUM(reasoning_tokens), 0) AS total_reasoning,
+                ${USAGE_TOTALS_COLUMNS},
                 SUM(CASE WHEN usage_source = 'unavailable' THEN 1 ELSE 0 END) AS unavailable_count,
-                SUM(${costUnavailableSql()}) AS cost_unavailable_count,
-                SUM(${tokenUnavailableSql()}) AS token_unavailable_count,
                 SUM(${cacheUnavailableSql()}) AS cache_unavailable_count
            FROM runs r
           ${where.clause}`,
       )
-      .get(...where.params) as {
+      .get(...where.params) as UsageTotalsDbRow & {
       total_runs: number;
-      total_cost: number | null;
-      total_input: number | null;
-      total_output: number | null;
-      total_cached: number | null;
-      total_reasoning: number | null;
       unavailable_count: number | null;
-      cost_unavailable_count: number | null;
-      token_unavailable_count: number | null;
       cache_unavailable_count: number | null;
     };
     const sourceRows = this.raw
@@ -580,30 +640,16 @@ export class RunsRepo {
     const rows = this.raw
       .prepare(
         `SELECT substr(r.started_at, 1, 10) AS day,
-                COALESCE(SUM(r.cost_usd_micros), 0) AS total_cost,
-                COALESCE(SUM(r.input_tokens), 0) AS total_input,
-                COALESCE(SUM(r.output_tokens), 0) AS total_output,
-                COALESCE(SUM(r.cached_input_tokens), 0) AS total_cached,
-                COALESCE(SUM(r.reasoning_tokens), 0) AS total_reasoning,
-                SUM(${costUnavailableSql()}) AS cost_unavailable_count,
-                SUM(${tokenUnavailableSql()}) AS token_unavailable_count,
+                ${USAGE_TOTALS_COLUMNS},
                 SUM(${cacheUnavailableSql()}) AS cache_unavailable_count
            FROM runs r
           ${where.clause}
           GROUP BY substr(r.started_at, 1, 10)
           ORDER BY day ASC`,
       )
-      .all(...where.params) as Array<{
-      day: string;
-      total_cost: number | null;
-      total_input: number | null;
-      total_output: number | null;
-      total_cached: number | null;
-      total_reasoning: number | null;
-      cost_unavailable_count: number | null;
-      token_unavailable_count: number | null;
-      cache_unavailable_count: number | null;
-    }>;
+      .all(...where.params) as Array<
+      UsageTotalsDbRow & { day: string; cache_unavailable_count: number | null }
+    >;
     return rows.map((row) => ({
       date: row.day,
       cost: rowNumber(row.total_cost),
@@ -621,39 +667,14 @@ export class RunsRepo {
         `SELECT COALESCE(r.model_id, 'unknown') AS id,
                 COALESCE(r.model_id, 'unknown') AS name,
                 COUNT(*) AS runs,
-                COALESCE(SUM(r.cost_usd_micros), 0) AS total_cost,
-                COALESCE(SUM(r.input_tokens), 0) AS total_input,
-                COALESCE(SUM(r.output_tokens), 0) AS total_output,
-                COALESCE(SUM(r.cached_input_tokens), 0) AS total_cached,
-                COALESCE(SUM(r.reasoning_tokens), 0) AS total_reasoning,
-                SUM(${costUnavailableSql()}) AS cost_unavailable_count,
-                SUM(${tokenUnavailableSql()}) AS token_unavailable_count
+                ${USAGE_TOTALS_COLUMNS}
            FROM runs r
           ${where.clause}
           GROUP BY COALESCE(r.model_id, 'unknown')
           ORDER BY total_cost DESC, runs DESC, name ASC`,
       )
-      .all(...where.params) as Array<{
-      id: string;
-      name: string;
-      runs: number;
-      total_cost: number | null;
-      total_input: number | null;
-      total_output: number | null;
-      total_cached: number | null;
-      total_reasoning: number | null;
-      cost_unavailable_count: number | null;
-      token_unavailable_count: number | null;
-    }>;
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      runs: rowNumber(row.runs),
-      cost: rowNumber(row.total_cost),
-      tokens: rowToUsageTokens(row),
-      costUnavailableCount: rowNumber(row.cost_unavailable_count),
-      tokenUnavailableCount: rowNumber(row.token_unavailable_count),
-    }));
+      .all(...where.params) as UsageBreakdownDbRow[];
+    return rows.map(breakdownRowToDomain);
   }
 
   usageByAgent(opts: UsageRangeOptions = {}): UsageBreakdownAggregate[] {
@@ -663,40 +684,15 @@ export class RunsRepo {
         `SELECT r.agent_id AS id,
                 COALESCE(a.name, r.agent_id) AS name,
                 COUNT(*) AS runs,
-                COALESCE(SUM(r.cost_usd_micros), 0) AS total_cost,
-                COALESCE(SUM(r.input_tokens), 0) AS total_input,
-                COALESCE(SUM(r.output_tokens), 0) AS total_output,
-                COALESCE(SUM(r.cached_input_tokens), 0) AS total_cached,
-                COALESCE(SUM(r.reasoning_tokens), 0) AS total_reasoning,
-                SUM(${costUnavailableSql()}) AS cost_unavailable_count,
-                SUM(${tokenUnavailableSql()}) AS token_unavailable_count
+                ${USAGE_TOTALS_COLUMNS}
            FROM runs r
            LEFT JOIN agents a ON a.id = r.agent_id
           ${where.clause}
           GROUP BY r.agent_id, COALESCE(a.name, r.agent_id)
           ORDER BY total_cost DESC, runs DESC, name ASC`,
       )
-      .all(...where.params) as Array<{
-      id: string;
-      name: string;
-      runs: number;
-      total_cost: number | null;
-      total_input: number | null;
-      total_output: number | null;
-      total_cached: number | null;
-      total_reasoning: number | null;
-      cost_unavailable_count: number | null;
-      token_unavailable_count: number | null;
-    }>;
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      runs: rowNumber(row.runs),
-      cost: rowNumber(row.total_cost),
-      tokens: rowToUsageTokens(row),
-      costUnavailableCount: rowNumber(row.cost_unavailable_count),
-      tokenUnavailableCount: rowNumber(row.token_unavailable_count),
-    }));
+      .all(...where.params) as UsageBreakdownDbRow[];
+    return rows.map(breakdownRowToDomain);
   }
 
   updateStatus(id: string, status: SdkRunStatus, error?: unknown): void {
@@ -1110,111 +1106,38 @@ export class RunsRepo {
   }
 
   /**
-   * Per-agent aggregates used by the Agent Picker and `/api/agents`. Returns
-   * one row per agent_id; agents with zero runs are NOT included — the caller
-   * (AgentRuntime.list) joins this against the agents table and substitutes
-   * zeros for missing keys so a freshly-created agent renders correctly.
-   *
-   * Precision note: better-sqlite3 returns `SUM(cost_usd_micros)` as a JS
-   * `number`. Cost is stored in integer micro-USD, so the safe-integer
-   * cap (2^53 ≈ 9.007e15) corresponds to roughly $9.007 billion in total
-   * cost per agent. Single-user local workloads are nowhere near this,
-   * so we treat the precision as acceptable for v1; if the harness ever
-   * grows to multi-tenant or aggregate-across-tenants reporting, swap to
-   * `better-sqlite3`'s `safeIntegers` mode and BigInt arithmetic.
-   */
-  /**
    * Per-agent aggregates for a single agent. Same shape as one row of
    * `aggregatesByAgent()` but filters in SQL so we don't scan all runs
    * for a `getById` request. Returns null when the agent has zero runs
    * (caller substitutes zeros for missing keys per the same convention
    * as `aggregatesByAgent`).
    */
-  aggregatesForAgent(agentId: string): {
-    runCount: number;
-    activeRunCount: number;
-    totalCostUsdMicros: number;
-    totalInputTokens: number;
-    totalOutputTokens: number;
-  } | null {
+  aggregatesForAgent(agentId: string): AgentAggregates | null {
     const row = this.raw
       .prepare(
-        `SELECT COUNT(*)                                            AS run_count,
-                SUM(CASE WHEN status IN ('CREATING','RUNNING') THEN 1 ELSE 0 END) AS active_run_count,
-                COALESCE(SUM(cost_usd_micros), 0)                   AS total_cost,
-                COALESCE(SUM(input_tokens), 0)                      AS total_input,
-                COALESCE(SUM(output_tokens), 0)                     AS total_output
+        `SELECT ${AGENT_AGGREGATE_COLUMNS}
            FROM runs
           WHERE agent_id = ?
             AND parent_run_id IS NULL`,
       )
-      .get(agentId) as
-      | {
-          run_count: number;
-          active_run_count: number;
-          total_cost: number;
-          total_input: number;
-          total_output: number;
-        }
-      | undefined;
+      .get(agentId) as AgentAggregateDbRow | undefined;
     if (!row || row.run_count === 0) return null;
-    return {
-      runCount: row.run_count,
-      activeRunCount: row.active_run_count,
-      totalCostUsdMicros: row.total_cost,
-      totalInputTokens: row.total_input,
-      totalOutputTokens: row.total_output,
-    };
+    return aggregateRowToDomain(row);
   }
 
-  aggregatesByAgent(): Map<
-    string,
-    {
-      runCount: number;
-      activeRunCount: number;
-      totalCostUsdMicros: number;
-      totalInputTokens: number;
-      totalOutputTokens: number;
-    }
-  > {
+  aggregatesByAgent(): Map<string, AgentAggregates> {
     const rows = this.raw
       .prepare(
         `SELECT agent_id,
-                COUNT(*)                                            AS run_count,
-                SUM(CASE WHEN status IN ('CREATING','RUNNING') THEN 1 ELSE 0 END) AS active_run_count,
-                COALESCE(SUM(cost_usd_micros), 0)                   AS total_cost,
-                COALESCE(SUM(input_tokens), 0)                      AS total_input,
-                COALESCE(SUM(output_tokens), 0)                     AS total_output
+                ${AGENT_AGGREGATE_COLUMNS}
            FROM runs
           WHERE parent_run_id IS NULL
           GROUP BY agent_id`,
       )
-      .all() as Array<{
-      agent_id: string;
-      run_count: number;
-      active_run_count: number;
-      total_cost: number;
-      total_input: number;
-      total_output: number;
-    }>;
-    const out = new Map<
-      string,
-      {
-        runCount: number;
-        activeRunCount: number;
-        totalCostUsdMicros: number;
-        totalInputTokens: number;
-        totalOutputTokens: number;
-      }
-    >();
-    for (const r of rows) {
-      out.set(r.agent_id, {
-        runCount: r.run_count,
-        activeRunCount: r.active_run_count,
-        totalCostUsdMicros: r.total_cost,
-        totalInputTokens: r.total_input,
-        totalOutputTokens: r.total_output,
-      });
+      .all() as Array<AgentAggregateDbRow & { agent_id: string }>;
+    const out = new Map<string, AgentAggregates>();
+    for (const row of rows) {
+      out.set(row.agent_id, aggregateRowToDomain(row));
     }
     return out;
   }

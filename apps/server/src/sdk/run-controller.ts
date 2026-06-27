@@ -1,11 +1,13 @@
 import type { FastifyBaseLogger } from "fastify";
 import { randomUUID } from "node:crypto";
-import type {
-  AgentMode,
-  RunInterruptedReason,
-  SdkImage,
-  SdkRunStatus,
-  SettingsSnapshot,
+import {
+  SDK_RUN_TERMINAL_STATUSES,
+  sdkRunStatusSchema,
+  type AgentMode,
+  type RunInterruptedReason,
+  type SdkImage,
+  type SdkRunStatus,
+  type SettingsSnapshot,
 } from "@harness/shared";
 import type { RunsRepo } from "../db/repositories/runs.repo.js";
 import type { Run, SDKAgent, SdkAdapter, SendOptions } from "./sdk-adapter.js";
@@ -221,8 +223,7 @@ export class RunController {
           ...(unsupportedReason !== undefined ? { unsupported_reason: unsupportedReason } : {}),
         },
       });
-      const result: CancelResult = { outcome: "unsupported", unsupportedReason };
-      return result;
+      return { outcome: "unsupported", unsupportedReason };
     }
     try {
       await this.runHandle.cancel();
@@ -324,15 +325,8 @@ export class RunController {
     const next = rec.status;
     if (typeof next !== "string") return;
     const upper = next.toUpperCase();
-    if (
-      upper === "CREATING" ||
-      upper === "RUNNING" ||
-      upper === "FINISHED" ||
-      upper === "ERROR" ||
-      upper === "CANCELLED" ||
-      upper === "EXPIRED"
-    ) {
-      this.setStatus(upper as SdkRunStatus);
+    if (isKnownSdkRunStatus(upper)) {
+      this.setStatus(upper);
       return;
     }
     // Unknown status literal — log at debug so Phase 14 observability can
@@ -433,13 +427,12 @@ export class RunController {
   }
 }
 
+function isKnownSdkRunStatus(value: string): value is SdkRunStatus {
+  return sdkRunStatusSchema.safeParse(value).success;
+}
+
 function isTerminalStatus(status: SdkRunStatus): boolean {
-  return (
-    status === "FINISHED" ||
-    status === "ERROR" ||
-    status === "CANCELLED" ||
-    status === "EXPIRED"
-  );
+  return SDK_RUN_TERMINAL_STATUSES.has(status);
 }
 
 export function newRunId(): string {

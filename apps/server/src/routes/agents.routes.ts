@@ -6,30 +6,18 @@ import {
   listAgentsResponseSchema,
   updateAgentRequestSchema,
 } from "@harness/shared";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance } from "fastify";
 import type { AgentsRepo } from "../db/repositories/agents.repo.js";
 import {
   AgentRuntimeError,
   WorkspaceRejectedError,
   type AgentRuntime,
 } from "../sdk/index.js";
-import { send422, sendRuntimeError } from "./route-errors.js";
+import { send422, sendRuntimeError, sendWorkspaceRejection } from "./route-errors.js";
 
 export interface AgentsRoutesDeps {
   runtime: AgentRuntime;
   agentsRepo: AgentsRepo;
-}
-
-function sendWorkspaceRejection(reply: FastifyReply, err: WorkspaceRejectedError) {
-  return reply.code(403).send({
-    code: "WORKSPACE_REJECTED",
-    message: err.message,
-    details: err.details.map((d) => ({
-      input: d.input,
-      reason: d.decision.reason,
-      normalizedPath: d.decision.normalizedPath,
-    })),
-  });
 }
 
 export async function registerAgentsRoutes(

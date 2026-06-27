@@ -156,14 +156,27 @@ function normalizeStreamItem(value: unknown): StreamItem | null {
       return typeof record.status === "string" && typeof record.text === "string"
         ? { type: "task", status: record.status, text: record.text }
         : null;
-    case "subagent":
-      return typeof record.childRunId === "string"
-        && typeof record.sourceCallId === "string"
-        && typeof record.name === "string"
-        && (record.phase === "spawned" || record.phase === "completed")
-        && typeof record.status === "string"
-        ? { type: "subagent", childRunId: record.childRunId, sourceCallId: record.sourceCallId, name: record.name, phase: record.phase, status: record.status }
-        : null;
+    case "subagent": {
+      if (
+        typeof record.childRunId !== "string"
+        || typeof record.sourceCallId !== "string"
+        || typeof record.name !== "string"
+        || (record.phase !== "spawned" && record.phase !== "completed")
+        || typeof record.status !== "string"
+      ) {
+        return null;
+      }
+      const toolCalls = normalizeSubagentToolCalls(record.toolCalls);
+      return {
+        type: "subagent",
+        childRunId: record.childRunId,
+        sourceCallId: record.sourceCallId,
+        name: record.name,
+        phase: record.phase,
+        status: record.status,
+        ...(toolCalls.length > 0 ? { toolCalls } : {}),
+      };
+    }
     case "system":
       return typeof record.text === "string" ? { type: "system", text: record.text } : null;
     case "error":
@@ -171,6 +184,22 @@ function normalizeStreamItem(value: unknown): StreamItem | null {
     default:
       return null;
   }
+}
+
+function normalizeSubagentToolCalls(value: unknown): NonNullable<Extract<StreamItem, { type: "subagent" }>["toolCalls"]> {
+  if (!Array.isArray(value)) return [];
+  const out: NonNullable<Extract<StreamItem, { type: "subagent" }>["toolCalls"]> = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const record = entry as Record<string, unknown>;
+    if (typeof record.name !== "string" || typeof record.ok !== "boolean") continue;
+    out.push({
+      name: record.name,
+      detail: typeof record.detail === "string" ? record.detail : "",
+      ok: record.ok,
+    });
+  }
+  return out;
 }
 
 function normalizeToolItem(record: Record<string, unknown>): StreamItem | null {
@@ -339,6 +368,9 @@ function sanitizeStreamItem(item: StreamItem): StreamItem {
         sourceCallId: sanitizeText(item.sourceCallId),
         name: sanitizeText(item.name),
         status: sanitizeText(item.status),
+        ...(item.toolCalls
+          ? { toolCalls: item.toolCalls.map((tc) => ({ ...tc, name: sanitizeText(tc.name), detail: sanitizeText(tc.detail) })) }
+          : {}),
       };
   }
 }

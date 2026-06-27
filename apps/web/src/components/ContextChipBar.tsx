@@ -6,6 +6,10 @@ export interface ContextChipBarProps {
   onRemove: (id: string) => void;
 }
 
+function formatTokenCount(tokens: number): string {
+  return tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
+}
+
 function ChipIcon({ kind }: { kind: string }) {
   switch (kind) {
     case "file":
@@ -44,9 +48,7 @@ export function ContextChipBar({ chips, onRemove }: ContextChipBarProps) {
             <span className="context-chip__label">{chip.mention.displayLabel}</span>
             {chip.tokenEstimate ? (
               <span className="context-chip__tokens mono">
-                ~{chip.tokenEstimate >= 1000
-                  ? `${(chip.tokenEstimate / 1000).toFixed(1)}k`
-                  : chip.tokenEstimate}
+                ~{formatTokenCount(chip.tokenEstimate)}
               </span>
             ) : null}
             <button
@@ -62,9 +64,7 @@ export function ContextChipBar({ chips, onRemove }: ContextChipBarProps) {
       </div>
       {totalTokens > 0 ? (
         <span className="context-chip-bar__total mono">
-          ~{totalTokens >= 1000
-            ? `${(totalTokens / 1000).toFixed(1)}k`
-            : totalTokens} tokens
+          ~{formatTokenCount(totalTokens)} tokens
         </span>
       ) : null}
     </div>

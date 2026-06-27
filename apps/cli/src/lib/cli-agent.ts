@@ -2,11 +2,11 @@ import type { AgentSummary } from "@harness/shared";
 import type { CliAgentSummary, CliMode } from "../types.js";
 
 /**
- * Normalize a backend agent `executionMode` string to the CLI's two-valued
- * mode. The backend may carry modes the CLI doesn't model; everything that
- * isn't "ask" is treated as "agent".
+ * Normalize a backend `executionMode` (or a raw CLI flag value) to the CLI's
+ * two-valued mode. The backend may carry modes the CLI doesn't model, and flag
+ * parsing yields `unknown`; everything that isn't "ask" is treated as "agent".
  */
-export function normalizeCliMode(value: string): CliMode {
+export function normalizeCliMode(value: unknown): CliMode {
   return value === "ask" ? "ask" : "agent";
 }
 

@@ -67,6 +67,8 @@ export class AnthropicProvider implements ModelProvider {
   }
 
   async listModels(options?: ListModelsOptions): Promise<ProviderModelInfo[]> {
+    const fallback = (): ProviderModelInfo[] =>
+      FALLBACK_MODELS.anthropic.map((m) => ({ id: m.name, name: m.label }));
     const fetchReal = async (): Promise<ProviderModelInfo[]> => {
       const page = await this.client.models.list();
       const data = (page as { data?: Array<{ id: string; display_name?: string }> }).data ?? [];
@@ -76,7 +78,7 @@ export class AnthropicProvider implements ModelProvider {
     // fails the connection test instead of silently degrading to the static list.
     if (options?.validate) {
       const out = await fetchReal();
-      return out.length > 0 ? out : FALLBACK_MODELS.anthropic.map((m) => ({ id: m.name, name: m.label }));
+      return out.length > 0 ? out : fallback();
     }
     try {
       const out = await fetchReal();
@@ -84,6 +86,6 @@ export class AnthropicProvider implements ModelProvider {
     } catch {
       // Populating mode — degrade to the static list.
     }
-    return FALLBACK_MODELS.anthropic.map((m) => ({ id: m.name, name: m.label }));
+    return fallback();
   }
 }

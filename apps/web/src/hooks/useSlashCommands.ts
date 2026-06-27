@@ -4,6 +4,10 @@ import { httpRequest } from "../lib/http-client.js";
 import { useMutatingRequest } from "./useMutatingRequest.js";
 import { useMountEffect } from "./useMountEffect.js";
 
+function byName(a: SlashCommand, b: SlashCommand): number {
+  return a.name.localeCompare(b.name);
+}
+
 export interface UseSlashCommandsResult {
   commands: SlashCommand[];
   loading: boolean;
@@ -57,7 +61,7 @@ export function useSlashCommands(): UseSlashCommandsResult {
         body: { name, description, template },
       });
       const cmd = data as unknown as SlashCommand;
-      setCommands((prev) => [...prev, cmd].sort((a, b) => a.name.localeCompare(b.name)));
+      setCommands((prev) => [...prev, cmd].sort(byName));
       return cmd;
     },
     [mutate],
@@ -74,7 +78,7 @@ export function useSlashCommands(): UseSlashCommandsResult {
       });
       const updated = data as unknown as SlashCommand;
       setCommands((prev) =>
-        prev.map((c) => (c.id === id ? updated : c)).sort((a, b) => a.name.localeCompare(b.name)),
+        prev.map((c) => (c.id === id ? updated : c)).sort(byName),
       );
     },
     [mutate],

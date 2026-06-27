@@ -253,9 +253,8 @@ export function createPersistAndBroadcast(
     ingestUnknownSDKMessage(args): void {
       const receivedAt = args.receivedAt ?? new Date().toISOString();
       const occurredAt = args.occurredAt ?? receivedAt;
-      const sdkType = typeof (args.raw as { type?: unknown })?.type === "string"
-        ? ((args.raw as { type: string }).type)
-        : "<unknown>";
+      const rawType = (args.raw as { type?: unknown } | null)?.type;
+      const sdkType = typeof rawType === "string" ? rawType : "<unknown>";
       try {
         deps.events.appendCanonicalEvent({
           runId: args.runId,

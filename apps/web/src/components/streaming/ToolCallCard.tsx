@@ -38,14 +38,14 @@ function iconForTool(name: string): ToolIcon {
   return "default";
 }
 
-function iconGlyph(icon: ToolIcon): string {
-  if (icon === "read") return "doc";
-  if (icon === "write") return "pen";
-  if (icon === "run") return ">_";
-  if (icon === "grep") return "src";
-  if (icon === "web") return "web";
-  return "box";
-}
+const ICON_GLYPH: Record<ToolIcon, string> = {
+  read: "doc",
+  write: "pen",
+  run: ">_",
+  grep: "src",
+  web: "web",
+  default: "box",
+};
 
 function formatMs(ms: number | undefined): string {
   if (ms === undefined) return "writing...";
@@ -103,13 +103,13 @@ export function ToolCallCard({
   const preview = resultPreview(call.result);
   const summary = byteSummary(call.result);
   const contractConfirmed = hasContractConfirmation(call.result);
-  const statusLabel = call.status === "running" ? formatMs(call.durationMs) : formatMs(call.durationMs);
+  const statusLabel = formatMs(call.durationMs);
 
   return (
     <div className={cn("tool", collapsed ? "tool--collapsed" : null, `tool--${call.status}`)}>
       <div className="tool-head">
         <span className={cn("tool-icon", `tool-icon--${icon}`)} aria-hidden="true">
-          {iconGlyph(icon)}
+          {ICON_GLYPH[icon]}
         </span>
         <span className="name">{call.name}</span>
         <span className="arg">{summarizeArgs(call.args)}</span>

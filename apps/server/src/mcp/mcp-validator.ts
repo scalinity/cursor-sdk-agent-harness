@@ -73,7 +73,6 @@ export interface McpValidatorOptions {
  * duplicating the literal.
  */
 export const DEFAULT_PROBE_TIMEOUT_MS = 3000;
-const DEFAULT_TIMEOUT_MS = DEFAULT_PROBE_TIMEOUT_MS;
 
 /**
  * Probe an MCP server configuration once.
@@ -112,7 +111,7 @@ export async function validateMcpServerConfig(
   const transport: McpTransport =
     "command" in config ? "stdio" : (config.type ?? "http") === "sse" ? "sse" : "http";
 
-  const timeoutMs = Math.max(50, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const timeoutMs = Math.max(50, options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS);
 
   if ("command" in config) {
     return probeStdio(config, transport, timeoutMs, options.spawnImpl ?? spawn);

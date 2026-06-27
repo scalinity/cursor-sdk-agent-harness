@@ -201,13 +201,14 @@ export {
   subagentCompletedFrameSchema,
   subagentLifecyclePayloadSchema,
   subagentSpawnedFrameSchema,
+  subagentToolCallSummarySchema,
   submitUserInputFrameSchema,
   subscribeRunFrameSchema,
   unsubscribeRunFrameSchema,
   updateSettingsFrameSchema,
   wsErrorCodeSchema,
 } from "./ws-protocol.js";
-export type { ClientFrame, ServerFrame, WsErrorCode } from "./ws-protocol.js";
+export type { ClientFrame, ServerFrame, WsErrorCode, SubagentToolCallSummary } from "./ws-protocol.js";
 
 // REST contracts
 export {

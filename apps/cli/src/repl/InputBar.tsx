@@ -10,6 +10,7 @@ import { mentionItemToChip } from "./MentionPopup.js";
 import { isKnownSlashCommand, type KnownSlashCommandName, type SlashPaletteItem } from "./SlashPalette.js";
 import { glyph } from "./glyphs.js";
 import { shouldReserveArrowKeysForStreamScroll, shouldUseCtrlForPromptHistory } from "./stream-scroll.js";
+import { parseMouseWheel } from "./mouse.js";
 
 export interface MentionTrigger {
   start: number;
@@ -141,6 +142,9 @@ export function InputBar({
   };
 
   useInput((input, key) => {
+    // Wheel reports reach this consumer too; without this guard the raw escape
+    // sequence would fall through to the text-insert branch and pollute the draft.
+    if (parseMouseWheel(input)) return;
     const isReturn = key.return || input === "\r" || input === "\n";
     if (mentionItems.length > 0) {
       if (key.upArrow) {

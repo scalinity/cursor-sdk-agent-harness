@@ -7,6 +7,7 @@ export const glyph = {
   thinking: "◐",
   readyDot: "●",
   agent: "◆",
+  skill: "✦",
 } as const;
 
 export type GlyphName = keyof typeof glyph;

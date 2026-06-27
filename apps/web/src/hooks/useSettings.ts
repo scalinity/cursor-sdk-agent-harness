@@ -149,15 +149,18 @@ export function useSettingsActions(): UseSettingsActions {
   return { reload, updateSettings, updatePricing, setApiKey, deleteApiKey };
 }
 
-export function useSettingsBootstrap(): void {
+/** Trigger a one-time bootstrap reload unless a snapshot is already loaded. */
+function useBootstrapReload(reload: () => Promise<void>): void {
   const snapshot = useSettingsStore((s) => s.snapshot);
-  const actions = useSettingsActions();
-  const { reload } = actions;
-
   useEffect(() => {
     if (snapshot) return;
     void reload();
   }, [snapshot, reload]);
+}
+
+export function useSettingsBootstrap(): void {
+  const { reload } = useSettingsActions();
+  useBootstrapReload(reload);
 }
 
 export function useSettings(): UseSettingsResult {
@@ -166,12 +169,7 @@ export function useSettings(): UseSettingsResult {
   const loading = useSettingsStore((s) => s.loading);
   const lastError = useSettingsStore((s) => s.lastError);
   const actions = useSettingsActions();
-  const { reload } = actions;
-
-  useEffect(() => {
-    if (snapshot) return;
-    void reload();
-  }, [snapshot, reload]);
+  useBootstrapReload(actions.reload);
 
   return {
     snapshot,

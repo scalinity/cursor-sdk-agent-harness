@@ -13,6 +13,7 @@ import {
   type SemanticSearchProvider,
 } from "../services/context.service.js";
 import { getActiveWorkspaceRoot } from "../config/active-workspace.js";
+import { send422 } from "./route-errors.js";
 
 export interface ContextRoutesDeps {
   settingsRepo: SettingsRepo;
@@ -28,9 +29,7 @@ export async function registerContextRoutes(
 ): Promise<void> {
   app.get("/api/context/search", async (request, reply) => {
     const parsed = contextSearchQuerySchema.safeParse(request.query);
-    if (!parsed.success) {
-      return reply.code(422).send({ code: "VALIDATION_ERROR", details: parsed.error.issues });
-    }
+    if (!parsed.success) return send422(reply, parsed.error);
     const root = getActiveWorkspaceRoot(deps);
     if (!root) {
       return reply.code(200).send({ files: [], symbols: [] });
@@ -42,9 +41,7 @@ export async function registerContextRoutes(
 
   app.post("/api/context/resolve", async (request, reply) => {
     const parsed = contextResolveRequestSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(422).send({ code: "VALIDATION_ERROR", details: parsed.error.issues });
-    }
+    if (!parsed.success) return send422(reply, parsed.error);
     const root = getActiveWorkspaceRoot(deps);
     if (!root) {
       return reply.code(400).send({ code: "NO_WORKSPACE", message: "No active workspace" });

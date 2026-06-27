@@ -115,6 +115,14 @@ function newCwdRow(): CwdRow {
   };
 }
 
+/** Immutably add/remove `id` from a Set, returning a fresh Set. */
+function toggleInSet(set: Set<string>, id: string): Set<string> {
+  const next = new Set(set);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+}
+
 export function NewAgentDialog({ open, onClose, onCreated }: NewAgentDialogProps) {
   const { createAgent } = useAgents();
   const mcp = useMcpServers();
@@ -575,12 +583,7 @@ function McpTab({
   servers,
 }: TabProps & { servers: McpServerSummary[] }) {
   const toggle = (id: string) => {
-    setState((prev) => {
-      const next = new Set(prev.selectedMcpIds);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return { ...prev, selectedMcpIds: next };
-    });
+    setState((prev) => ({ ...prev, selectedMcpIds: toggleInSet(prev.selectedMcpIds, id) }));
   };
   return (
     <div className="flex flex-col gap-2">
@@ -616,12 +619,10 @@ function SubagentsTab({
   subagents,
 }: TabProps & { subagents: SubagentSummary[] }) {
   const toggle = (id: string) => {
-    setState((prev) => {
-      const next = new Set(prev.selectedSubagentIds);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return { ...prev, selectedSubagentIds: next };
-    });
+    setState((prev) => ({
+      ...prev,
+      selectedSubagentIds: toggleInSet(prev.selectedSubagentIds, id),
+    }));
   };
   return (
     <div className="flex flex-col gap-2">

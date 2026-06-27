@@ -11,7 +11,7 @@ import { createSkillCommand, listSkillsCommand, parseSkillPaths } from "./comman
 import { searchWorkspace } from "./commands/search.js";
 import { resolveCliBackend, type CliBackend } from "./backend.js";
 import { CliHttpError } from "./client/http.js";
-import { toCliAgentSummary } from "./lib/cli-agent.js";
+import { normalizeCliMode, toCliAgentSummary } from "./lib/cli-agent.js";
 import {
   CLI_NAME,
   CLI_NAME_ALIAS,
@@ -60,7 +60,7 @@ export function normalizeChatCommandOptions(globalOptions: GlobalOptions, option
   return {
     ...globalOptions,
     ...(options.agent !== undefined ? { agent: options.agent } : {}),
-    ...(options.mode !== undefined ? { mode: normalizeMode(options.mode) } : {}),
+    ...(options.mode !== undefined ? { mode: normalizeCliMode(options.mode) } : {}),
     ...(options.model !== undefined ? { model: options.model } : {}),
     ...(options.workspace !== undefined ? { workspace: options.workspace } : {}),
     resume: Boolean(globalOptions.resume),
@@ -314,7 +314,7 @@ program
       process.exitCode = await runPrompt({
         prompt,
         agent: options.agent,
-        mode: normalizeMode(options.mode),
+        mode: normalizeCliMode(options.mode),
         model: options.model,
         workspace: options.workspace,
         json: Boolean(options.json),
@@ -330,7 +330,7 @@ agents.command("list").option("--json", "Output JSONL").action(async (options) =
   await runCommand(async () => withBackend(program.opts<GlobalOptions>(), {}, (deps) => listAgents({ json: Boolean(options.json) }, deps)));
 });
 agents.command("create").argument("<name>").option("--model <id>", "Model", DEFAULT_MODEL_ID).option("--mode <mode>", "Default execution mode", "agent").option("--workspace <path>", "Workspace", process.cwd()).option("--json", "Output JSONL").action(async (name: string, options) => {
-  await runCommand(async () => withBackend(program.opts<GlobalOptions>(), {}, (deps) => createAgent({ name, model: options.model, mode: normalizeMode(options.mode), workspace: options.workspace, json: Boolean(options.json) }, deps)));
+  await runCommand(async () => withBackend(program.opts<GlobalOptions>(), {}, (deps) => createAgent({ name, model: options.model, mode: normalizeCliMode(options.mode), workspace: options.workspace, json: Boolean(options.json) }, deps)));
 });
 
 const skills = program.command("skills").description("Create and manage Cursor agent skills on disk");
@@ -392,10 +392,6 @@ if (isEntrypoint()) {
 function isEntrypoint(): boolean {
   const entryPath = process.argv[1];
   return entryPath !== undefined && path.resolve(entryPath) === fileURLToPath(import.meta.url);
-}
-
-function normalizeMode(value: unknown): CliMode {
-  return value === "ask" ? "ask" : "agent";
 }
 
 async function runCommand(action: () => Promise<unknown>): Promise<void> {

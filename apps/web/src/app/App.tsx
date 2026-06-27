@@ -1,49 +1,29 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ComponentType } from "react";
 import { Routes, Route } from "react-router-dom";
 import { TokensQA } from "../pages/TokensQA.js";
 import { AppShell } from "./AppShell.js";
 import { useSettingsBootstrap } from "../hooks/useSettings.js";
 import { useThemeController } from "../hooks/useTheme.js";
 
-const RunHistory = lazy(async () => {
-  const module = await import("../pages/RunHistory.js");
-  return { default: module.RunHistory };
-});
+/**
+ * `React.lazy` over a named (non-default) export. Adapts the module's named
+ * component to the `{ default }` shape `lazy` expects.
+ */
+function lazyNamed<TName extends string>(
+  load: () => Promise<Record<TName, ComponentType>>,
+  name: TName,
+) {
+  return lazy(async () => ({ default: (await load())[name] }));
+}
 
-const RunReplay = lazy(async () => {
-  const module = await import("../pages/RunReplay.js");
-  return { default: module.RunReplay };
-});
-
-const Usage = lazy(async () => {
-  const module = await import("../pages/Usage.js");
-  return { default: module.Usage };
-});
-
-const StreamingQA = lazy(async () => {
-  const module = await import("../pages/StreamingQA.js");
-  return { default: module.StreamingQA };
-});
-
-const McpServers = lazy(async () => {
-  const module = await import("../pages/McpServers.js");
-  return { default: module.McpServers };
-});
-
-const Subagents = lazy(async () => {
-  const module = await import("../pages/Subagents.js");
-  return { default: module.Subagents };
-});
-
-const Settings = lazy(async () => {
-  const module = await import("../pages/Settings.js");
-  return { default: module.Settings };
-});
-
-const NotepadsPage = lazy(async () => {
-  const module = await import("../pages/Notepads.js");
-  return { default: module.Notepads };
-});
+const RunHistory = lazyNamed(() => import("../pages/RunHistory.js"), "RunHistory");
+const RunReplay = lazyNamed(() => import("../pages/RunReplay.js"), "RunReplay");
+const Usage = lazyNamed(() => import("../pages/Usage.js"), "Usage");
+const StreamingQA = lazyNamed(() => import("../pages/StreamingQA.js"), "StreamingQA");
+const McpServers = lazyNamed(() => import("../pages/McpServers.js"), "McpServers");
+const Subagents = lazyNamed(() => import("../pages/Subagents.js"), "Subagents");
+const Settings = lazyNamed(() => import("../pages/Settings.js"), "Settings");
+const NotepadsPage = lazyNamed(() => import("../pages/Notepads.js"), "Notepads");
 
 export function App() {
   useSettingsBootstrap();

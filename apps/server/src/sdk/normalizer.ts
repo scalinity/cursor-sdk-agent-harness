@@ -5,7 +5,7 @@ import type {
   ToolUseBlock,
 } from "@harness/shared";
 import { extractCodeEdit } from "./code-edit-extractors/index.js";
-import { detectSubagentToolCall } from "./subagent-detector.js";
+import { detectSubagentToolCall, extractSubagentToolCalls } from "./subagent-detector.js";
 
 /**
  * Phase 07 — pure normalization from raw SDK message to one or more canonical
@@ -185,12 +185,18 @@ export function normalize(input: NormalizeInput): NormalizeOutput {
     }
 
     case "tool_call": {
-      const kind: "tool_call.running" | "tool_call.completed" | "tool_call.error" =
-        raw.status === "completed"
-          ? "tool_call.completed"
-          : raw.status === "error"
-            ? "tool_call.error"
-            : "tool_call.running";
+      let kind: "tool_call.running" | "tool_call.completed" | "tool_call.error";
+      switch (raw.status) {
+        case "completed":
+          kind = "tool_call.completed";
+          break;
+        case "error":
+          kind = "tool_call.error";
+          break;
+        default:
+          kind = "tool_call.running";
+          break;
+      }
       const payload: Record<string, unknown> = {
         call_id: raw.call_id,
         name: raw.name,
@@ -237,6 +243,12 @@ export function normalize(input: NormalizeInput): NormalizeOutput {
 
       const subagent = detectSubagentToolCall(raw, runContext);
       if (subagent !== null) {
+        // The SDK doesn't stream a sub-agent's internal tool calls; they
+        // only arrive in the completed `task` result. Surface them on the
+        // completion event so the renderer can fill the (otherwise empty)
+        // sub-agent card. See SDK_VERIFICATION_LEDGER OQ-32.
+        const toolCalls =
+          raw.status === "running" ? [] : extractSubagentToolCalls(raw.result);
         events.push({
           sdkType: "task",
           kind: raw.status === "running" ? "subagent.spawned" : "subagent.completed",
@@ -249,6 +261,7 @@ export function normalize(input: NormalizeInput): NormalizeOutput {
             subagent_name: subagent.name,
             source_call_id: raw.call_id,
             status: subagent.status,
+            ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
           },
           raw: null,
           occurredAt: runContext.occurredAt,

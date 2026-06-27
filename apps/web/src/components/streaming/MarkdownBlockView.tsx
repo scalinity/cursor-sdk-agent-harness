@@ -1,11 +1,10 @@
-import { memo, createElement, useState } from "react";
+import { memo, createElement, useState, type ReactNode } from "react";
 import type { KnownLanguage } from "@harness/shared";
 import type { MarkdownBlock } from "../../lib/streaming-markdown-projector.js";
 import { detectLanguageFromPath } from "../../lib/code-edit-events.js";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard.js";
-import { mutatingRequest } from "../../lib/http-client.js";
+import { httpRequest, mutatingRequest } from "../../lib/http-client.js";
 import { useUiStore } from "../../state/ui-store.js";
-import { httpRequest } from "../../lib/http-client.js";
 import { csrfTokenResponseSchema } from "@harness/shared";
 import { StreamingText } from "./StreamingText.js";
 import { SyntaxHighlighter } from "./SyntaxHighlighter.js";
@@ -106,6 +105,32 @@ function ErrorXIcon({ className }: { className?: string }) {
 
 type ApplyState = "idle" | "applying" | "applied" | "error";
 
+function applyIconFor(state: ApplyState): ReactNode {
+  switch (state) {
+    case "applying":
+      return <SpinnerIcon className="size-3.5 animate-spin" />;
+    case "applied":
+      return <CheckSmallIcon className="size-3.5" />;
+    case "error":
+      return <ErrorXIcon className="size-3.5 text-danger" />;
+    case "idle":
+      return <ApplyIcon className="size-3.5" />;
+  }
+}
+
+function applyLabelFor(state: ApplyState): string {
+  switch (state) {
+    case "applying":
+      return "Applying...";
+    case "applied":
+      return "Applied";
+    case "error":
+      return "Failed";
+    case "idle":
+      return "Apply";
+  }
+}
+
 interface CodeBlockProps {
   text: string;
   language: KnownLanguage;
@@ -152,17 +177,8 @@ function CodeBlock({ text, language, languageRaw, closed, terminal }: CodeBlockP
       });
   };
 
-  const applyIcon =
-    applyState === "applying" ? <SpinnerIcon className="size-3.5 animate-spin" /> :
-    applyState === "applied" ? <CheckSmallIcon className="size-3.5" /> :
-    applyState === "error" ? <ErrorXIcon className="size-3.5 text-danger" /> :
-    <ApplyIcon className="size-3.5" />;
-
-  const applyLabel =
-    applyState === "applying" ? "Applying..." :
-    applyState === "applied" ? "Applied" :
-    applyState === "error" ? "Failed" :
-    "Apply";
+  const applyIcon = applyIconFor(applyState);
+  const applyLabel = applyLabelFor(applyState);
 
   return (
     <pre className="streaming-md__code group relative">

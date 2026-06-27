@@ -13,10 +13,9 @@ import {
   type SubagentSummary,
   type UpdateSubagentRequest,
 } from "@harness/shared";
-import { httpRequest, mutatingRequest } from "../lib/http-client.js";
-import { useUiStore } from "../state/ui-store.js";
-import { useCsrfToken } from "./useCsrfToken.js";
+import { httpRequest } from "../lib/http-client.js";
 import { useMountEffect } from "./useMountEffect.js";
+import { useMutatingRequest } from "./useMutatingRequest.js";
 
 export interface UseSubagentsResult {
   subagents: SubagentSummary[];
@@ -33,7 +32,7 @@ export function useSubagents(): UseSubagentsResult {
   const [subagents, setSubagents] = useState<SubagentSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { refresh: refreshCsrfToken } = useCsrfToken();
+  const mutate = useMutatingRequest();
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -52,65 +51,51 @@ export function useSubagents(): UseSubagentsResult {
 
   const create = useCallback(
     async (input: CreateSubagentRequest) => {
-      const created = await mutatingRequest("/api/subagents", {
+      const created = await mutate("/api/subagents", {
         method: "POST",
         body: input,
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken,
         responseSchema: subagentSummarySchema,
       });
       setSubagents((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
       return created;
     },
-    [refreshCsrfToken],
+    [mutate],
   );
 
   const replace = useCallback(
     async (id: string, input: ReplaceSubagentRequest) => {
-      const updated = await mutatingRequest(
-        `/api/subagents/${encodeURIComponent(id)}`,
-        {
-          method: "PUT",
-          body: input,
-          getCsrfToken: () => useUiStore.getState().csrfToken,
-          refreshCsrfToken,
-          responseSchema: subagentSummarySchema,
-        },
-      );
+      const updated = await mutate(`/api/subagents/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: input,
+        responseSchema: subagentSummarySchema,
+      });
       setSubagents((prev) => prev.map((s) => (s.id === id ? updated : s)));
       return updated;
     },
-    [refreshCsrfToken],
+    [mutate],
   );
 
   const patch = useCallback(
     async (id: string, input: UpdateSubagentRequest) => {
-      const updated = await mutatingRequest(
-        `/api/subagents/${encodeURIComponent(id)}`,
-        {
-          method: "PATCH",
-          body: input,
-          getCsrfToken: () => useUiStore.getState().csrfToken,
-          refreshCsrfToken,
-          responseSchema: subagentSummarySchema,
-        },
-      );
+      const updated = await mutate(`/api/subagents/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: input,
+        responseSchema: subagentSummarySchema,
+      });
       setSubagents((prev) => prev.map((s) => (s.id === id ? updated : s)));
       return updated;
     },
-    [refreshCsrfToken],
+    [mutate],
   );
 
   const remove = useCallback(
     async (id: string) => {
-      await mutatingRequest(`/api/subagents/${encodeURIComponent(id)}`, {
+      await mutate(`/api/subagents/${encodeURIComponent(id)}`, {
         method: "DELETE",
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken,
       });
       setSubagents((prev) => prev.filter((s) => s.id !== id));
     },
-    [refreshCsrfToken],
+    [mutate],
   );
 
   // REVIEW-S7: explicit mount-only hydration via useMountEffect wrapper.

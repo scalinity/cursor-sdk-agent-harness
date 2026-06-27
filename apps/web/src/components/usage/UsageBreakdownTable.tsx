@@ -1,9 +1,29 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { UsageBreakdownRow } from "@harness/shared";
 import { formatMicros, formatTokens } from "../../lib/format.js";
 
 function partialLabel(value: string, unavailableCount: number): string {
   return unavailableCount > 0 ? `partial ${value}` : value;
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`h-control-md rounded-sm px-3 text-sm ${active ? "bg-accent-bg text-accent-primary" : "text-text-tertiary"}`}
+    >
+      {children}
+    </button>
+  );
 }
 
 export function UsageBreakdownTable({
@@ -19,20 +39,12 @@ export function UsageBreakdownTable({
   return (
     <div className="border border-border-subtle bg-surface-1">
       <div className="flex items-center gap-2 border-b border-border-subtle p-2">
-        <button
-          className={tab === "model" ? "h-control-md rounded-sm bg-accent-bg px-3 text-sm text-accent-primary" : "h-control-md rounded-sm px-3 text-sm text-text-tertiary"}
-          type="button"
-          onClick={() => setTab("model")}
-        >
+        <TabButton active={tab === "model"} onClick={() => setTab("model")}>
           By model
-        </button>
-        <button
-          className={tab === "agent" ? "h-control-md rounded-sm bg-accent-bg px-3 text-sm text-accent-primary" : "h-control-md rounded-sm px-3 text-sm text-text-tertiary"}
-          type="button"
-          onClick={() => setTab("agent")}
-        >
+        </TabButton>
+        <TabButton active={tab === "agent"} onClick={() => setTab("agent")}>
           By agent
-        </button>
+        </TabButton>
       </div>
       <table className="w-full border-collapse text-sm">
         <thead className="text-left text-xs uppercase tracking-uppercase text-text-tertiary">

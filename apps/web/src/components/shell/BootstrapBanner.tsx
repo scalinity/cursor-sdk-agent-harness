@@ -4,8 +4,6 @@
  * no actionable feedback when /api/security/csrf-token returns 5xx at first
  * paint. The banner offers a manual retry that calls `useCsrfToken.refresh`.
  */
-import { cn } from "../../lib/cn.js";
-
 export interface BootstrapBannerProps {
   error: string;
   loading: boolean;
@@ -15,9 +13,7 @@ export interface BootstrapBannerProps {
 export function BootstrapBanner({ error, loading, onRetry }: BootstrapBannerProps) {
   return (
     <div
-      className={cn(
-        "fixed inset-x-0 top-0 z-50 flex items-center gap-3 border-b border-danger bg-danger-bg px-4 py-2 text-sm text-text-primary",
-      )}
+      className="fixed inset-x-0 top-0 z-50 flex items-center gap-3 border-b border-danger bg-danger-bg px-4 py-2 text-sm text-text-primary"
       role="alert"
     >
       <span className="font-semibold text-danger">Bootstrap failed</span>

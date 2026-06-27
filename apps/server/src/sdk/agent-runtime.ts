@@ -141,16 +141,13 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
     const servers = deps.mcpRepo
       .list()
       .filter((server) => selectedMcpIds.has(server.id) && server.enabled);
-    if (!deps.mcpSecretStore) return servers;
+    const secretStore = deps.mcpSecretStore;
+    if (!secretStore) return servers;
     try {
       return await Promise.all(
         servers.map(async (server) => ({
           ...server,
-          config: await hydrateMcpSecrets(
-            server.config,
-            server.id,
-            deps.mcpSecretStore!,
-          ),
+          config: await hydrateMcpSecrets(server.config, server.id, secretStore),
         })),
       );
     } catch (err) {

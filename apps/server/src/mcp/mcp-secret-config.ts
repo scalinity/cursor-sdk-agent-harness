@@ -80,10 +80,12 @@ async function externalizeValue(
   value: string,
 ): Promise<{ value: string; wrote: boolean }> {
   const ref = parseMcpSecretRef(value);
-  if (ref !== null && !refMatchesPath(ref, serverId, path)) {
+  const matchesOwnPath = refMatchesPath(ref, serverId, path);
+  if (ref !== null && !matchesOwnPath) {
     throw new ForeignMcpSecretRefError(serverId, path, ref.serverId);
   }
-  if (refMatchesPath(ref, serverId, path)) return { value, wrote: false };
+  // Already an owned ref to this exact field — leave it untouched.
+  if (matchesOwnPath) return { value, wrote: false };
   return { value: await store.set(serverId, path, value), wrote: true };
 }
 

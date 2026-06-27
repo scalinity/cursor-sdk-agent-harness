@@ -65,6 +65,20 @@ function getToolName(evt: CanonicalRunEvent | null): string | null {
   return null;
 }
 
+function ApprovalStatusBadge({ approval }: { approval: ApprovalState }) {
+  if (approval.status === "pending") {
+    return <span className="text-xs text-text-tertiary">Awaiting your response</span>;
+  }
+  if (approval.status === "resolved") {
+    return (
+      <span className="text-xs text-success">
+        ✓ {approval.decision === "approve" ? "Approved" : "Denied"}
+      </span>
+    );
+  }
+  return <span className="text-xs text-danger">✗ {approval.code ?? "Failed"}</span>;
+}
+
 export function ApprovalPrompt({
   runId,
   approval,
@@ -82,9 +96,8 @@ export function ApprovalPrompt({
   );
 
   const pending = approval.status === "pending";
-  const resolved = approval.status === "resolved";
-  const failed = approval.status === "failed";
-  const isUnimplemented = failed && approval.code === "APPROVAL_UNIMPLEMENTED";
+  const isUnimplemented =
+    approval.status === "failed" && approval.code === "APPROVAL_UNIMPLEMENTED";
 
   return (
     <div className="approval-prompt my-3 rounded-md border border-warning bg-surface-2 px-3 py-2 text-md">
@@ -95,17 +108,7 @@ export function ApprovalPrompt({
             req {approval.requestId.slice(0, 8)}
           </span>
         </div>
-        {pending ? (
-          <span className="text-xs text-text-tertiary">
-            Awaiting your response
-          </span>
-        ) : resolved ? (
-          <span className="text-xs text-success">
-            ✓ {approval.decision === "approve" ? "Approved" : "Denied"}
-          </span>
-        ) : (
-          <span className="text-xs text-danger">✗ {approval.code ?? "Failed"}</span>
-        )}
+        <ApprovalStatusBadge approval={approval} />
       </div>
 
       <div className="approval-prompt__context mt-1 space-y-1">

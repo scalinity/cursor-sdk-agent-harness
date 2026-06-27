@@ -6,6 +6,13 @@ export interface ConnectionBannerProps {
   onRetry?: () => void;
 }
 
+const MESSAGES: Partial<Record<ConnectionState, string>> = {
+  connecting: "Connecting…",
+  reconnecting: "Reconnecting…",
+  closed: "Connection lost.",
+  error: "Connection error — manual retry required.",
+};
+
 export function ConnectionBanner({ connectionState, onRetry }: ConnectionBannerProps) {
   if (connectionState === "open" || connectionState === "idle") return null;
   const isError = connectionState === "error" || connectionState === "closed";
@@ -16,12 +23,7 @@ export function ConnectionBanner({ connectionState, onRetry }: ConnectionBannerP
         isError ? "connection-banner--err" : "connection-banner--warn",
       )}
     >
-      <span>
-        {connectionState === "connecting" ? "Connecting…" : null}
-        {connectionState === "reconnecting" ? "Reconnecting…" : null}
-        {connectionState === "closed" ? "Connection lost." : null}
-        {connectionState === "error" ? "Connection error — manual retry required." : null}
-      </span>
+      <span>{MESSAGES[connectionState] ?? null}</span>
       {onRetry ? (
         <button
           type="button"

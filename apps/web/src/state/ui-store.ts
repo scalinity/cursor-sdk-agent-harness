@@ -130,40 +130,28 @@ const CODE_HIDDEN_STORAGE_KEY = "harness:codeHidden";
 const RAIL_HIDDEN_STORAGE_KEY = "harness:railHidden";
 const SELECTED_MODEL_STORAGE_KEY = "harness:selectedModelId";
 
-function readInitialCodeHidden(): boolean {
+/** Read a "0"/"1" boolean flag from localStorage; false if unset/unavailable. */
+function readStoredFlag(key: string): boolean {
   if (typeof window === "undefined") return false;
   try {
-    return window.localStorage.getItem(CODE_HIDDEN_STORAGE_KEY) === "1";
+    return window.localStorage.getItem(key) === "1";
   } catch {
     return false;
+  }
+}
+
+/** Persist a boolean flag as "0"/"1"; no-op when storage is unavailable. */
+function persistFlag(key: string, value: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, value ? "1" : "0");
+  } catch {
+    // Storage unavailable (private mode) — silently ignore.
   }
 }
 
 function persistCodeHidden(hidden: boolean): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(CODE_HIDDEN_STORAGE_KEY, hidden ? "1" : "0");
-  } catch {
-    // Storage unavailable (private mode) — silently ignore.
-  }
-}
-
-function readInitialRailHidden(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return window.localStorage.getItem(RAIL_HIDDEN_STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function persistRailHidden(hidden: boolean): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(RAIL_HIDDEN_STORAGE_KEY, hidden ? "1" : "0");
-  } catch {
-    // Storage unavailable (private mode) — silently ignore.
-  }
+  persistFlag(CODE_HIDDEN_STORAGE_KEY, hidden);
 }
 
 function readInitialSelectedModel(): UnifiedModelId {
@@ -188,8 +176,8 @@ function persistSelectedModel(modelId: UnifiedModelId): void {
 }
 
 export const useUiStore = create<UiState>((set) => ({
-  codeHidden: readInitialCodeHidden(),
-  railHidden: readInitialRailHidden(),
+  codeHidden: readStoredFlag(CODE_HIDDEN_STORAGE_KEY),
+  railHidden: readStoredFlag(RAIL_HIDDEN_STORAGE_KEY),
   rightPanelTab: "terminal",
   csrfToken: null,
   connectionState: "idle",
@@ -223,13 +211,13 @@ export const useUiStore = create<UiState>((set) => ({
     });
   },
   setRailHidden: (hidden) => {
-    persistRailHidden(hidden);
+    persistFlag(RAIL_HIDDEN_STORAGE_KEY, hidden);
     set({ railHidden: hidden });
   },
   toggleRailHidden: () => {
     set((s) => {
       const next = !s.railHidden;
-      persistRailHidden(next);
+      persistFlag(RAIL_HIDDEN_STORAGE_KEY, next);
       return { railHidden: next };
     });
   },

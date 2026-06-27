@@ -46,14 +46,19 @@ function chunkSignature(chunks: readonly CodeEditAnimationChunk[]): string {
     .join("\u0001");
 }
 
+/** Clamp an offset into the valid [0, length] range of a buffer. */
+function clampOffset(offset: number, length: number): number {
+  return Math.min(Math.max(offset, 0), length);
+}
+
 function applyDeletion(buffer: string, startOffset: number, deleteText: string | undefined): string {
   if (deleteText === undefined || deleteText.length === 0) return buffer;
-  const start = Math.min(Math.max(startOffset, 0), buffer.length);
+  const start = clampOffset(startOffset, buffer.length);
   return buffer.slice(0, start) + buffer.slice(start + deleteText.length);
 }
 
 function insertAt(buffer: string, startOffset: number, text: string): string {
-  const start = Math.min(Math.max(startOffset, 0), buffer.length);
+  const start = clampOffset(startOffset, buffer.length);
   return buffer.slice(0, start) + text + buffer.slice(start);
 }
 

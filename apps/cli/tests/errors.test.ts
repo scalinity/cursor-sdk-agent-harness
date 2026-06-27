@@ -80,7 +80,7 @@ describe("fatal shutdown hooks", () => {
     registerFatalShutdownHook(hook);
     await runFatalShutdown();
     expect(hook).toHaveBeenCalledTimes(1);
-    expect(stdoutWrite).toHaveBeenCalledWith("\u001b[?25h\u001b[?1049l");
+    expect(stdoutWrite).toHaveBeenCalledWith("\u001b[?1006l\u001b[?1000l\u001b[?25h\u001b[?1049l");
   });
 
   it("is idempotent when shutdown runs more than once", async () => {

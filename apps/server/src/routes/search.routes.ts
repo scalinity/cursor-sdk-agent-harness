@@ -9,7 +9,14 @@ import type { WorkspaceAllowlistRepo } from "../db/repositories/workspace-allowl
 import { grepSearch, fileSearch } from "../services/search.service.js";
 import type { SearchService } from "../search/search-service.js";
 import { getActiveWorkspaceRoot } from "../config/active-workspace.js";
+import { send422 } from "./route-errors.js";
 import { realpath } from "node:fs/promises";
+import type { FastifyReply } from "fastify";
+
+/** 400 response used when a search route has no resolvable workspace root. */
+function sendNoWorkspace(reply: FastifyReply): FastifyReply {
+  return reply.code(400).send({ code: "NO_WORKSPACE", message: "No active workspace" });
+}
 
 export interface SearchRoutesDeps {
   settingsRepo: SettingsRepo;
@@ -47,13 +54,9 @@ export async function registerSearchRoutes(
 ): Promise<void> {
   app.get("/api/search/grep", async (request, reply) => {
     const parsed = grepSearchQuerySchema.safeParse(request.query);
-    if (!parsed.success) {
-      return reply.code(422).send({ code: "VALIDATION_ERROR", details: parsed.error.issues });
-    }
+    if (!parsed.success) return send422(reply, parsed.error);
     const root = getActiveWorkspaceRoot(deps);
-    if (!root) {
-      return reply.code(400).send({ code: "NO_WORKSPACE", message: "No active workspace" });
-    }
+    if (!root) return sendNoWorkspace(reply);
     const result = await grepSearch({
       query: parsed.data.q,
       workspaceRoot: root,
@@ -66,13 +69,9 @@ export async function registerSearchRoutes(
 
   app.get("/api/search/files", async (request, reply) => {
     const parsed = fileSearchQuerySchema.safeParse(request.query);
-    if (!parsed.success) {
-      return reply.code(422).send({ code: "VALIDATION_ERROR", details: parsed.error.issues });
-    }
+    if (!parsed.success) return send422(reply, parsed.error);
     const root = getActiveWorkspaceRoot(deps);
-    if (!root) {
-      return reply.code(400).send({ code: "NO_WORKSPACE", message: "No active workspace" });
-    }
+    if (!root) return sendNoWorkspace(reply);
     const result = await fileSearch({
       pattern: parsed.data.pattern,
       workspaceRoot: root,
@@ -85,13 +84,9 @@ export async function registerSearchRoutes(
 
   app.get("/api/search/semantic", async (request, reply) => {
     const parsed = semanticSearchQuerySchema.safeParse(request.query);
-    if (!parsed.success) {
-      return reply.code(422).send({ code: "VALIDATION_ERROR", details: parsed.error.issues });
-    }
+    if (!parsed.success) return send422(reply, parsed.error);
     const root = await resolveWorkspaceRoot(deps, parsed.data.workspaceId);
-    if (!root) {
-      return reply.code(400).send({ code: "NO_WORKSPACE", message: "No active workspace" });
-    }
+    if (!root) return sendNoWorkspace(reply);
     // First query on an unindexed workspace kicks a background index.
     deps.searchService.ensureIndexing(root, root);
     const result = await deps.searchService.search({
@@ -124,9 +119,7 @@ export async function registerSearchRoutes(
 
   app.post("/api/search/reindex", async (_request, reply) => {
     const root = getActiveWorkspaceRoot(deps);
-    if (!root) {
-      return reply.code(400).send({ code: "NO_WORKSPACE", message: "No active workspace" });
-    }
+    if (!root) return sendNoWorkspace(reply);
     const { status, totalChunks } = deps.searchService.reindex(root, root);
     return reply.send({ status, totalChunks, message: null });
   });

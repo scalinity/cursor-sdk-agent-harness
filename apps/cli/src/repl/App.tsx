@@ -21,10 +21,11 @@ import { HeaderBar, type ChromeState } from "./HeaderBar.js";
 import { InputBar, parseSlashCommand, PromptHistory, type MentionTrigger } from "./InputBar.js";
 import { computeTuiLayout, countInputLines, MAX_INPUT_VISIBLE_LINES } from "./layout.js";
 import { MentionPopup, flattenMentionResults, MAX_MENTION_ITEMS, moveMentionSelection } from "./MentionPopup.js";
-import { filterSlashCommands, SlashPalette } from "./SlashPalette.js";
+import { filterSlashCommands, isKnownSlashCommand, SlashPalette, type SlashPaletteItem } from "./SlashPalette.js";
 import { ModelPicker, moveModelSelection, type ModelPickerRow } from "./ModelPicker.js";
 import { computeStreamViewportState, createStreamBuffer, ingestStreamFrame, StreamView, type StreamBuffer, type StreamItem } from "./StreamView.js";
 import { applyStreamScrollDelta, resolveStreamScrollDelta } from "./stream-scroll.js";
+import { parseMouseWheel, WHEEL_LINES_PER_NOTCH } from "./mouse.js";
 import { StatusBar, type SessionCostState, type SessionTokenState } from "./StatusBar.js";
 import { formatActiveToolLine } from "./ToolCallLine.js";
 import { createTuiTheme, bg, border, fg, truncateMiddle, MIN_COLUMNS, MIN_ROWS } from "./theme.js";
@@ -110,6 +111,7 @@ export function App({
   const [mentionIndex, setMentionIndex] = useState(0);
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
+  const [skillSlashItems, setSkillSlashItems] = useState<SlashPaletteItem[]>([]);
   // Model catalog picker, opened by a bare `/model`. `null` = closed;
   // `[]` while the catalog is loading (rows arrive once listModels resolves).
   const [modelPickerRows, setModelPickerRows] = useState<ModelPickerRow[] | null>(null);
@@ -132,7 +134,7 @@ export function App({
   const mentionRequestSeqRef = useRef(0);
   const allMentionItems = flattenMentionResults(mentionResults);
   const mentionItems = mentionOpen ? allMentionItems.slice(0, MAX_MENTION_ITEMS) : [];
-  const slashItems = !mentionOpen && inputDraft.startsWith("/") && !slashDismissed ? filterSlashCommands(inputDraft) : [];
+  const slashItems = !mentionOpen && inputDraft.startsWith("/") && !slashDismissed ? filterSlashCommands(inputDraft, skillSlashItems) : [];
   const slashOpen = slashItems.length > 0;
   const modelPickerOpen = modelPickerRows !== null;
   const overlayLineCount = modelPickerOpen
@@ -153,6 +155,29 @@ export function App({
   const lastItem = buffer.items.at(-1);
   const chromeState = deriveChromeState({ streamStatus, turnActive, busy, toolRunning: runningTool !== undefined, lastItemType: lastItem?.type });
   const [cwdBase] = useState(() => safeProcessCwd(workspace));
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const skills = await listSkills({ workspace });
+        if (cancelled) return;
+        setSkillSlashItems(
+          skills.map((skill) => ({
+            command: skill.name,
+            // Collapse whitespace so a multi-line (literal `|`) description can't
+            // inject a newline into the single-line command-deck row.
+            description: skill.description.replace(/\s+/g, " ").trim(),
+            kind: "skill" as const,
+          })),
+        );
+      } catch {
+        if (!cancelled) setSkillSlashItems([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspace]);
   // ASSUMPTION: The CLI is single-user until a multi-account config exists; label
   // the active context as "local" rather than inventing account support here.
   // Flag if wrong.
@@ -325,6 +350,16 @@ export function App({
         return;
       }
       // Swallow other keys while the modal picker owns the input.
+      return;
+    }
+    // Mouse-wheel scrolling. The wheel report reaches every `useInput` consumer,
+    // so we both act on it here and swallow it (return) — InputBar guards the
+    // same way so the bytes never land in the composer.
+    const wheel = parseMouseWheel(input);
+    if (wheel) {
+      if (wheel.notches !== 0 && maxOffset > 0) {
+        setScrollOffset(applyStreamScrollDelta(effectiveOffset, wheel.notches * WHEEL_LINES_PER_NOTCH, maxOffset));
+      }
       return;
     }
     if (key.ctrl && input === "l") {
@@ -563,7 +598,7 @@ export function App({
   const handleInputChange = (text: string, mention: MentionTrigger | null) => {
     setInputDraft(text);
     setSlashDismissed(false);
-    setSlashIndex((current) => clampSelectionIndex(current, filterSlashCommands(text).length));
+    setSlashIndex((current) => clampSelectionIndex(current, filterSlashCommands(text, skillSlashItems).length));
     if (!mention) {
       clearMentionState();
       return;
@@ -892,6 +927,9 @@ async function handleSkillSlash(
     try {
       const created = await createSkill({ name, description, workspace: ctx.workspace });
       appendMessage(`Skill created at ${created.filePath}`);
+      if (isKnownSlashCommand(created.name)) {
+        appendError(`"/${created.name}" is a built-in command and will shadow this skill — it can't be invoked as a slash command.`);
+      }
     } catch (error: unknown) {
       appendError(error instanceof Error ? error.message : String(error));
     }

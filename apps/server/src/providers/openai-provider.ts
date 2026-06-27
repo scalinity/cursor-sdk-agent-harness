@@ -69,6 +69,8 @@ export class OpenAIProvider implements ModelProvider {
   }
 
   async listModels(options?: ListModelsOptions): Promise<ProviderModelInfo[]> {
+    const fallback = (): ProviderModelInfo[] =>
+      FALLBACK_MODELS.openai.map((m) => ({ id: m.name, name: m.label }));
     const fetchReal = async (): Promise<ProviderModelInfo[]> => {
       const page = await this.client.models.list();
       return page.data.map((m) => ({ id: m.id, name: m.id }));
@@ -76,7 +78,7 @@ export class OpenAIProvider implements ModelProvider {
     // P23-W3: validation mode surfaces auth errors instead of degrading.
     if (options?.validate) {
       const out = await fetchReal();
-      return out.length > 0 ? out : FALLBACK_MODELS.openai.map((m) => ({ id: m.name, name: m.label }));
+      return out.length > 0 ? out : fallback();
     }
     try {
       const out = await fetchReal();
@@ -84,6 +86,6 @@ export class OpenAIProvider implements ModelProvider {
     } catch {
       // Populating mode — degrade to the static list.
     }
-    return FALLBACK_MODELS.openai.map((m) => ({ id: m.name, name: m.label }));
+    return fallback();
   }
 }

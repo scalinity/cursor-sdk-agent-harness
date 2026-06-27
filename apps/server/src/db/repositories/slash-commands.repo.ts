@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Database as BetterSqlite3Database } from "better-sqlite3";
 import type { SlashCommand } from "@harness/shared";
 import { isoNow } from "./mapping.js";
@@ -135,8 +136,7 @@ export class SlashCommandsRepo {
     for (const cmd of builtins) {
       const existing = this.getByName(cmd.name);
       if (!existing) {
-        const id = crypto.randomUUID();
-        this.create(id, cmd.name, cmd.description, cmd.template);
+        this.create(randomUUID(), cmd.name, cmd.description, cmd.template);
         seeded++;
       }
     }

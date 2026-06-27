@@ -47,20 +47,25 @@ function parseGrepOutput(stdout: string, workspaceRoot: string): GrepMatch[] {
   const lines = stdout.split("\n").filter(Boolean);
 
   // Group by separator "--" (context groups)
-  let currentGroup: { path: string; lineNo: number; col: number; text: string; before: string[]; after: string[] } | null = null;
+  type Group = { path: string; lineNo: number; col: number; text: string; before: string[]; after: string[] };
+  let currentGroup: Group | null = null;
   let afterCount = 0;
+
+  const flushGroup = (group: Group): void => {
+    results.push({
+      path: group.path,
+      line: group.lineNo,
+      column: group.col,
+      content: group.text,
+      contextBefore: group.before,
+      contextAfter: group.after,
+    });
+  };
 
   for (const line of lines) {
     if (line === "--") {
       if (currentGroup) {
-        results.push({
-          path: currentGroup.path,
-          line: currentGroup.lineNo,
-          column: currentGroup.col,
-          content: currentGroup.text,
-          contextBefore: currentGroup.before,
-          contextAfter: currentGroup.after,
-        });
+        flushGroup(currentGroup);
         currentGroup = null;
         afterCount = 0;
       }
@@ -73,14 +78,7 @@ function parseGrepOutput(stdout: string, workspaceRoot: string): GrepMatch[] {
     const matchResult = rgMatch ?? (grepMatch ? [grepMatch[0], grepMatch[1], grepMatch[2], "1", grepMatch[3]] : null);
     if (matchResult) {
       if (currentGroup && afterCount <= 2) {
-        results.push({
-          path: currentGroup.path,
-          line: currentGroup.lineNo,
-          column: currentGroup.col,
-          content: currentGroup.text,
-          contextBefore: currentGroup.before,
-          contextAfter: currentGroup.after,
-        });
+        flushGroup(currentGroup);
       }
       const relPath = path.relative(workspaceRoot, path.resolve(workspaceRoot, matchResult[1]!));
       currentGroup = {
@@ -111,14 +109,7 @@ function parseGrepOutput(stdout: string, workspaceRoot: string): GrepMatch[] {
   }
 
   if (currentGroup) {
-    results.push({
-      path: currentGroup.path,
-      line: currentGroup.lineNo,
-      column: currentGroup.col,
-      content: currentGroup.text,
-      contextBefore: currentGroup.before,
-      contextAfter: currentGroup.after,
-    });
+    flushGroup(currentGroup);
   }
 
   return results;
@@ -130,45 +121,39 @@ export async function grepSearch(opts: GrepSearchOptions): Promise<GrepSearchOut
 
   let stdout = "";
 
+  const command = useRg ? "rg" : "grep";
+  let args: string[];
+  if (useRg) {
+    args = [
+      "--no-heading",
+      "--column",
+      "--line-number",
+      "--context", "2",
+      "--max-count", String(opts.maxResults),
+      "--color", "never",
+    ];
+    if (!opts.caseSensitive) args.push("--ignore-case");
+    if (opts.filePattern) args.push("--glob", opts.filePattern);
+  } else {
+    args = [
+      "-rn",
+      "--include=*.ts", "--include=*.tsx", "--include=*.js", "--include=*.jsx",
+      "--include=*.json", "--include=*.md", "--include=*.css", "--include=*.html",
+      "--exclude-dir=node_modules", "--exclude-dir=.git", "--exclude-dir=dist",
+      "--exclude-dir=build", "--exclude-dir=coverage",
+      "-C", "2",
+    ];
+    if (!opts.caseSensitive) args.push("-i");
+  }
+  args.push("--", opts.query, ".");
+
   try {
-    if (useRg) {
-      const args = [
-        "--no-heading",
-        "--column",
-        "--line-number",
-        "--context", "2",
-        "--max-count", String(opts.maxResults),
-        "--color", "never",
-      ];
-      if (!opts.caseSensitive) args.push("--ignore-case");
-      if (opts.filePattern) args.push("--glob", opts.filePattern);
-      args.push("--", opts.query, ".");
-
-      const result = await execFile("rg", args, {
-        cwd: opts.workspaceRoot,
-        timeout: 10_000,
-        maxBuffer: 1024 * 1024,
-      });
-      stdout = result.stdout;
-    } else {
-      const args = [
-        "-rn",
-        "--include=*.ts", "--include=*.tsx", "--include=*.js", "--include=*.jsx",
-        "--include=*.json", "--include=*.md", "--include=*.css", "--include=*.html",
-        "--exclude-dir=node_modules", "--exclude-dir=.git", "--exclude-dir=dist",
-        "--exclude-dir=build", "--exclude-dir=coverage",
-        "-C", "2",
-      ];
-      if (!opts.caseSensitive) args.push("-i");
-      args.push("--", opts.query, ".");
-
-      const result = await execFile("grep", args, {
-        cwd: opts.workspaceRoot,
-        timeout: 10_000,
-        maxBuffer: 1024 * 1024,
-      });
-      stdout = result.stdout;
-    }
+    const result = await execFile(command, args, {
+      cwd: opts.workspaceRoot,
+      timeout: 10_000,
+      maxBuffer: 1024 * 1024,
+    });
+    stdout = result.stdout;
   } catch (err: unknown) {
     // grep/rg exit 1 = no matches, exit 2 = error
     if (typeof err === "object" && err !== null && "code" in err) {
@@ -240,32 +225,21 @@ async function walkDir(
 
     const fullPath = path.join(dir, entry.name);
     const relPath = path.relative(root, fullPath);
+    const isDir = entry.isDirectory();
 
-    if (entry.isDirectory()) {
-      if (fuzzyMatch(entry.name, pattern) || fuzzyMatch(relPath, pattern)) {
-        try {
-          const stat = await fs.stat(fullPath);
-          results.push({
-            path: relPath,
-            name: entry.name,
-            size: 0,
-            modifiedAt: stat.mtime.toISOString(),
-          });
-        } catch { /* skip */ }
-      }
+    if (fuzzyMatch(entry.name, pattern) || fuzzyMatch(relPath, pattern)) {
+      try {
+        const stat = await fs.stat(fullPath);
+        results.push({
+          path: relPath,
+          name: entry.name,
+          size: isDir ? 0 : stat.size,
+          modifiedAt: stat.mtime.toISOString(),
+        });
+      } catch { /* skip */ }
+    }
+    if (isDir) {
       await walkDir(fullPath, root, pattern, results, maxResults, depth + 1);
-    } else {
-      if (fuzzyMatch(entry.name, pattern) || fuzzyMatch(relPath, pattern)) {
-        try {
-          const stat = await fs.stat(fullPath);
-          results.push({
-            path: relPath,
-            name: entry.name,
-            size: stat.size,
-            modifiedAt: stat.mtime.toISOString(),
-          });
-        } catch { /* skip */ }
-      }
     }
   }
 }

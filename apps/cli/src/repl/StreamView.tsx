@@ -1,7 +1,7 @@
 import React, { memo, useMemo } from "react";
 import { Box, Text } from "ink";
 import { styles } from "../render/styles.js";
-import type { ServerFrame } from "@harness/shared";
+import type { ServerFrame, SubagentToolCallSummary } from "@harness/shared";
 import { isRunStatusTerminalFrame } from "../client/ws.js";
 import { sanitizeTerminalText } from "../output/sanitize.js";
 import { renderFileEdit } from "../render/diff.js";
@@ -26,7 +26,7 @@ export type StreamItem =
   | { type: "approval"; requestId: string; description: string }
   | { type: "summary"; status: string; tokens: number | null; tokensPartial: boolean; costMicros: number | null; costUnavailable: boolean; durationMs: number | null }
   | { type: "task"; status: string; text: string }
-  | { type: "subagent"; childRunId: string; sourceCallId: string; name: string; phase: "spawned" | "completed"; status: string }
+  | { type: "subagent"; childRunId: string; sourceCallId: string; name: string; phase: "spawned" | "completed"; status: string; toolCalls?: SubagentToolCallSummary[] }
   | { type: "system"; text: string }
   | { type: "error"; message: string };
 
@@ -134,6 +134,7 @@ export function ingestStreamFrame(buffer: StreamBuffer, frame: ServerFrame, cwd:
         name: payload.subagent_name,
         phase: "completed",
         status: payload.status,
+        ...(payload.tool_calls && payload.tool_calls.length > 0 ? { toolCalls: payload.tool_calls } : {}),
       });
       break;
     }
@@ -273,7 +274,7 @@ export function formatScrollIndicator(scrollOffset: number, width: number): stri
 
 /**
  * Turn separator. With a timestamp it fills to `width` (── you · 14:32 ─────);
- * without one it is a short sub-label (── claude ──).
+ * without one it is a short sub-label (── Gumbo ──).
  */
 export function formatTurnHeader(label: string, width: number, at?: string): string {
   if (at === undefined) return `── ${label} ──`;
@@ -355,7 +356,7 @@ function renderStreamItem(item: StreamItem, width: number): string {
     case "user":
       return `${styles.brand(formatTurnHeader("you", width, item.at))}\n${styles.user(sanitizeTerminalText(item.text))}`;
     case "assistant":
-      return `${styles.brand(formatTurnHeader("claude", width))}\n${styles.muted(renderMarkdown(item.text))}`;
+      return `${styles.brand(formatTurnHeader("Gumbo", width))}\n${styles.muted(renderMarkdown(item.text))}`;
     case "thinking":
       return styles.thinking(`${glyph.thinking} Thinking...\n  ${sanitizeTerminalText(item.text)}`);
     case "tool":
@@ -416,10 +417,42 @@ function formatSubagentCard(item: Extract<StreamItem, { type: "subagent" }>, wid
   const gap = Math.max(1, innerWidth - displayName.length - statusPill.length);
   const bodyLine = `${border("│")}  ${nameStyle(displayName)}${" ".repeat(gap)}${statusStyle(statusPill)} ${border("│")}`;
 
+  const toolLines = formatSubagentToolLines(item.toolCalls ?? [], innerWidth, border, isMuted);
+
   const bottomFill = Math.max(0, safeWidth - 2);
   const bottomLine = border(`╰${"─".repeat(bottomFill)}╯`);
 
-  return `${topLine}\n${bodyLine}\n${bottomLine}`;
+  return [topLine, bodyLine, ...toolLines, bottomLine].join("\n");
+}
+
+// The SDK only surfaces a sub-agent's tool calls in the completed `task`
+// result (never live), so these lines appear once the card flips to a
+// terminal status — filling what was previously an empty box.
+const MAX_SUBAGENT_TOOL_LINES = 12;
+
+function formatSubagentToolLines(
+  toolCalls: readonly SubagentToolCallSummary[],
+  innerWidth: number,
+  border: (text: string) => string,
+  isMuted: boolean,
+): string[] {
+  if (toolCalls.length === 0) return [];
+  const labelWidth = Math.max(1, innerWidth - 2);
+  const visible = toolCalls.slice(0, MAX_SUBAGENT_TOOL_LINES);
+  const lines = visible.map((tc) => {
+    const glyphChar = tc.ok ? glyph.done : glyph.failed;
+    const glyphStyle = isMuted ? styles.muted : tc.ok ? styles.glyphOk : styles.glyphErr;
+    const labelStyle = isMuted ? styles.muted : styles.tool;
+    const label = cleanInline(tc.detail ? `${tc.name} ${tc.detail}` : tc.name) || tc.name;
+    const field = truncateMiddle(label, labelWidth).padEnd(labelWidth, " ");
+    return `${border("│")}  ${glyphStyle(glyphChar)} ${labelStyle(field)} ${border("│")}`;
+  });
+  const overflow = toolCalls.length - visible.length;
+  if (overflow > 0) {
+    const field = `… +${overflow} more (${toolCalls.length} total)`.slice(0, innerWidth).padEnd(innerWidth, " ");
+    lines.push(`${border("│")}  ${styles.muted(field)} ${border("│")}`);
+  }
+  return lines;
 }
 
 function formatSubagentStatus(status: string): string {

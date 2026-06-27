@@ -43,11 +43,7 @@ export class ActiveRuns {
   }
 
   forAgent(agentId: string): CancelableRun[] {
-    const out: CancelableRun[] = [];
-    for (const c of this.byRunId.values()) {
-      if (c.agentId === agentId) out.push(c);
-    }
-    return out;
+    return this.all().filter((c) => c.agentId === agentId);
   }
 
   /**

@@ -71,7 +71,13 @@ export async function registerUsageRoutes(app: FastifyInstance, deps: UsageRoute
     if (!parsed.success) return send422(reply, parsed.error);
     const key = req.url;
     const cached = getCached(cache, key) as UsageSummaryAggregate | undefined;
-    const summary = cached ?? setCached(cache, key, deps.runsRepo.usageSummary(toRangeOptions(parsed.data))) as UsageSummaryAggregate;
+    const summary =
+      cached ??
+      (setCached(
+        cache,
+        key,
+        deps.runsRepo.usageSummary(toRangeOptions(parsed.data)),
+      ) as UsageSummaryAggregate);
     const lastVerifiedAt = deps.settingsRepo.get<string | null>(
       PRICING_SETTING_KEYS.lastVerifiedAt,
     ) ?? null;

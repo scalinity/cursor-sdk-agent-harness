@@ -1,10 +1,11 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import type { RunSummary, SdkRunStatus, WorkspaceAllowlistRow } from "@harness/shared";
 import { cn } from "../../lib/cn.js";
 import { useRunStore } from "../../state/run-store.js";
 import { useWorkspaceAllowlist } from "../../hooks/useWorkspaceAllowlist.js";
 import { useActiveWorkspace } from "../../hooks/useActiveWorkspace.js";
 import { ChevronDownIcon, FolderIcon, PlusIcon, XIcon } from "./ToolbarIcons.js";
+import { workspaceLabel } from "../../lib/workspace-label.js";
 import { httpRequest, mutatingRequest } from "../../lib/http-client.js";
 import { useUiStore } from "../../state/ui-store.js";
 import { csrfTokenResponseSchema } from "@harness/shared";
@@ -41,12 +42,6 @@ function isTerminal(status: SdkRunStatus): boolean {
   return status !== "RUNNING" && status !== "CREATING";
 }
 
-function workspaceLabel(ws: WorkspaceAllowlistRow): string {
-  if (ws.label && ws.label.length > 0) return ws.label;
-  const segments = ws.path.split("/").filter((s) => s.length > 0);
-  return segments[segments.length - 1] ?? ws.path;
-}
-
 export function SessionsRail({
   runs,
   activeRunId,
@@ -56,7 +51,6 @@ export function SessionsRail({
   onDeleteRun,
   onRenameRun,
 }: SessionsRailProps) {
-  const searchRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
   // Workspaces explicitly collapsed by the user. Default is expanded, so a
   // freshly-loaded rail shows every workspace's chats without a click.
@@ -140,7 +134,6 @@ export function SessionsRail({
 
       <div className="mx-2.5 mb-2 flex items-center gap-1.5 rounded-md border border-border-subtle bg-surface-1 px-2 py-1 text-md text-text-tertiary">
         <input
-          ref={searchRef}
           data-rail-search="true"
           placeholder="Search chats…"
           value={query}
@@ -370,7 +363,6 @@ function RailItem({ run, isActive, onSelectRun, onDeleteRun, onRenameRun }: Rail
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
-  const renameInputRef = useRef<HTMLInputElement | null>(null);
 
   const label = run.name ?? run.promptPreview ?? run.id;
 
@@ -423,7 +415,6 @@ function RailItem({ run, isActive, onSelectRun, onDeleteRun, onRenameRun }: Rail
         {renaming ? (
           <input
             ref={(node) => {
-              renameInputRef.current = node;
               // Select the text once the input mounts.
               node?.select();
             }}

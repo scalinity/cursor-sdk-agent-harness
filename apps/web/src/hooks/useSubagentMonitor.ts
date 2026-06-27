@@ -90,15 +90,10 @@ export function useSubagentMonitor(parentRunId: string | null): UseSubagentMonit
     [snapshot.subagents],
   );
 
-  // Select a stable string fingerprint from the store so the selector never
-  // allocates a new object (which would trip "getSnapshot should be cached").
-  // The actual Record<string, string[]> is derived in useMemo below.
-  const eventStreamsKey = useRunStore((state) => {
-    if (childRunIdsKey.length === 0 || !parentRunId) return "";
-    const parentEvents = state.eventsByRunId[parentRunId]?.subagentLifecycleEvents ?? [];
-    return parentEvents.map((e) => `${e.seq}:${e.kind}`).join("|");
-  });
-
+  // `lifecycleKey` is a stable string fingerprint of the parent's lifecycle
+  // events (selecting the array directly would trip "getSnapshot should be
+  // cached"). It also serves as the recompute trigger for the derived
+  // Record<string, string[]> below — when it changes, the events changed.
   const eventStreamsByRunId = useMemo((): Record<string, string[]> => {
     if (childRunIdsKey.length === 0 || !parentRunId) return {};
     const childRunIds = new Set(childRunIdsKey.split("|"));
@@ -113,9 +108,9 @@ export function useSubagentMonitor(parentRunId: string | null): UseSubagentMonit
       streams[childRunId]?.push(formatLifecycleEvent(event));
     }
     return streams;
-    // eventStreamsKey changes when the relevant events change — triggers recompute.
+    // lifecycleKey changes when the relevant events change — triggers recompute.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parentRunId, childRunIdsKey, eventStreamsKey]);
+  }, [parentRunId, childRunIdsKey, lifecycleKey]);
 
   const reload = useCallback(async () => {
     if (!parentRunId) {

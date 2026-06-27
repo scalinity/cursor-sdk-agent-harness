@@ -19,11 +19,16 @@ const SPEED_OPTIONS: ReadonlyArray<SelectOption<ReplaySpeed>> = SPEEDS.map((valu
   label: value,
 }));
 
+/** Narrow an event payload to a plain object record, or null for non-objects. */
+function payloadRecord(payload: unknown): Record<string, unknown> | null {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
+  return payload as Record<string, unknown>;
+}
+
 function eventHasError(event: { kind: string; payload: unknown }): boolean {
   if (event.kind.toLowerCase().includes("error")) return true;
-  if (typeof event.payload !== "object" || event.payload === null || Array.isArray(event.payload)) return false;
-  const record = event.payload as Record<string, unknown>;
-  return record.status === "error" || record.status === "ERROR";
+  const record = payloadRecord(event.payload);
+  return record?.status === "error" || record?.status === "ERROR";
 }
 
 export function RunReplay() {
@@ -35,10 +40,9 @@ export function RunReplay() {
   useSettings();
   const replay = useRunReplay({ runId, speed, paused, startFromSeq: targetSeq });
   const maxSeq = replay.allEvents.at(-1)?.seq ?? summary.run?.toolCallCount ?? 0;
-  const usageUnavailable = summary.run?.usageSource === "unavailable" || replay.allEvents.some((event) => {
-    if (typeof event.payload !== "object" || event.payload === null || Array.isArray(event.payload)) return false;
-    return (event.payload as Record<string, unknown>).usage_source === "unavailable";
-  });
+  const usageUnavailable = summary.run?.usageSource === "unavailable" || replay.allEvents.some(
+    (event) => payloadRecord(event.payload)?.usage_source === "unavailable",
+  );
 
   const jumpTargets = useMemo(() => {
     const error = replay.allEvents.find(eventHasError)?.seq ?? null;

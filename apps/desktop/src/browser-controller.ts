@@ -54,6 +54,11 @@ function hostOf(url: string): string {
   }
 }
 
+/** Promise that resolves after `ms` milliseconds. */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Map Chromium's numeric console level to our ConsoleLevel enum. */
 function consoleLevelFromChromium(level: number): ConsoleLevel {
   switch (level) {
@@ -269,21 +274,19 @@ export class BrowserController {
   }
 
   back(agentId: BrowserId): BrowserState {
-    const view = this.get(agentId);
-    if (view && view.webContents.navigationHistory.canGoBack()) {
-      view.webContents.navigationHistory.goBack();
-      this.setLastAction(agentId, "back");
-    }
-    return this.snapshotState(agentId);
+    return this.runHistoryCommand(agentId, "back", (history) => {
+      if (!history.canGoBack()) return false;
+      history.goBack();
+      return true;
+    });
   }
 
   forward(agentId: BrowserId): BrowserState {
-    const view = this.get(agentId);
-    if (view && view.webContents.navigationHistory.canGoForward()) {
-      view.webContents.navigationHistory.goForward();
-      this.setLastAction(agentId, "forward");
-    }
-    return this.snapshotState(agentId);
+    return this.runHistoryCommand(agentId, "forward", (history) => {
+      if (!history.canGoForward()) return false;
+      history.goForward();
+      return true;
+    });
   }
 
   reload(agentId: BrowserId): BrowserState {
@@ -300,6 +303,22 @@ export class BrowserController {
     if (view) {
       view.webContents.stop();
       this.setLastAction(agentId, "stop");
+    }
+    return this.snapshotState(agentId);
+  }
+
+  /**
+   * Shared back/forward flow: run `act` against the view's navigation history
+   * (when a view exists) and record `action` only when `act` actually moved.
+   */
+  private runHistoryCommand(
+    agentId: BrowserId,
+    action: string,
+    act: (history: WebContents["navigationHistory"]) => boolean,
+  ): BrowserState {
+    const view = this.get(agentId);
+    if (view && act(view.webContents.navigationHistory)) {
+      this.setLastAction(agentId, action);
     }
     return this.snapshotState(agentId);
   }
@@ -410,7 +429,7 @@ export class BrowserController {
     this.setLastAction(agentId, `click ${ref}`);
     this.emitAction(agentId, { type: "click", ref, rect: { x: 0, y: 0, width: 0, height: 0 } });
     // Brief wait for navigation/state changes triggered by the click
-    await new Promise((r) => setTimeout(r, 100));
+    await delay(100);
     return { clicked: true, urlAfter: wc.getURL(), ms: Date.now() - start };
   }
 
@@ -493,7 +512,7 @@ export class BrowserController {
     const start = Date.now();
 
     if (opts.ms !== undefined) {
-      await new Promise((r) => setTimeout(r, Math.min(opts.ms!, timeout)));
+      await delay(Math.min(opts.ms, timeout));
       return { matched: true, ms: Date.now() - start };
     }
 
@@ -513,7 +532,7 @@ export class BrowserController {
 
     while (Date.now() - start < timeout) {
       if (await poll()) return { matched: true, ms: Date.now() - start };
-      await new Promise((r) => setTimeout(r, 200));
+      await delay(200);
     }
     return { matched: false, ms: Date.now() - start };
   }

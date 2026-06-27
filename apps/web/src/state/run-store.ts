@@ -357,30 +357,11 @@ export const useRunStore = create<RunState>((set) => ({
       const agentId = evt.agent_id;
       const replayed = options?.replayed ?? frame.replayed ?? false;
 
-      // Defensive copy of event state so we never mutate the prior snapshot.
+      // Shallow copy of event state so we never mutate the prior snapshot.
+      // The nested containers (Maps, arrays, records) are themselves replaced
+      // immutably below before any mutation.
       const prevEvents = state.eventsByRunId[runId];
-      const nextEvents: RunEventState = prevEvents
-        ? {
-            seqList: prevEvents.seqList,
-            bySeq: prevEvents.bySeq,
-            byEventId: prevEvents.byEventId,
-            eventChunks: prevEvents.eventChunks,
-            eventsVersion: prevEvents.eventsVersion,
-            lastSeq: prevEvents.lastSeq,
-            lastReceivedAt: prevEvents.lastReceivedAt,
-            assistantText: prevEvents.assistantText,
-            thinkingText: prevEvents.thinkingText,
-            thinkingDurationMs: prevEvents.thinkingDurationMs,
-            toolCallCount: prevEvents.toolCallCount,
-            toolCallProjections: prevEvents.toolCallProjections,
-            toolCallGroups: prevEvents.toolCallGroups,
-            codeEditEvents: prevEvents.codeEditEvents,
-            codeEditEventBySourceCallId: prevEvents.codeEditEventBySourceCallId,
-            subagentLifecycleEvents: prevEvents.subagentLifecycleEvents,
-            approvalToolCallIdByRequestId: prevEvents.approvalToolCallIdByRequestId,
-            approvalsByRequestId: prevEvents.approvalsByRequestId,
-          }
-        : emptyEventState();
+      const nextEvents: RunEventState = prevEvents ? { ...prevEvents } : emptyEventState();
 
       // Skip duplicates (replay edge cases where we already saw a seq).
       if (nextEvents.bySeq.has(evt.seq)) {

@@ -29,6 +29,20 @@ export function useStreamingTextNode(input: UseStreamingTextNodeInput): RefCallb
   const latestInputRef = useRef(input);
   latestInputRef.current = input;
 
+  // Ensure the element holds exactly one text node we own, (re)creating it if
+  // missing or reparented. Returns the node; resets the last-seen text when a
+  // fresh node is created so the next write replaces rather than appends.
+  const ensureTextNode = useCallback((element: HTMLSpanElement): Text => {
+    const existing = textNodeRef.current;
+    if (existing && existing.parentNode === element) return existing;
+    const textNode = document.createTextNode("");
+    element.textContent = "";
+    element.appendChild(textNode);
+    textNodeRef.current = textNode;
+    lastSeenTextRef.current = "";
+    return textNode;
+  }, []);
+
   const flush = useCallback(() => {
     rafRef.current = null;
     const pending = pendingRef.current;
@@ -36,14 +50,7 @@ export function useStreamingTextNode(input: UseStreamingTextNodeInput): RefCallb
     const element = elementRef.current;
     if (!pending || !element) return;
 
-    let textNode = textNodeRef.current;
-    if (!textNode || textNode.parentNode !== element) {
-      textNode = document.createTextNode("");
-      element.textContent = "";
-      element.appendChild(textNode);
-      textNodeRef.current = textNode;
-      lastSeenTextRef.current = "";
-    }
+    const textNode = ensureTextNode(element);
 
     const previous = lastSeenTextRef.current;
     const shouldReplace = pending.isReplacement || !pending.text.startsWith(previous);
@@ -53,7 +60,7 @@ export function useStreamingTextNode(input: UseStreamingTextNodeInput): RefCallb
       textNode.nodeValue = `${textNode.nodeValue ?? ""}${pending.text.slice(previous.length)}`;
     }
     lastSeenTextRef.current = pending.text;
-  }, []);
+  }, [ensureTextNode]);
 
   const schedule = useCallback(
     (update: PendingUpdate) => {
@@ -72,15 +79,10 @@ export function useStreamingTextNode(input: UseStreamingTextNodeInput): RefCallb
         lastSeenTextRef.current = "";
         return;
       }
-      if (!textNodeRef.current || textNodeRef.current.parentNode !== node) {
-        const textNode = document.createTextNode("");
-        node.textContent = "";
-        node.appendChild(textNode);
-        textNodeRef.current = textNode;
-      }
+      ensureTextNode(node);
       schedule({ text: latestInputRef.current.text, isReplacement: true });
     },
-    [schedule],
+    [ensureTextNode, schedule],
   );
 
   useEffect(() => {

@@ -1,8 +1,12 @@
 import type { ReactElement } from "react";
 import { render } from "ink";
+import { DISABLE_MOUSE, ENABLE_MOUSE } from "./mouse.js";
 
-const ENTER_ALT_SCREEN = "\u001b[?1049h\u001b[2J\u001b[?25l";
-const EXIT_ALT_SCREEN = "\u001b[?25h\u001b[?1049l";
+// Mouse reporting is enabled alongside the alternate screen and, critically,
+// disabled on every teardown path below — leaving a terminal in mouse-reporting
+// mode after exit makes clicks spew escape codes, so DISABLE_MOUSE leads here.
+const ENTER_ALT_SCREEN = `[?1049h[2J[?25l${ENABLE_MOUSE}`;
+const EXIT_ALT_SCREEN = `${DISABLE_MOUSE}[?25h[?1049l`;
 
 type SignalName = "SIGINT" | "SIGTERM" | "SIGHUP";
 

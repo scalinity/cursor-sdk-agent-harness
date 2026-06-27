@@ -357,6 +357,52 @@ describe("normalize — discriminant coverage", () => {
     });
   });
 
+  it("attaches the sub-agent's tool calls to subagent.completed from the task result transcript", () => {
+    const out = normalize({
+      raw: {
+        type: "tool_call",
+        agent_id: AGENT_ID,
+        run_id: RUN_ID,
+        call_id: "task-1",
+        name: "task",
+        status: "completed",
+        args: { subagentType: { kind: "explore", name: "Explorer" } },
+        result: {
+          status: "success",
+          value: {
+            conversationSteps: [
+              { thinkingMessage: { text: "plan" } },
+              { toolCall: { globToolCall: { args: { globPattern: "**/*" }, result: { success: {} } } } },
+              { toolCall: { readToolCall: { args: { path: "/a/b/SKILL.md" }, result: { success: {} } } } },
+            ],
+          },
+        },
+      },
+      runContext: ctx(),
+    });
+
+    expect((out.events[1]?.payload as { tool_calls?: unknown }).tool_calls).toEqual([
+      { name: "glob", detail: "**/*", ok: true },
+      { name: "read", detail: "SKILL.md", ok: true },
+    ]);
+  });
+
+  it("omits tool_calls on subagent.spawned (no transcript exists yet)", () => {
+    const out = normalize({
+      raw: {
+        type: "tool_call",
+        agent_id: AGENT_ID,
+        run_id: RUN_ID,
+        call_id: "task-1",
+        name: "task",
+        status: "running",
+        args: { subagentType: { kind: "explore", name: "Explorer" } },
+      },
+      runContext: ctx(),
+    });
+    expect((out.events[1]?.payload as { tool_calls?: unknown }).tool_calls).toBeUndefined();
+  });
+
   it("does not treat a generic task tool call as a sub-agent", () => {
     const out = normalize({
       raw: {

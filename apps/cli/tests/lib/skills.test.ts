@@ -137,4 +137,72 @@ describe("skills library", () => {
     expect(await resolveSkillBySlashCommand("skill-creator", workspace)).toMatchObject({ name: "skill-creator" });
     expect(await resolveSkillBySlashCommand("missing", workspace)).toBeNull();
   });
+
+  it("parses folded block-scalar descriptions (>-)", async () => {
+    const workspace = await makeWorkspace();
+    const skillsRoot = path.join(workspace, ".cursor/skills");
+    const skillDir = path.join(skillsRoot, "folded-skill");
+    await mkdir(skillDir, { recursive: true });
+    const content = [
+      "---",
+      "name: folded-skill",
+      "description: >-",
+      "  This is a folded",
+      "  multi-line description.",
+      "---",
+      "",
+      "# Body",
+    ].join("\n");
+    await (await import("node:fs/promises")).writeFile(path.join(skillDir, "SKILL.md"), content, "utf8");
+
+    const skills = await listSkills({ workspace });
+    const skill = skills.find((s) => s.name === "folded-skill");
+    expect(skill).toBeDefined();
+    expect(skill!.description).toBe("This is a folded multi-line description.");
+  });
+
+  it("parses literal block-scalar descriptions (|-)", async () => {
+    const workspace = await makeWorkspace();
+    const skillsRoot = path.join(workspace, ".cursor/skills");
+    const skillDir = path.join(skillsRoot, "literal-skill");
+    await mkdir(skillDir, { recursive: true });
+    const content = [
+      "---",
+      "name: literal-skill",
+      "description: |-",
+      "  First line.",
+      "  Second line.",
+      "---",
+      "",
+      "# Body",
+    ].join("\n");
+    await (await import("node:fs/promises")).writeFile(path.join(skillDir, "SKILL.md"), content, "utf8");
+
+    const skills = await listSkills({ workspace });
+    const skill = skills.find((s) => s.name === "literal-skill");
+    expect(skill).toBeDefined();
+    expect(skill!.description).toBe("First line.\nSecond line.");
+  });
+
+  it("parses frontmatter with a leading blank line", async () => {
+    const workspace = await makeWorkspace();
+    const skillsRoot = path.join(workspace, ".cursor/skills");
+    const skillDir = path.join(skillsRoot, "leading-blank");
+    await mkdir(skillDir, { recursive: true });
+    const content = [
+      "",
+      "---",
+      "name: leading-blank",
+      "description: Skill whose file starts with a blank line.",
+      "---",
+      "",
+      "# Body",
+    ].join("\n");
+    await (await import("node:fs/promises")).writeFile(path.join(skillDir, "SKILL.md"), content, "utf8");
+
+    const skills = await listSkills({ workspace });
+    const skill = skills.find((s) => s.name === "leading-blank");
+    expect(skill).toBeDefined();
+    expect(skill!.description).toBe("Skill whose file starts with a blank line.");
+  });
 });

@@ -133,40 +133,30 @@ export function useAgents(): UseAgentsResult {
     [refreshCsrfToken, upsertAgent],
   );
 
-  const updateAgentModel = useCallback(
-    async (agentId: string, modelId: string): Promise<AgentSummary> => {
-      const updated = await mutatingRequest(
-        `/api/agents/${encodeURIComponent(agentId)}`,
-        {
-          method: "PATCH",
-          body: { modelId },
-          getCsrfToken: () => useUiStore.getState().csrfToken,
-          refreshCsrfToken,
-          responseSchema: agentSummarySchema,
-        },
-      );
+  const patchAgent = useCallback(
+    async (agentId: string, body: Record<string, unknown>): Promise<AgentSummary> => {
+      const updated = await mutatingRequest(`/api/agents/${encodeURIComponent(agentId)}`, {
+        method: "PATCH",
+        body,
+        getCsrfToken: () => useUiStore.getState().csrfToken,
+        refreshCsrfToken,
+        responseSchema: agentSummarySchema,
+      });
       upsertAgent(updated);
       return updated;
     },
     [refreshCsrfToken, upsertAgent],
   );
 
+  const updateAgentModel = useCallback(
+    (agentId: string, modelId: string): Promise<AgentSummary> => patchAgent(agentId, { modelId }),
+    [patchAgent],
+  );
+
   const updateAgentModelParams = useCallback(
-    async (agentId: string, modelParams: ModelParameterValue[]): Promise<AgentSummary> => {
-      const updated = await mutatingRequest(
-        `/api/agents/${encodeURIComponent(agentId)}`,
-        {
-          method: "PATCH",
-          body: { modelParams },
-          getCsrfToken: () => useUiStore.getState().csrfToken,
-          refreshCsrfToken,
-          responseSchema: agentSummarySchema,
-        },
-      );
-      upsertAgent(updated);
-      return updated;
-    },
-    [refreshCsrfToken, upsertAgent],
+    (agentId: string, modelParams: ModelParameterValue[]): Promise<AgentSummary> =>
+      patchAgent(agentId, { modelParams }),
+    [patchAgent],
   );
 
   const terminateAgent = useCallback(

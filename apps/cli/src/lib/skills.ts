@@ -89,16 +89,69 @@ function assertPathInside(parent: string, child: string): void {
   }
 }
 
+function parseBlockScalar(indicator: string, lines: string[], startIndex: number): { value: string; nextIndex: number } {
+  // We only distinguish folded (`>`) from literal (`|`). The chomping
+  // indicators (`-`/`+`) only affect trailing newlines, which the final
+  // trim() discards for these single-value frontmatter fields — so handling
+  // them would be dead code.
+  const folded = indicator.startsWith(">");
+  const contentLines: string[] = [];
+  let i = startIndex;
+  for (; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (line.length === 0) {
+      contentLines.push("");
+      continue;
+    }
+    if (!line.startsWith(" ") && !line.startsWith("\t")) break;
+    contentLines.push(line.replace(/^[ \t]+/, ""));
+  }
+  while (contentLines.length > 0 && contentLines[contentLines.length - 1] === "") {
+    contentLines.pop();
+  }
+  let value: string;
+  if (folded) {
+    const foldedLines: string[] = [];
+    let buffer = "";
+    for (const line of contentLines) {
+      if (line === "") {
+        if (buffer.length > 0) {
+          foldedLines.push(buffer);
+          buffer = "";
+        }
+        foldedLines.push("");
+      } else {
+        buffer = buffer.length > 0 ? `${buffer} ${line}` : line;
+      }
+    }
+    if (buffer.length > 0) foldedLines.push(buffer);
+    value = foldedLines.join("\n");
+  } else {
+    value = contentLines.join("\n");
+  }
+  return { value: value.trim(), nextIndex: i };
+}
+
 function parseFrontmatter(raw: string): { frontmatter: SkillFrontmatter; body: string } {
-  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  const match = raw.match(/^\s*---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!match) return { frontmatter: {}, body: raw };
 
   const frontmatter: SkillFrontmatter = {};
-  for (const line of match[1]!.split("\n")) {
+  const lines = match[1]!.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
     const colonIdx = line.indexOf(":");
     if (colonIdx === -1) continue;
     const key = line.slice(0, colonIdx).trim();
-    const value = parseYamlScalar(line.slice(colonIdx + 1).trim());
+    const rawValue = line.slice(colonIdx + 1).trim();
+    let value: string;
+    if (rawValue === ">" || rawValue === "|" || rawValue === ">-" || rawValue === "|-" || rawValue === ">+" || rawValue === "|+") {
+      const block = parseBlockScalar(rawValue, lines, i + 1);
+      value = block.value;
+      i = block.nextIndex - 1;
+    } else {
+      value = parseYamlScalar(rawValue);
+    }
     if (key === "name") frontmatter.name = value;
     else if (key === "description") frontmatter.description = value;
   }

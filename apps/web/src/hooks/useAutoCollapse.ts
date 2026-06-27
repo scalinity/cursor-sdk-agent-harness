@@ -4,11 +4,8 @@ export function useAutoCollapse(input: { status: "running" | "completed" | "erro
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
-    if (input.status === "running") {
-      setCollapsed(false);
-      return undefined;
-    }
-    if (input.status === "error" || input.pinned) {
+    // Stay expanded while running, on error, or when the user pinned it open.
+    if (input.status === "running" || input.status === "error" || input.pinned) {
       setCollapsed(false);
       return undefined;
     }

@@ -141,16 +141,14 @@ export async function contextSearch(
   const qLower = query.toLowerCase();
 
   if (wantFiles) {
-    const files = await walkForFiles(workspaceRoot, qLower, 20);
-    result.files = files;
+    result.files = await walkForFiles(workspaceRoot, qLower, 20);
   }
 
   if (wantSymbols) {
     const allSymbols = await collectSymbols(workspaceRoot);
-    const matched = allSymbols
+    result.symbols = allSymbols
       .filter((s) => s.name.toLowerCase().includes(qLower))
       .slice(0, 20);
-    result.symbols = matched;
   }
 
   return result;

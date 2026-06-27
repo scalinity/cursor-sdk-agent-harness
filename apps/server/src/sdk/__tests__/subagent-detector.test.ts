@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CanonicalRunEventDraft } from "../normalizer.js";
-import { detectSubagentSpawn } from "../subagent-detector.js";
+import { detectSubagentSpawn, extractSubagentToolCalls } from "../subagent-detector.js";
 
 const BASE_EVENT: CanonicalRunEventDraft = {
   sdkType: "tool_call",
@@ -68,5 +68,65 @@ describe("detectSubagentSpawn", () => {
       callId: "call-3",
       parentRunId: "run-parent",
     });
+  });
+});
+
+describe("extractSubagentToolCalls", () => {
+  // Shape mirrors the verified completed `task` result (ledger OQ-32):
+  // result.value.conversationSteps[] with thinking/assistant/toolCall steps,
+  // each toolCall a oneof keyed `<name>ToolCall`.
+  function result(steps: unknown[]): unknown {
+    return { status: "success", value: { conversationSteps: steps } };
+  }
+
+  it("extracts a compact summary per toolCall step, skipping thinking/assistant", () => {
+    const out = extractSubagentToolCalls(
+      result([
+        { thinkingMessage: { text: "planning", durationMs: 3 } },
+        { assistantMessage: { text: "exploring" } },
+        { toolCall: { globToolCall: { args: { targetDirectory: "/x", globPattern: "**/*" }, result: { success: {} } } } },
+        { toolCall: { readToolCall: { args: { path: "/Users/danny/.claude/skills/benchmark/SKILL.md" }, result: { success: {} } } } },
+        { toolCall: { grepToolCall: { args: { pattern: "skill|prompt" }, result: { success: {} } } } },
+      ]),
+    );
+    expect(out).toEqual([
+      { name: "glob", detail: "**/*", ok: true },
+      { name: "read", detail: "SKILL.md", ok: true },
+      { name: "grep", detail: "skill|prompt", ok: true },
+    ]);
+  });
+
+  it("marks a tool call failed when the result is not the success variant", () => {
+    const out = extractSubagentToolCalls(
+      result([{ toolCall: { shellToolCall: { args: {}, result: { permissionDenied: {} } } } }]),
+    );
+    expect(out).toEqual([{ name: "shell", detail: "", ok: false }]);
+  });
+
+  it("shows the full command for shell-style details and the basename for paths", () => {
+    const out = extractSubagentToolCalls(
+      result([
+        { toolCall: { shellToolCall: { args: { command: "ls -la /tmp" }, result: { success: {} } } } },
+        { toolCall: { editToolCall: { args: { path: "/a/b/c/file.ts" }, result: { success: {} } } } },
+      ]),
+    );
+    expect(out).toEqual([
+      { name: "shell", detail: "ls -la /tmp", ok: true },
+      { name: "edit", detail: "file.ts", ok: true },
+    ]);
+  });
+
+  it("returns [] for a running task (no result), a non-transcript shape, or junk", () => {
+    expect(extractSubagentToolCalls(undefined)).toEqual([]);
+    expect(extractSubagentToolCalls({ status: "success" })).toEqual([]);
+    expect(extractSubagentToolCalls({ value: { conversationSteps: "nope" } })).toEqual([]);
+    expect(extractSubagentToolCalls("string")).toEqual([]);
+  });
+
+  it("caps extraction at 500 entries", () => {
+    const steps = Array.from({ length: 600 }, () => ({
+      toolCall: { readToolCall: { args: { path: "/a/f" }, result: { success: {} } } },
+    }));
+    expect(extractSubagentToolCalls(result(steps))).toHaveLength(500);
   });
 });

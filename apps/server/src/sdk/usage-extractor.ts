@@ -68,12 +68,13 @@ export function extractUsage(input: ExtractedUsageInput): ExtractedUsage {
   // gain. We do a defensive shape check: if it doesn't look parsed,
   // fall back to the safeParse path so callers handing us raw SDK shapes
   // still work.
-  const usage: ParsedTurnEndedUsage | null = looksParsed(input.rawUsage)
-    ? (input.rawUsage as ParsedTurnEndedUsage)
-    : (() => {
-        const parsed = turnEndedUsageShape.safeParse(input.rawUsage);
-        return parsed.success ? parsed.data : null;
-      })();
+  let usage: ParsedTurnEndedUsage | null;
+  if (looksParsed(input.rawUsage)) {
+    usage = input.rawUsage as ParsedTurnEndedUsage;
+  } else {
+    const parsed = turnEndedUsageShape.safeParse(input.rawUsage);
+    usage = parsed.success ? parsed.data : null;
+  }
   if (usage === null) {
     // Shape didn't match either pre-parsed accumulator OR raw turn-ended
     // payload — capture a redacted shape so ops can diagnose SDK drift.

@@ -1,6 +1,6 @@
 import type { FastifyReply } from "fastify";
 import type { z } from "zod";
-import type { AgentRuntimeError } from "../sdk/index.js";
+import type { AgentRuntimeError, WorkspaceRejectedError } from "../sdk/index.js";
 
 /**
  * Shared HTTP error responders for the route layer. These were previously
@@ -14,6 +14,22 @@ export function send422(reply: FastifyReply, error: z.ZodError): FastifyReply {
   return reply.code(422).send({
     code: "VALIDATION_ERROR",
     details: error.issues,
+  });
+}
+
+/** 403 response for a request whose workspace cwd(s) failed the policy check. */
+export function sendWorkspaceRejection(
+  reply: FastifyReply,
+  err: WorkspaceRejectedError,
+): FastifyReply {
+  return reply.code(403).send({
+    code: "WORKSPACE_REJECTED",
+    message: err.message,
+    details: err.details.map((d) => ({
+      input: d.input,
+      reason: d.decision.reason,
+      normalizedPath: d.decision.normalizedPath,
+    })),
   });
 }
 

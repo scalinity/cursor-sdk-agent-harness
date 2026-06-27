@@ -17,6 +17,11 @@ export interface SystemBannerProps {
   event: CanonicalRunEvent;
 }
 
+function sandboxLabelFor(enabled: boolean | undefined): string {
+  if (enabled === undefined) return "sandbox unknown";
+  return enabled ? "sandbox on" : "sandbox off";
+}
+
 function isPricingStale(value: string | null | undefined): boolean {
   if (!value) return true;
   const time = Date.parse(value);
@@ -30,12 +35,7 @@ export function SystemBanner({ event }: SystemBannerProps) {
   const stale = isPricingStale(lastVerifiedAt);
   const tools = payload.tools ?? [];
   const cwd = payload.cwd ?? [];
-  const sandboxLabel =
-    payload.sandbox_enabled === undefined
-      ? "sandbox unknown"
-      : payload.sandbox_enabled
-        ? "sandbox on"
-        : "sandbox off";
+  const sandboxLabel = sandboxLabelFor(payload.sandbox_enabled);
 
   return (
     <div className="system-banner">

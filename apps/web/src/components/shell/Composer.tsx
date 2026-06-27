@@ -87,9 +87,8 @@ export function Composer({
       const base = dictationBaseRef.current;
       // Safe single-space join: `base` is .trimEnd()'d at snapshot (line below),
       // and `text` is .trim()'d in the worker — so neither has leading/trailing spaces.
-      const next =
-        base.length > 0 && text.length > 0 ? `${base} ${text}` : base.length > 0 ? base : text;
-      setDraft(next);
+      const parts = [base, text].filter((part) => part.length > 0);
+      setDraft(parts.join(" "));
     },
     [setDraft],
   );
@@ -304,6 +303,18 @@ export function Composer({
     ? "Plan, Build, / for commands, @ for context"
     : "Send a prompt to the coding agent…";
 
+  function micTitle(): string {
+    if (!speech.supported) return "Voice input isn't available here";
+    return speech.isRecording ? "Stop recording" : "Dictate with your microphone";
+  }
+
+  function speechStatusText(): string | null {
+    if (speech.modelProgress !== null) return `Loading voice model… ${speech.modelProgress}%`;
+    if (speech.status === "transcribing") return "Transcribing…";
+    return null;
+  }
+  const sttStatus = speechStatusText();
+
   const canSend = ready && !busy && (draft.trim().length > 0 || attachments.length > 0);
 
   // The reasoning/thinking effort control (next to the model picker) is driven
@@ -409,13 +420,9 @@ export function Composer({
             />
           ) : null}
           <div className="ml-auto flex items-center gap-2">
-            {speech.modelProgress !== null ? (
+            {sttStatus !== null ? (
               <span className="composer-stt-status" aria-live="polite">
-                Loading voice model… {speech.modelProgress}%
-              </span>
-            ) : speech.status === "transcribing" ? (
-              <span className="composer-stt-status" aria-live="polite">
-                Transcribing…
+                {sttStatus}
               </span>
             ) : null}
             <button
@@ -429,13 +436,7 @@ export function Composer({
               }
               aria-pressed={speech.isRecording}
               aria-label={speech.isRecording ? "Stop recording" : "Record voice input"}
-              title={
-                speech.supported
-                  ? speech.isRecording
-                    ? "Stop recording"
-                    : "Dictate with your microphone"
-                  : "Voice input isn't available here"
-              }
+              title={micTitle()}
               className={cn("composer-mic", speech.isRecording && "composer-mic--recording")}
             >
               <MicIcon className="size-4" />

@@ -24,7 +24,7 @@ import {
   WorkspaceRejectedError,
   type AgentRuntime,
 } from "../sdk/index.js";
-import { send422, sendRuntimeError } from "./route-errors.js";
+import { send422, sendRuntimeError, sendWorkspaceRejection } from "./route-errors.js";
 
 export interface RunsRoutesDeps {
   runtime: AgentRuntime;
@@ -402,15 +402,7 @@ export async function registerRunsRoutes(
       return reply.code(201).send(createRunResponseSchema.parse(result));
     } catch (err) {
       if (err instanceof WorkspaceRejectedError) {
-        return reply.code(403).send({
-          code: "WORKSPACE_REJECTED",
-          message: err.message,
-          details: err.details.map((d) => ({
-            input: d.input,
-            reason: d.decision.reason,
-            normalizedPath: d.decision.normalizedPath,
-          })),
-        });
+        return sendWorkspaceRejection(reply, err);
       }
       if (err instanceof AgentRuntimeError) return sendRuntimeError(reply, err);
       throw err;

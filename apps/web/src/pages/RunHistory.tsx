@@ -71,8 +71,25 @@ function setListParam(next: URLSearchParams, key: string, values: string[]): voi
   else next.delete(key);
 }
 
+/** Add/remove `value` from the comma-list at `key`, preserving order-as-set. */
+function toggleListParam(next: URLSearchParams, key: string, current: string[], value: string): void {
+  const values = new Set(current);
+  if (values.has(value)) values.delete(value);
+  else values.add(value);
+  setListParam(next, key, [...values]);
+}
+
 function isStatus(value: string): value is SdkRunStatus {
   return STATUSES.includes(value as SdkRunStatus);
+}
+
+/** Filter-chip className: highlighted when active, bordered when not. `mono`
+ *  prefix is opt-in for chips that show identifiers (model ids). */
+function chipClass(active: boolean, mono = false): string {
+  const base = active
+    ? "h-control-md rounded-sm bg-accent-bg px-3 text-sm text-accent-primary"
+    : "h-control-md rounded-sm border border-border-subtle px-3 text-sm text-text-secondary";
+  return mono ? `mono ${base}` : base;
 }
 
 function rowCost(run: RunSummary): string {
@@ -242,7 +259,7 @@ export function RunHistory() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {["24h", "7d", "30d"].map((value) => (
-              <button key={value} className={preset === value ? "h-control-md rounded-sm bg-accent-bg px-3 text-sm text-accent-primary" : "h-control-md rounded-sm border border-border-subtle px-3 text-sm text-text-secondary"} type="button" onClick={() => applyPreset(value as Exclude<RangePreset, "custom">)}>{value}</button>
+              <button key={value} className={chipClass(preset === value)} type="button" onClick={() => applyPreset(value as Exclude<RangePreset, "custom">)}>{value}</button>
             ))}
             <input className="h-control-md rounded-sm border border-border-subtle bg-background px-2 text-sm" type="date" value={isoDateInput(new Date(from))} onChange={(event) => updateParams((next) => { next.set("range", "custom"); next.set("from", `${event.currentTarget.value}T00:00:00.000Z`); })} />
             <input className="h-control-md rounded-sm border border-border-subtle bg-background px-2 text-sm" type="date" value={isoDateInput(new Date(to))} onChange={(event) => updateParams((next) => { next.set("range", "custom"); next.set("to", `${event.currentTarget.value}T23:59:59.999Z`); })} />
@@ -263,45 +280,21 @@ export function RunHistory() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {agents.map((agent) => {
-              const active = selectedAgents.includes(agent.id);
-              return (
-                <button key={agent.id} className={active ? "h-control-md rounded-sm bg-accent-bg px-3 text-sm text-accent-primary" : "h-control-md rounded-sm border border-border-subtle px-3 text-sm text-text-secondary"} type="button" onClick={() => updateParams((next) => {
-                  const values = new Set(selectedAgents);
-                  if (values.has(agent.id)) values.delete(agent.id);
-                  else values.add(agent.id);
-                  setListParam(next, "agents", [...values]);
-                })}>{agent.name}</button>
-              );
-            })}
+            {agents.map((agent) => (
+              <button key={agent.id} className={chipClass(selectedAgents.includes(agent.id))} type="button" onClick={() => updateParams((next) => toggleListParam(next, "agents", selectedAgents, agent.id))}>{agent.name}</button>
+            ))}
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {STATUSES.map((status) => {
-              const active = selectedStatuses.includes(status);
-              return (
-                <button key={status} className={active ? "h-control-md rounded-sm bg-accent-bg px-3 text-sm text-accent-primary" : "h-control-md rounded-sm border border-border-subtle px-3 text-sm text-text-secondary"} type="button" onClick={() => updateParams((next) => {
-                  const values = new Set(selectedStatuses);
-                  if (values.has(status)) values.delete(status);
-                  else values.add(status);
-                  setListParam(next, "status", [...values]);
-                })}>{status}</button>
-              );
-            })}
+            {STATUSES.map((status) => (
+              <button key={status} className={chipClass(selectedStatuses.includes(status))} type="button" onClick={() => updateParams((next) => toggleListParam(next, "status", selectedStatuses, status))}>{status}</button>
+            ))}
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {modelOptions.map((model) => {
-              const active = selectedModels.includes(model);
-              return (
-                <button key={model} className={active ? "mono h-control-md rounded-sm bg-accent-bg px-3 text-sm text-accent-primary" : "mono h-control-md rounded-sm border border-border-subtle px-3 text-sm text-text-secondary"} type="button" onClick={() => updateParams((next) => {
-                  const values = new Set(selectedModels);
-                  if (values.has(model)) values.delete(model);
-                  else values.add(model);
-                  setListParam(next, "models", [...values]);
-                })}>{model}</button>
-              );
-            })}
+            {modelOptions.map((model) => (
+              <button key={model} className={chipClass(selectedModels.includes(model), true)} type="button" onClick={() => updateParams((next) => toggleListParam(next, "models", selectedModels, model))}>{model}</button>
+            ))}
           </div>
         </section>
 

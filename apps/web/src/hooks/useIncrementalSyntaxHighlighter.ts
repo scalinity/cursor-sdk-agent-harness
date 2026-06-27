@@ -25,17 +25,25 @@ export interface Decoration {
 
 const EMPTY_DECORATIONS: Decoration[] = [];
 
+// Lezer highlight token classes → harness `tk-*` classes, in priority order
+// (first matching group wins, matching the original sequential checks).
+const TOKEN_CLASS_GROUPS: ReadonlyArray<readonly [target: string, tokens: readonly string[]]> = [
+  ["tk-key", ["tok-keyword"]],
+  ["tk-str", ["tok-string", "tok-string2"]],
+  ["tk-num", ["tok-number"]],
+  ["tk-cmt", ["tok-comment"]],
+  ["tk-type", ["tok-typeName", "tok-className", "tok-namespace"]],
+  ["tk-prop", ["tok-propertyName"]],
+  ["tk-bool", ["tok-bool", "tok-atom"]],
+  ["tk-var", ["tok-variableName", "tok-variableName2"]],
+  ["tk-punct", ["tok-punctuation", "tok-operator"]],
+];
+
 function mapClassName(classes: string): string | null {
-  const names = classes.split(/\s+/);
-  if (names.some((name) => name === "tok-keyword")) return "tk-key";
-  if (names.some((name) => name === "tok-string" || name === "tok-string2")) return "tk-str";
-  if (names.some((name) => name === "tok-number")) return "tk-num";
-  if (names.some((name) => name === "tok-comment")) return "tk-cmt";
-  if (names.some((name) => name === "tok-typeName" || name === "tok-className" || name === "tok-namespace")) return "tk-type";
-  if (names.some((name) => name === "tok-propertyName")) return "tk-prop";
-  if (names.some((name) => name === "tok-bool" || name === "tok-atom")) return "tk-bool";
-  if (names.some((name) => name === "tok-variableName" || name === "tok-variableName2")) return "tk-var";
-  if (names.some((name) => name === "tok-punctuation" || name === "tok-operator")) return "tk-punct";
+  const names = new Set(classes.split(/\s+/));
+  for (const [target, tokens] of TOKEN_CLASS_GROUPS) {
+    if (tokens.some((token) => names.has(token))) return target;
+  }
   return null;
 }
 
@@ -45,16 +53,19 @@ function shellDecorations(text: string): Decoration[] {
   for (const match of text.matchAll(pattern)) {
     const value = match[0] ?? "";
     const index = match.index ?? 0;
-    const trimmedStart = value.length - value.trimStart().length;
-    const from = index + trimmedStart;
+    const trimmed = value.trimStart();
+    const from = index + (value.length - trimmed.length);
     const to = index + value.length;
-    const className = value.trimStart().startsWith("#")
-      ? "tk-cmt"
-      : value.trimStart().startsWith("-")
-        ? "tk-prop"
-        : value.trimStart().startsWith("\"") || value.trimStart().startsWith("'")
-          ? "tk-str"
-          : "tk-key";
+    let className: string;
+    if (trimmed.startsWith("#")) {
+      className = "tk-cmt";
+    } else if (trimmed.startsWith("-")) {
+      className = "tk-prop";
+    } else if (trimmed.startsWith('"') || trimmed.startsWith("'")) {
+      className = "tk-str";
+    } else {
+      className = "tk-key";
+    }
     decorations.push({ from, to, className });
   }
   return decorations;

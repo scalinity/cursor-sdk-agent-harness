@@ -86,7 +86,7 @@ export class HarnessHttpClient implements CliHttpPort {
   }
 
   async getAgent(agentId: string): Promise<AgentDetailResponse> {
-    return this.request("/api/agents/" + encodeURIComponent(agentId), { schema: agentDetailResponseSchema });
+    return this.request(`/api/agents/${encodeURIComponent(agentId)}`, { schema: agentDetailResponseSchema });
   }
 
   async createAgent(input: CreateAgentRequest): Promise<AgentSummary> {
@@ -96,7 +96,7 @@ export class HarnessHttpClient implements CliHttpPort {
 
   async updateAgent(agentId: string, input: UpdateAgentRequest): Promise<AgentDetailResponse> {
     const parsed = updateAgentRequestSchema.parse(input);
-    return this.request("/api/agents/" + encodeURIComponent(agentId), { method: "PATCH", body: parsed, schema: agentDetailResponseSchema });
+    return this.request(`/api/agents/${encodeURIComponent(agentId)}`, { method: "PATCH", body: parsed, schema: agentDetailResponseSchema });
   }
 
   async getOrCreateAgent(input: {
@@ -143,14 +143,14 @@ export class HarnessHttpClient implements CliHttpPort {
   }
 
   async getRun(runId: string): Promise<RunSummary> {
-    return this.request("/api/runs/" + encodeURIComponent(runId), { schema: runSummarySchema });
+    return this.request(`/api/runs/${encodeURIComponent(runId)}`, { schema: runSummarySchema });
   }
 
   async getRunEvents(
     runId: string,
     input: { afterSeq?: number; limit?: number; direction?: "asc" | "desc" } = {},
   ): Promise<GetRunEventsResponse> {
-    return this.request("/api/runs/" + encodeURIComponent(runId) + "/events", {
+    return this.request(`/api/runs/${encodeURIComponent(runId)}/events`, {
       query: {
         after_seq: input.afterSeq,
         limit: input.limit,

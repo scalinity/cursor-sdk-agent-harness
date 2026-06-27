@@ -147,7 +147,7 @@ describe("StreamView helpers", () => {
     );
     expect(out).toContain("── you · 14:32 ");
     expect(out).toContain("fix the bug");
-    expect(out).toContain("── claude ──");
+    expect(out).toContain("── Gumbo ──");
     expect(out).toContain("Done.");
     expect(out).toContain("Mode switched to agent.");
   });
@@ -231,6 +231,11 @@ describe("StreamView helpers", () => {
           subagent_name: "scroll reviewer",
           source_call_id: "task-review-scroll",
           status: "FINISHED",
+          tool_calls: [
+            { name: "glob", detail: "**/*", ok: true },
+            { name: "read", detail: "StreamView.tsx", ok: true },
+            { name: "shell", detail: "", ok: false },
+          ],
         },
       },
     } satisfies ServerFrame);
@@ -242,6 +247,48 @@ describe("StreamView helpers", () => {
     expect(output).toContain("✓ finished");
     expect(output).toContain("╭─");
     expect(output).toContain("╰─");
+    // The completed card now lists the sub-agent's own tool calls.
+    expect(output).toContain("glob **/*");
+    expect(output).toContain("read StreamView.tsx");
+    expect(output).toContain("shell");
+  });
+
+  it("shows an overflow footer when a sub-agent makes more tool calls than fit", () => {
+    let buffer = createStreamBuffer();
+    const toolCalls = Array.from({ length: 20 }, (_unused, index) => ({
+      name: "read",
+      detail: `file-${index}.ts`,
+      ok: true,
+    }));
+    buffer = ingestStreamFrame(buffer, {
+      ...base,
+      id: "frame-subagent-overflow",
+      type: "subagent_completed",
+      event: {
+        event_id: "00000000-0000-4000-8000-000000000313",
+        schema_version: 1,
+        seq: 1,
+        agent_id: "agent-1",
+        run_id: "run-1",
+        occurred_at: base.sent_at,
+        received_at: base.sent_at,
+        sdk_type: "task",
+        kind: "subagent.completed",
+        call_id: "task-overflow",
+        status: "completed",
+        payload: {
+          parent_run_id: "run-1",
+          child_run_id: "subagent-overflow-1234567890abcdef00",
+          subagent_name: "explorer",
+          source_call_id: "task-overflow",
+          status: "FINISHED",
+          tool_calls: toolCalls,
+        },
+      },
+    } satisfies ServerFrame);
+
+    const output = renderStreamItems(buffer.items);
+    expect(output).toContain("+8 more (20 total)");
   });
 
   it("renders sdk.task progress text instead of dropping it", () => {

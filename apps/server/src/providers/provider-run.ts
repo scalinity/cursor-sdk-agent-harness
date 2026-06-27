@@ -99,25 +99,32 @@ export class ProviderRunController implements CancelableRun {
           systemPrompt: this.init.systemPrompt,
           signal: this.abortController.signal,
         })) {
-          if (ev.type === "text_delta") {
-            finalText += ev.content;
-            this.emit({
-              type: "assistant",
-              agent_id: this.agentId,
-              run_id: this.runId,
-              message: { role: "assistant", content: [{ type: "text", text: ev.content }] },
-            });
-          } else if (ev.type === "thinking_delta") {
-            this.emit({
-              type: "thinking",
-              agent_id: this.agentId,
-              run_id: this.runId,
-              text: ev.content,
-            });
-          } else if (ev.type === "usage") {
-            usage = ev.usage;
-          } else if (ev.type === "error") {
-            errored = ev.message;
+          switch (ev.type) {
+            case "text_delta":
+              finalText += ev.content;
+              this.emit({
+                type: "assistant",
+                agent_id: this.agentId,
+                run_id: this.runId,
+                message: { role: "assistant", content: [{ type: "text", text: ev.content }] },
+              });
+              break;
+            case "thinking_delta":
+              this.emit({
+                type: "thinking",
+                agent_id: this.agentId,
+                run_id: this.runId,
+                text: ev.content,
+              });
+              break;
+            case "usage":
+              usage = ev.usage;
+              break;
+            case "error":
+              errored = ev.message;
+              break;
+            case "done":
+              break;
           }
         }
       } catch (err) {

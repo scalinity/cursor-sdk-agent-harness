@@ -194,30 +194,27 @@ export function expandHome(filePath: string): string {
   return filePath;
 }
 
+async function lstatImageFile(targetPath: string) {
+  const fileStat = await lstat(targetPath);
+  if (fileStat.isSymbolicLink()) {
+    throw new Error(`Image path must not be a symlink (${formatPathForMessage(targetPath)})`);
+  }
+  if (!fileStat.isFile()) {
+    throw new Error(`Not a file: ${formatPathForMessage(targetPath)}`);
+  }
+  return fileStat;
+}
+
 async function statExistingFile(resolved: string) {
   try {
-    const fileStat = await lstat(resolved);
-    if (fileStat.isSymbolicLink()) {
-      throw new Error(`Image path must not be a symlink (${formatPathForMessage(resolved)})`);
-    }
-    if (!fileStat.isFile()) {
-      throw new Error(`Not a file: ${formatPathForMessage(resolved)}`);
-    }
-    return fileStat;
+    return await lstatImageFile(resolved);
   } catch (error) {
     if (process.platform !== "darwin" || (error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
     const nfd = resolved.normalize("NFD");
     if (nfd === resolved) throw error;
-    const fileStat = await lstat(nfd);
-    if (fileStat.isSymbolicLink()) {
-      throw new Error(`Image path must not be a symlink (${formatPathForMessage(nfd)})`);
-    }
-    if (!fileStat.isFile()) {
-      throw new Error(`Not a file: ${formatPathForMessage(nfd)}`);
-    }
-    return fileStat;
+    return lstatImageFile(nfd);
   }
 }
 

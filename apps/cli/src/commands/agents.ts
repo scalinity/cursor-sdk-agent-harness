@@ -1,4 +1,5 @@
 import type { AgentSummary } from "@harness/shared";
+import { DEFAULT_MODEL_ID } from "../config.js";
 import { writeJsonLine } from "../output/json.js";
 import { formatMicros, renderTable, shortId } from "../output/table.js";
 import type { CliMode, CommandDeps } from "../types.js";
@@ -36,7 +37,7 @@ export async function createAgent(options: AgentCreateOptions, deps: Pick<Comman
   await deps.http.ensureCsrfToken();
   const created = await deps.http.createAgent({
     name: options.name,
-    modelId: options.model ?? "composer-2-5-fast",
+    modelId: options.model ?? DEFAULT_MODEL_ID,
     mode: "local",
     cwd: [options.workspace ?? process.cwd()],
     mcpServerIds: [],

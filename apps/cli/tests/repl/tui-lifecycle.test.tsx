@@ -11,6 +11,9 @@ vi.mock("ink", () => ({
 
 const { renderFullscreenApp } = await import("../../src/repl/tui-lifecycle.js");
 
+const ENTER_SEQUENCE = "[?1049h[2J[?25l[?1000h[?1006h";
+const EXIT_SEQUENCE = "[?1006l[?1000l[?25h[?1049l";
+
 function setStdoutTty(value: boolean | undefined): void {
   Object.defineProperty(process.stdout, "isTTY", { configurable: true, value });
 }
@@ -64,7 +67,7 @@ describe("renderFullscreenApp", () => {
     expect(instance.cleanup).toHaveBeenCalledTimes(1);
   });
 
-  it("restores alternate screen when Ink render startup throws", async () => {
+  it("restores alternate screen and mouse mode when Ink render startup throws", async () => {
     setStdoutTty(true);
     inkMock.render.mockImplementation(() => {
       throw new Error("raw mode failed");
@@ -72,7 +75,7 @@ describe("renderFullscreenApp", () => {
 
     await renderFullscreenApp(React.createElement("div"));
 
-    expect(stdoutWrite.mock.calls.map((call) => call[0])).toEqual(["\u001b[?1049h\u001b[2J\u001b[?25l", "\u001b[?25h\u001b[?1049l"]);
+    expect(stdoutWrite.mock.calls.map((call) => call[0])).toEqual([ENTER_SEQUENCE, EXIT_SEQUENCE]);
     expect(stderrWrite).toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });
@@ -93,6 +96,6 @@ describe("renderFullscreenApp", () => {
     expect(instance.unmount).toHaveBeenCalledTimes(1);
     expect(instance.cleanup).toHaveBeenCalledTimes(1);
     expect(process.exitCode).toBe(130);
-    expect(stdoutWrite.mock.calls.map((call) => call[0])).toContain("\u001b[?25h\u001b[?1049l");
+    expect(stdoutWrite.mock.calls.map((call) => call[0])).toContain(EXIT_SEQUENCE);
   });
 });

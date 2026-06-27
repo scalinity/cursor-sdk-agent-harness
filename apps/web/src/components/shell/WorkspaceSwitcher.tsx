@@ -6,14 +6,8 @@ import { useActiveWorkspace } from "../../hooks/useActiveWorkspace.js";
 import { useWorkspacePicker, type WorkspacePickError } from "../../hooks/useWorkspacePicker.js";
 import { useErrorReporter } from "../../hooks/useErrorReporter.js";
 import { useDismiss } from "../../hooks/useDismiss.js";
+import { workspaceLabel } from "../../lib/workspace-label.js";
 import { CheckIcon, ChevronDownIcon, FolderIcon, HomeIcon, MonitorIcon } from "./ToolbarIcons.js";
-
-/** Trigger/menu display name: explicit label (e.g. seeded "Home") else basename. */
-function displayName(ws: WorkspaceAllowlistRow): string {
-  if (ws.label && ws.label.length > 0) return ws.label;
-  const segments = ws.path.split("/").filter((s) => s.length > 0);
-  return segments[segments.length - 1] ?? ws.path;
-}
 
 function isHome(ws: WorkspaceAllowlistRow): boolean {
   return ws.label === "Home";
@@ -68,7 +62,7 @@ export function WorkspaceSwitcher() {
     const q = query.trim().toLowerCase();
     if (!q) return entries;
     return entries.filter(
-      (e) => displayName(e).toLowerCase().includes(q) || e.path.toLowerCase().includes(q),
+      (e) => workspaceLabel(e).toLowerCase().includes(q) || e.path.toLowerCase().includes(q),
     );
   }, [entries, query]);
 
@@ -94,7 +88,7 @@ export function WorkspaceSwitcher() {
     }
   }, [pick, reload, report]);
 
-  const triggerName = workspace ? displayName(workspace) : "Select workspace";
+  const triggerName = workspace ? workspaceLabel(workspace) : "Select workspace";
 
   return (
     <div ref={containerRef} className="workspace-switcher">
