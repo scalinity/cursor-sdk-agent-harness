@@ -28,6 +28,7 @@ import {
   type UpdateAgentRequest,
 } from "@harness/shared";
 import { DEFAULT_MODEL_ID, DEFAULT_WEB_ORIGIN } from "../config.js";
+import { toCliAgentSummary } from "../lib/cli-agent.js";
 import type { CliAgentSummary, CliHttpPort, CliMode } from "../types.js";
 
 export class CliHttpError<TBody = unknown> extends Error {
@@ -101,7 +102,7 @@ export class HarnessHttpClient implements CliHttpPort {
   }): Promise<CliAgentSummary> {
     if (input.agentId) {
       const detail = await this.getAgent(input.agentId);
-      return cliAgentFromSummary(detail);
+      return toCliAgentSummary(detail);
     }
 
     const workspace = path.resolve(input.workspace ?? process.cwd());
@@ -112,9 +113,9 @@ export class HarnessHttpClient implements CliHttpPort {
       const detail = await this.getAgent(agent.id);
       if (!agentHasWorkspace(detail, workspace)) continue;
       if (input.mode && detail.executionMode !== input.mode) {
-        return cliAgentFromSummary(await this.updateAgent(detail.id, { executionMode: input.mode }));
+        return toCliAgentSummary(await this.updateAgent(detail.id, { executionMode: input.mode }));
       }
-      return cliAgentFromSummary(detail);
+      return toCliAgentSummary(detail);
     }
 
     const created = await this.createAgent({
@@ -126,9 +127,9 @@ export class HarnessHttpClient implements CliHttpPort {
       subagentDefinitionIds: [],
     });
     if (input.mode && created.executionMode !== input.mode) {
-      return cliAgentFromSummary(await this.updateAgent(created.id, { executionMode: input.mode }));
+      return toCliAgentSummary(await this.updateAgent(created.id, { executionMode: input.mode }));
     }
-    return cliAgentFromSummary(created);
+    return toCliAgentSummary(created);
   }
 
   async createRun(input: CreateRunRequest): Promise<CreateRunResponse> {
@@ -240,19 +241,6 @@ export class HarnessHttpClient implements CliHttpPort {
     }
     return parsed.data;
   }
-}
-
-function normalizeExecutionMode(value: unknown): CliMode {
-  return value === "ask" ? "ask" : "agent";
-}
-
-function cliAgentFromSummary(agent: Pick<AgentSummary, "id" | "name" | "modelId" | "executionMode">): CliAgentSummary {
-  return {
-    id: agent.id,
-    name: agent.name,
-    modelId: agent.modelId,
-    executionMode: normalizeExecutionMode(agent.executionMode),
-  };
 }
 
 function agentHasWorkspace(agent: AgentDetailResponse, workspace: string): boolean {

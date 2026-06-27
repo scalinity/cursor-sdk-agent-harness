@@ -11,6 +11,7 @@ import { createSkillCommand, listSkillsCommand, parseSkillPaths } from "./comman
 import { searchWorkspace } from "./commands/search.js";
 import { resolveCliBackend, type CliBackend } from "./backend.js";
 import { CliHttpError } from "./client/http.js";
+import { toCliAgentSummary } from "./lib/cli-agent.js";
 import {
   CLI_NAME,
   CLI_NAME_ALIAS,
@@ -89,12 +90,12 @@ async function resolveAgentForChat(
 ): Promise<CliAgentSummary> {
   if (input.agentId) {
     const detail = await http.getAgent(input.agentId);
-    return agentSummaryFromDetail(detail);
+    return toCliAgentSummary(detail);
   }
   if (input.savedSession) {
     try {
       const detail = await http.getAgent(input.savedSession.agent.id);
-      return agentSummaryFromDetail(detail);
+      return toCliAgentSummary(detail);
     } catch (error: unknown) {
       if (!shouldCreateFreshAgentForSavedSession(error)) throw error;
       // Fall back to a fresh agent in the saved workspace if the backing agent is gone.
@@ -106,15 +107,6 @@ async function resolveAgentForChat(
   if (input.mode !== undefined) agentInput.mode = input.mode;
   else if (input.savedSession) agentInput.mode = input.savedSession.mode;
   return http.getOrCreateAgent(agentInput);
-}
-
-function agentSummaryFromDetail(agent: { id: string; name: string; modelId: string; executionMode: string }): CliAgentSummary {
-  return {
-    id: agent.id,
-    name: agent.name,
-    modelId: agent.modelId,
-    executionMode: agent.executionMode === "ask" ? "ask" : "agent",
-  };
 }
 
 function localCommandDeps(): Pick<CommandDeps, "write" | "writeRaw" | "writeError"> {

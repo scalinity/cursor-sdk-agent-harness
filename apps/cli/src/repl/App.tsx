@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import type { AgentSummary, ContextChip, ContextSearchResult, ServerFrame, TokenUsage } from "@harness/shared";
+import type { ContextChip, ContextSearchResult, ServerFrame, TokenUsage } from "@harness/shared";
 import { CLI_DISPLAY_NAME } from "@harness/shared";
 import { isRunStatusTerminalFrame, isTerminalFrame } from "../client/ws.js";
 import { appendPromptHistory, writePreferences } from "../config.js";
@@ -15,6 +15,7 @@ import {
 } from "../lib/attachments.js";
 import { createSkill, listSkills, resolveSkillBySlashCommand, readSkillBody, buildSkillInvocationPrompt } from "../lib/skills.js";
 import { renderTable, shortId } from "../output/table.js";
+import { toCliAgentSummary } from "../lib/cli-agent.js";
 import type { CliAgentSummary, CliHttpPort, CliMode, CliStreamPort } from "../types.js";
 import { HeaderBar, type ChromeState } from "./HeaderBar.js";
 import { InputBar, parseSlashCommand, PromptHistory, type MentionTrigger } from "./InputBar.js";
@@ -684,7 +685,7 @@ async function switchAgent(
   const agents = await ctx.http.listAgents({ limit: 500 });
   const summary = agents.items.find((item) => item.id === selector || item.name === selector);
   const detail = summary ? await ctx.http.getAgent(summary.id) : await ctx.http.getAgent(selector);
-  const next = cliAgentFromSummary(detail);
+  const next = toCliAgentSummary(detail);
   ctx.setActiveAgent(next);
   ctx.setModelId(next.modelId);
   ctx.setMode(next.executionMode);
@@ -743,14 +744,6 @@ async function handleSkillSlash(
   appendError("Usage: /skill create <name> <description> | /skill list");
 }
 
-function cliAgentFromSummary(agent: Pick<AgentSummary, "id" | "name" | "modelId" | "executionMode">): CliAgentSummary {
-  return {
-    id: agent.id,
-    name: agent.name,
-    modelId: agent.modelId,
-    executionMode: agent.executionMode === "ask" ? "ask" : "agent",
-  };
-}
 
 export interface ChromeStateInput {
   streamStatus: StreamConnectionStatus;
