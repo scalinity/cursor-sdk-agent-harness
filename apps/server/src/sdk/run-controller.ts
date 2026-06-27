@@ -17,6 +17,7 @@ import {
 } from "./usage-extractor.js";
 import type { StreamSink } from "./stream-stub.js";
 import type { PersistAndBroadcastPipeline } from "./persist-and-broadcast.js";
+import { RunFinalizer } from "./run-finalizer.js";
 
 /**
  * Per-run lifecycle owner. Holds the SDK Run handle, the abort controller
@@ -78,7 +79,6 @@ export class RunController {
   private runHandle: Run | null = null;
   private status: SdkRunStatus = "CREATING";
   private accumulatedUsage: ParsedTurnEndedUsage | null = null;
-  private terminalEventAppended = false;
   /**
    * The MOST RECENT turn-ended usage (NOT summed). Its `inputTokens` already
    * includes all prior context the model re-ingested, so last-turn input +
@@ -90,6 +90,7 @@ export class RunController {
 
   private readonly init: RunControllerInit;
   private readonly onTerminate: (controller: RunController) => void;
+  private readonly finalizer: RunFinalizer;
 
   constructor(
     init: RunControllerInit,
@@ -102,6 +103,13 @@ export class RunController {
     this.abortController = new AbortController();
     this.init = init;
     this.onTerminate = onTerminate;
+    this.finalizer = new RunFinalizer({
+      runId: init.runId,
+      agentId: init.agentId,
+      runsRepo: init.runsRepo,
+      pipeline: init.pipeline,
+      logger: init.logger,
+    });
   }
 
   /**
@@ -229,11 +237,10 @@ export class RunController {
       return { outcome: "failed", error: err };
     }
     // The SDK should emit a CANCELLED status event next; the consume loop
-    // picks it up. Belt-and-braces: stamp CANCELLED here too via the
-    // dedicated setter — `setInterrupted` would write status='ERROR',
-    // which is the wrong terminal state for a successful user cancel.
-    this.init.runsRepo.setCancelled(this.runId, reason);
-    this.appendRunInterrupted(reason);
+    // picks it up. Belt-and-braces: stamp CANCELLED here too — the finalizer
+    // uses `setCancelled` (not `setInterrupted`, which would write
+    // status='ERROR') and emits the single terminal event.
+    this.finalizer.finalizeCancelled(reason);
     // Wait for the background consume loop to settle BEFORE returning to
     // the caller. Otherwise the route resolves "cancelled" while the row
     // is still being updated (final-result, usage) by the detached
@@ -287,44 +294,16 @@ export class RunController {
         pricing: this.init.pricing,
       });
 
+      const occupancy = {
+        lastTurnInputTokens: this.lastTurnUsage?.inputTokens ?? null,
+        lastTurnOutputTokens: this.lastTurnUsage?.outputTokens ?? null,
+      };
       if (finalResult) {
-        const upper = finalResult.status.toUpperCase() as SdkRunStatus;
-        // Single transactional finalize: status + final-result columns +
-        // usage + context occupancy in one UPDATE. The status guard inside
-        // `finalize` keeps a CANCELLED/EXPIRED row from being clobbered.
-        this.init.runsRepo.finalize(this.runId, {
-          status: upper,
-          finalText: finalResult.result ?? null,
-          finalResult,
-          gitMetadata: finalResult.git ?? null,
-          durationMs: finalResult.durationMs ?? null,
-          usage,
-          lastTurnInputTokens: this.lastTurnUsage?.inputTokens ?? null,
-          lastTurnOutputTokens: this.lastTurnUsage?.outputTokens ?? null,
-        });
-        // Mirror the row status into the controller's view so subsequent
-        // status frames don't fight the terminal-state guard.
-        this.status = upper;
-        if (upper === "FINISHED") {
-          this.appendRunFinalResult(finalResult, usage);
-        } else if (upper === "CANCELLED") {
-          this.appendRunInterrupted("user_cancelled");
-        } else if (upper === "ERROR" || upper === "EXPIRED") {
-          this.appendRunInterrupted("stream_error");
-        }
+        // Mirror the resolved row status into the controller's view so
+        // subsequent status frames don't fight the terminal-state guard.
+        this.status = this.finalizer.finalizeWithResult(finalResult, usage, occupancy);
       } else {
-        // No final result available — if the consume loop never observed a
-        // terminal status, treat the run as interrupted because we can't
-        // confirm completion. See spec §11 "run.wait() fails after stream".
-        if (!isTerminalStatus(this.status)) {
-          this.init.runsRepo.setInterrupted(this.runId, "stream_error", null);
-          this.appendRunInterrupted("stream_error");
-        }
-        // Usage + context occupancy persisted atomically; guard exempts EXPIRED.
-        this.init.runsRepo.setUsage(this.runId, usage, {
-          lastTurnInputTokens: this.lastTurnUsage?.inputTokens ?? null,
-          lastTurnOutputTokens: this.lastTurnUsage?.outputTokens ?? null,
-        });
+        this.finalizer.finalizeWithoutResult(this.status, usage, occupancy);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -332,60 +311,9 @@ export class RunController {
         { err, runId: this.runId },
         "run consume/finalize failed",
       );
-      this.init.runsRepo.setInterrupted(this.runId, "stream_error", message);
-      this.appendRunInterrupted("stream_error", message);
+      this.finalizer.finalizeConsumeError(message);
     } finally {
       this.onTerminate(this);
-    }
-  }
-
-  private appendRunFinalResult(
-    finalResult: Awaited<ReturnType<Run["wait"]>>,
-    usage: ReturnType<typeof extractUsage>,
-  ): void {
-    if (this.terminalEventAppended) return;
-    const model = (finalResult as { model?: unknown }).model;
-    this.init.pipeline.appendCanonicalEvent({
-      runId: this.runId,
-      agentId: this.agentId,
-      sdkType: "status",
-      kind: "run.final_result",
-      status: "FINISHED",
-      payload: {
-        ...(finalResult.result !== undefined && finalResult.result !== null
-          ? { text: finalResult.result }
-          : {}),
-        ...(model !== undefined ? { model } : {}),
-        ...(finalResult.durationMs !== undefined ? { duration_ms: finalResult.durationMs } : {}),
-        ...(finalResult.git !== undefined && finalResult.git !== null
-          ? { git_metadata: finalResult.git }
-          : {}),
-        usage,
-      },
-    });
-    this.terminalEventAppended = true;
-  }
-
-  private appendRunInterrupted(reason: RunInterruptedReason, message?: string | null): void {
-    if (this.terminalEventAppended) return;
-    try {
-      this.init.pipeline.appendCanonicalEvent({
-        runId: this.runId,
-        agentId: this.agentId,
-        sdkType: "status",
-        kind: "run.interrupted",
-        status: reason === "user_cancelled" || reason === "agent_terminated" ? "CANCELLED" : "ERROR",
-        payload: {
-          reason,
-          ...(message ? { message } : {}),
-        },
-      });
-      this.terminalEventAppended = true;
-    } catch (err) {
-      this.init.logger.error(
-        { err, runId: this.runId, reason },
-        "failed to append run.interrupted canonical event",
-      );
     }
   }
 
