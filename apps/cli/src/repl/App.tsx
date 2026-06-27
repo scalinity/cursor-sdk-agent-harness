@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import type { ContextChip, ContextSearchResult, ServerFrame, TokenUsage } from "@harness/shared";
-import { CLI_DISPLAY_NAME, findEffortParameter } from "@harness/shared";
+import { AUTO_MODEL_ID, CLI_DISPLAY_NAME, findEffortParameter, PROVIDER_KIND_LABELS } from "@harness/shared";
 import { isRunStatusTerminalFrame, isTerminalFrame } from "../client/ws.js";
 import { appendPromptHistory, writePreferences } from "../config.js";
 import {
@@ -22,6 +22,7 @@ import { InputBar, parseSlashCommand, PromptHistory, type MentionTrigger } from 
 import { computeTuiLayout, countInputLines, MAX_INPUT_VISIBLE_LINES } from "./layout.js";
 import { MentionPopup, flattenMentionResults, MAX_MENTION_ITEMS, moveMentionSelection } from "./MentionPopup.js";
 import { filterSlashCommands, SlashPalette } from "./SlashPalette.js";
+import { ModelPicker, moveModelSelection, type ModelPickerRow } from "./ModelPicker.js";
 import { computeStreamViewportState, createStreamBuffer, ingestStreamFrame, StreamView, type StreamBuffer, type StreamItem } from "./StreamView.js";
 import { applyStreamScrollDelta, resolveStreamScrollDelta } from "./stream-scroll.js";
 import { StatusBar, type SessionCostState, type SessionTokenState } from "./StatusBar.js";
@@ -109,6 +110,11 @@ export function App({
   const [mentionIndex, setMentionIndex] = useState(0);
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
+  // Model catalog picker, opened by a bare `/model`. `null` = closed;
+  // `[]` while the catalog is loading (rows arrive once listModels resolves).
+  const [modelPickerRows, setModelPickerRows] = useState<ModelPickerRow[] | null>(null);
+  const [modelPickerLoading, setModelPickerLoading] = useState(false);
+  const [modelPickerIndex, setModelPickerIndex] = useState(0);
   const [inputDraft, setInputDraft] = useState("");
   const [scrollOffset, setScrollOffset] = useState(resume?.scrollOffset ?? 0);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
@@ -128,7 +134,14 @@ export function App({
   const mentionItems = mentionOpen ? allMentionItems.slice(0, MAX_MENTION_ITEMS) : [];
   const slashItems = !mentionOpen && inputDraft.startsWith("/") && !slashDismissed ? filterSlashCommands(inputDraft) : [];
   const slashOpen = slashItems.length > 0;
-  const overlayLineCount = mentionOpen ? Math.min(9, Math.max(2, mentionItems.length + 1)) : slashOpen ? Math.min(7, slashItems.length + 1) : 0;
+  const modelPickerOpen = modelPickerRows !== null;
+  const overlayLineCount = modelPickerOpen
+    ? Math.min(10, Math.max(2, (modelPickerRows?.length ?? 0) + 2))
+    : mentionOpen
+      ? Math.min(9, Math.max(2, mentionItems.length + 1))
+      : slashOpen
+        ? Math.min(7, slashItems.length + 1)
+        : 0;
   const layout = computeTuiLayout(size, countInputLines(inputDraft, size.columns), overlayLineCount);
   const streamHeight = Math.max(1, layout.scrollHeight - 2);
   const streamWidth = Math.max(12, layout.columns - 4);
@@ -231,7 +244,89 @@ export function App({
     setMentionIndex(0);
   };
 
+  const closeModelPicker = () => {
+    setModelPickerRows(null);
+    setModelPickerLoading(false);
+    setModelPickerIndex(0);
+  };
+
+  // Bare `/model` opens this catalog picker rather than erroring. Discovery is
+  // best-effort: a missing key / network error surfaces an empty catalog with
+  // an actionable hint rather than throwing.
+  const openModelPicker = async () => {
+    setModelPickerLoading(true);
+    setModelPickerRows([]);
+    setModelPickerIndex(0);
+    try {
+      const catalog = await http.listModels();
+      const rows: ModelPickerRow[] = [];
+      if (catalog.autoAvailable) {
+        rows.push({ id: AUTO_MODEL_ID, name: "Auto", provider: "auto", current: modelId === AUTO_MODEL_ID });
+      }
+      for (const model of catalog.items) {
+        rows.push({
+          id: model.id,
+          name: model.name,
+          provider: PROVIDER_KIND_LABELS[model.provider] ?? model.provider,
+          current: model.id === modelId,
+        });
+      }
+      const currentIndex = rows.findIndex((row) => row.current);
+      setModelPickerRows(rows);
+      setModelPickerLoading(false);
+      setModelPickerIndex(currentIndex >= 0 ? currentIndex : 0);
+    } catch (error) {
+      closeModelPicker();
+      appendError(`Could not load the model catalog: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const performModelSwitch = async (model: string) => {
+    try {
+      const next = await http.getOrCreateAgent({ model, mode, workspace });
+      setActiveAgent(next);
+      setModelId(next.modelId);
+      await writePreferences({ preferredMode: mode, preferredModel: next.modelId });
+      appendSystem(`Model switched to ${next.modelId}.`);
+    } catch (error) {
+      appendError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const confirmModelPicker = () => {
+    const rows = modelPickerRows;
+    if (!rows || rows.length === 0) {
+      closeModelPicker();
+      return;
+    }
+    const row = rows[modelPickerIndex];
+    closeModelPicker();
+    if (row) void performModelSwitch(row.id);
+  };
+
   useInput((input, key) => {
+    if (modelPickerOpen) {
+      if (key.escape) {
+        closeModelPicker();
+        return;
+      }
+      if (modelPickerLoading) return;
+      const total = modelPickerRows?.length ?? 0;
+      if (key.upArrow) {
+        setModelPickerIndex((current) => moveModelSelection(current, -1, total));
+        return;
+      }
+      if (key.downArrow) {
+        setModelPickerIndex((current) => moveModelSelection(current, 1, total));
+        return;
+      }
+      if (key.return || input === "\r" || input === "\n") {
+        confirmModelPicker();
+        return;
+      }
+      // Swallow other keys while the modal picker owns the input.
+      return;
+    }
     if (key.ctrl && input === "l") {
       setBuffer(createStreamBuffer());
       setScrollOffset(0);
@@ -321,6 +416,8 @@ export function App({
           setBuffer,
           setScrollOffset,
           clearComposerAttachments,
+          openModelPicker,
+          performModelSwitch,
         }).catch((error: unknown) => {
           appendError(error instanceof Error ? error.message : String(error));
         });
@@ -515,8 +612,11 @@ export function App({
       <Box flexDirection="column" height={layout.scrollHeight} borderStyle="round" {...border(theme.border)} paddingX={1} {...bg(theme.panel)}>
         <StreamView items={buffer.items} height={streamHeight} width={streamWidth} scrollOffset={effectiveOffset} activeLabel={activeLabel} activeLabelSegments={activeLabelSegments} viewportState={streamViewport} theme={theme} />
       </Box>
-      {mentionOpen ? <MentionPopup results={mentionResults} selectedIndex={mentionIndex} open={mentionOpen} focused={inputFocused} theme={theme} /> : null}
-      {!mentionOpen && slashOpen ? <SlashPalette items={slashItems} selectedIndex={slashIndex} focused={inputFocused} theme={theme} /> : null}
+      {modelPickerOpen ? (
+        <ModelPicker rows={modelPickerRows ?? []} selectedIndex={modelPickerIndex} loading={modelPickerLoading} theme={theme} />
+      ) : null}
+      {!modelPickerOpen && mentionOpen ? <MentionPopup results={mentionResults} selectedIndex={mentionIndex} open={mentionOpen} focused={inputFocused} theme={theme} /> : null}
+      {!modelPickerOpen && !mentionOpen && slashOpen ? <SlashPalette items={slashItems} selectedIndex={slashIndex} focused={inputFocused} theme={theme} /> : null}
       <InputBar
         chips={chips}
         imageAttachments={imageAttachments}
@@ -535,7 +635,8 @@ export function App({
           setChips(nextChips);
           clearMentionState();
         }}
-        focused={inputFocused}
+        focused={inputFocused && !modelPickerOpen}
+        captureInput={!modelPickerOpen}
         onSlashNavigate={(delta) => setSlashIndex((current) => moveMentionSelection(current, delta, slashItems.length))}
         onSlashSelect={() => setSlashDismissed(true)}
         onSubmit={submitPrompt}
@@ -584,6 +685,8 @@ interface SlashCommandContext {
   setBuffer: React.Dispatch<React.SetStateAction<StreamBuffer>>;
   setScrollOffset: React.Dispatch<React.SetStateAction<number>>;
   clearComposerAttachments: () => void;
+  openModelPicker: () => Promise<void>;
+  performModelSwitch: (model: string) => Promise<void>;
 }
 
 async function handleSlashCommand(ctx: SlashCommandContext): Promise<void> {
@@ -615,7 +718,7 @@ async function handleSlashCommand(ctx: SlashCommandContext): Promise<void> {
       await switchAgent(slash.args.join(" "), ctx, appendMessage, appendError);
       return;
     case "model":
-      await switchModel(slash.args[0], ctx, appendMessage, appendError);
+      await switchModel(slash.args[0], ctx);
       return;
     case "effort":
       await setEffort(slash.args[0], ctx, appendMessage, appendError);
@@ -699,18 +802,13 @@ async function switchAgent(
 async function switchModel(
   model: string | undefined,
   ctx: SlashCommandContext,
-  appendMessage: (message: string) => void,
-  appendError: (message: string) => void,
 ): Promise<void> {
+  // Bare `/model` opens the catalog picker; `/model <id>` switches directly.
   if (!model) {
-    appendError("Usage: /model <id>");
+    await ctx.openModelPicker();
     return;
   }
-  const next = await ctx.http.getOrCreateAgent({ model, mode: ctx.mode, workspace: ctx.workspace });
-  ctx.setActiveAgent(next);
-  ctx.setModelId(next.modelId);
-  await writePreferences({ preferredMode: ctx.mode, preferredModel: next.modelId });
-  appendMessage(`Model switched to ${next.modelId}.`);
+  await ctx.performModelSwitch(model);
 }
 
 /**

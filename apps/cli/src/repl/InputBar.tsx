@@ -92,6 +92,8 @@ export interface InputBarProps {
   streamScrollActive?: boolean;
   theme: TuiTheme;
   focused?: boolean;
+  /** When false, the input stops capturing keystrokes (a modal owns input). */
+  captureInput?: boolean;
   onMentionNavigate?: (delta: number) => void;
   onMentionDismiss?: () => void;
   onMentionSelect?: (chips: ContextChip[]) => void;
@@ -118,6 +120,7 @@ export function InputBar({
   maxVisibleLines = 4,
   streamScrollActive = false,
   focused = true,
+  captureInput = true,
   theme,
   onMentionNavigate,
   onMentionDismiss,
@@ -238,7 +241,7 @@ export function InputBar({
       }
       setDraft(value + input.replace(/\r\n?/g, "\n"));
     }
-  });
+  }, { isActive: captureInput });
 
   const allVisibleLines = value.length > 0 ? value.split("\n").flatMap((line) => hardWrapText(line, Math.max(12, width - 8))) : [""];
   const hiddenLineCount = Math.max(0, allVisibleLines.length - maxVisibleLines);

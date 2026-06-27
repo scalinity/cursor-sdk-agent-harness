@@ -11,7 +11,7 @@ export interface SlashPaletteItem {
 
 export const SLASH_COMMANDS = [
   { command: "mode", args: "ask | agent", description: "switch execution mode" },
-  { command: "model", args: "<id>", description: "switch model for this directory session" },
+  { command: "model", args: "[id]", description: "switch model (no id opens the catalog picker)" },
   { command: "effort", args: "[level|default]", description: "set the model's thinking/effort level (default clears it)" },
   { command: "skill", args: "create <name> <desc> | list", description: "create or list Cursor skills" },
   { command: "history", description: "show recent runs inline" },
