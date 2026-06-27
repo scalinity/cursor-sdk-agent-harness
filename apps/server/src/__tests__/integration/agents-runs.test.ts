@@ -468,6 +468,23 @@ describe("agents + runs REST routes", () => {
     });
     const agentId = (create.json() as { id: string }).id;
 
+    // Set an effort param first; switching models must reset it (the new model
+    // exposes its own parameter set).
+    const setEffort = await h.app.inject({
+      method: "PATCH",
+      url: `/api/agents/${agentId}`,
+      payload: { modelParams: [{ id: "thinking", value: "high" }] },
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "x-csrf-token": token,
+        "content-type": "application/json",
+      },
+    });
+    expect(setEffort.statusCode).toBe(200);
+    expect((setEffort.json() as { modelParams: unknown }).modelParams).toEqual([
+      { id: "thinking", value: "high" },
+    ]);
+
     const patch = await h.app.inject({
       method: "PATCH",
       url: `/api/agents/${agentId}`,
@@ -480,6 +497,8 @@ describe("agents + runs REST routes", () => {
     });
     expect(patch.statusCode).toBe(200);
     expect((patch.json() as { modelId: string }).modelId).toBe("composer-2-5");
+    // Model switch reset the per-model params.
+    expect((patch.json() as { modelParams: unknown }).modelParams).toBeNull();
 
     const detail = await h.app.inject({
       method: "GET",
@@ -487,6 +506,7 @@ describe("agents + runs REST routes", () => {
       headers: { origin: "http://127.0.0.1:5173" },
     });
     expect((detail.json() as { modelId: string }).modelId).toBe("composer-2-5");
+    expect((detail.json() as { modelParams: unknown }).modelParams).toBeNull();
   });
 
   it("PATCH /api/agents/:id returns 422 when no supported update is provided", async () => {
