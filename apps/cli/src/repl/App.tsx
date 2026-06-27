@@ -749,12 +749,19 @@ async function setEffort(
     const detail = await ctx.http.getAgent(ctx.activeAgent.id);
     const current = detail.modelParams?.find((p) => p.id === param.id)?.value;
     appendMessage(
-      `${label}: ${allowed.join(" | ")}${current ? `  (current: ${current})` : ""}\nSet with /effort <level>.`,
+      `${label}: ${allowed.join(" | ")} | default${current ? `  (current: ${current})` : "  (current: default)"}\nSet with /effort <level>, or /effort default to clear.`,
     );
     return;
   }
+  // `/effort default` clears the per-model params so the model's own default
+  // applies. Cleared params persist as null (PATCH with an empty array).
+  if (value.toLowerCase() === "default") {
+    await ctx.http.updateAgent(ctx.activeAgent.id, { modelParams: [] });
+    appendMessage(`${label} reset to default.`);
+    return;
+  }
   if (!allowed.includes(value)) {
-    appendError(`Invalid ${label} "${value}". Allowed: ${allowed.join(" | ")}.`);
+    appendError(`Invalid ${label} "${value}". Allowed: ${allowed.join(" | ")} | default.`);
     return;
   }
   await ctx.http.updateAgent(ctx.activeAgent.id, { modelParams: [{ id: param.id, value }] });

@@ -43,7 +43,6 @@ export type {
 export {
   AUTO_MODEL_ID,
   DEFAULT_MODEL_ID,
-  defaultModelParamValue,
   EFFORT_PARAM_RE,
   findEffortParameter,
   formatModelLabel,

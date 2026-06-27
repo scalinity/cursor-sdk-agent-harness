@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   AUTO_MODEL_ID,
-  defaultModelParamValue,
   findEffortParameter,
   MODEL_LABELS,
   PROVIDER_KIND_LABELS,
@@ -29,6 +28,13 @@ import {
   MAX_IMAGE_ATTACHMENTS,
   type ComposerAttachment,
 } from "../../lib/attachments.js";
+
+/**
+ * Sentinel option value for "use the model's default effort". Selecting it
+ * clears the per-model params ([]). Not a real param value, so it can't collide
+ * with a discovered level (those are plain strings like "low"/"high").
+ */
+const EFFORT_DEFAULT_VALUE = "__default__";
 
 export interface ComposerProps {
   activeAgent: AgentSummary | null;
@@ -193,19 +199,26 @@ export function Composer({
     const model = models.find((m) => m.id === selectedModelId);
     const param = model ? findEffortParameter(model) : null;
     if (!model || !param || param.values.length === 0) return null;
-    const options: SelectOption<string>[] = param.values.map((v) => ({
-      value: v.value,
-      label: v.displayName ?? v.value,
-    }));
+    // The "Default" option clears the per-model params (maps to []), letting
+    // the model's own default apply. It's the resting state when nothing is
+    // explicitly selected, so the control shows it rather than pre-selecting
+    // a concrete level the user never chose.
+    const options: SelectOption<string>[] = [
+      { value: EFFORT_DEFAULT_VALUE, label: "Default" },
+      ...param.values.map((v) => ({
+        value: v.value,
+        label: v.displayName ?? v.value,
+      })),
+    ];
     const current =
-      selectedModelParams.find((p) => p.id === param.id)?.value ??
-      defaultModelParamValue(model, param);
+      selectedModelParams.find((p) => p.id === param.id)?.value ?? EFFORT_DEFAULT_VALUE;
     return { param, options, current };
   }, [models, selectedModelId, selectedModelParams]);
 
   const handleEffortChange = useCallback(
     async (paramId: string, value: string) => {
-      const params: ModelParameterValue[] = [{ id: paramId, value }];
+      const params: ModelParameterValue[] =
+        value === EFFORT_DEFAULT_VALUE ? [] : [{ id: paramId, value }];
       setSelectedModelParams(params);
       if (!onEffortChange || !activeAgent) return;
       setModelBusy(true);

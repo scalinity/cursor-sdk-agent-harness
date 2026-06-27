@@ -105,7 +105,6 @@ export function toHarnessModelId(sdkModelId: string): string {
 /** Minimal shape for effort-parameter discovery — anything carrying `parameters`/`variants`. */
 interface ModelParamCarrier {
   parameters?: ModelParameterDefinition[] | undefined;
-  variants?: ModelVariant[] | undefined;
 }
 
 /**
@@ -128,16 +127,6 @@ export function findEffortParameter(model: ModelParamCarrier): ModelParameterDef
       (p) => EFFORT_PARAM_RE.test(p.id) || (p.displayName ? EFFORT_PARAM_RE.test(p.displayName) : false),
     ) ?? null
   );
-}
-
-/** A model's default value for a parameter: its default variant, else the first allowed value. */
-export function defaultModelParamValue(
-  model: ModelParamCarrier,
-  param: ModelParameterDefinition,
-): string {
-  const def = (model.variants ?? []).find((v) => v.isDefault);
-  const fromVariant = def?.params.find((p) => p.id === param.id)?.value;
-  return fromVariant ?? param.values[0]?.value ?? "";
 }
 
 export const settingSourceSchema = z.enum([
