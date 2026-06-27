@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { pino } from "pino";
+import { createLogger } from "../../logger.js";
 import { openTestDb } from "../../db/__tests__/helpers.js";
 import { createRepositories } from "../../db/repositories/index.js";
 import { runStartupRecovery } from "../startup-recovery.js";
 
-const silentLogger = pino({ level: "silent" });
+const silentLogger = createLogger("silent");
 
 describe("startup-recovery", () => {
   it("finalizes RUNNING runs with a run.interrupted event and status flip", () => {

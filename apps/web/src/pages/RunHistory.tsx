@@ -222,7 +222,6 @@ export function RunHistory() {
             <p className="text-sm text-text-tertiary">Completed and active runs with replay, transcript export, cost, and token totals.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Link className="h-control-md rounded-sm border border-border-subtle px-3 py-1 text-sm text-text-secondary hover:bg-surface-1" to="/observatory">Observatory</Link>
             <Link className="h-control-md rounded-sm border border-border-subtle px-3 py-1 text-sm text-text-secondary hover:bg-surface-1" to="/usage">Usage</Link>
             <Link className="h-control-md rounded-sm border border-border-subtle px-3 py-1 text-sm text-text-secondary hover:bg-surface-1" to="/chat">Chat</Link>
           </div>

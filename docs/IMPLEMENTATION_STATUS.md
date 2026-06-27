@@ -4,6 +4,24 @@ Living index of phase completion against `spec-v1.1.md`. Updated at the end of
 each phase. Use it as the single source of truth for "what is decided" vs
 "what is still open."
 
+> **Post-rebrand amendment — observability/telemetry + Observatory removed.**
+> After the Orrery rebrand, the entire observability/telemetry surface was
+> intentionally stripped out: the shared/server/client perf-counter ring
+> buffers, every `perf.observe()` call site, the `/api/observability/*` routes,
+> `observability/stats.ts`, the **Observatory** page + `useObservatory` hook +
+> nav links, and the related shared REST contracts/tests. **Pino logging was
+> also removed** — `observability/logger.ts` (pino + `REDACT_CONFIG` +
+> `safeReqSerializer`) and `pino`/`pino-pretty` are gone; Fastify now uses a
+> minimal console logger (`apps/server/src/logger.ts`) via `loggerInstance`
+> with `disableRequestLogging: true`. Rationale: Orrery is a personal,
+> single-user, local tool and the always-on metrics + consolidated telemetry
+> page + structured-logging machinery were unnecessary. The **Orrery brand/app
+> name is kept** — only the observability feature was removed. Secret-safety is
+> preserved structurally (no request access logging; remaining `logger.*` calls
+> pass only scalar-safe objects). See the §13 amendment in `spec-v1.1.md`.
+> Dated entries below that describe perf counters / Observatory / pino remain
+> for historical accuracy.
+
 ## Phase Index
 
 | Phase | Title | Status | Notes |

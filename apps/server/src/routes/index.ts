@@ -20,10 +20,6 @@ import {
   registerNotepadsRoutes,
   type NotepadsRoutesDeps,
 } from "./notepads.routes.js";
-import {
-  registerObservabilityRoutes,
-  type ObservabilityRoutesDeps,
-} from "./observability.routes.js";
 import { registerRunsRoutes, type RunsRoutesDeps } from "./runs.routes.js";
 import {
   registerSecurityRoutes,
@@ -73,7 +69,6 @@ export interface RouteDeps {
   usage: UsageRoutesDeps;
   mcpServers: McpServersRoutesDeps;
   subagents: SubagentsRoutesDeps;
-  observability: ObservabilityRoutesDeps;
   git: GitRoutesDeps;
   files: FilesRoutesDeps;
   context: ContextRoutesDeps;
@@ -100,7 +95,6 @@ export async function registerRoutes(
   await registerRunsRoutes(app, deps.runs);
   await registerEventsRoutes(app, deps.events);
   await registerUsageRoutes(app, deps.usage);
-  await registerObservabilityRoutes(app, deps.observability);
   await registerGitRoutes(app, deps.git);
   await registerFilesRoutes(app, deps.files);
   await registerContextRoutes(app, deps.context);

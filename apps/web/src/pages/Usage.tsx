@@ -48,7 +48,6 @@ export function Usage() {
             <p className="text-sm text-text-tertiary">Cost and token totals by date, model, and agent.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Link className="h-control-md rounded-sm border border-border-subtle px-3 py-1 text-sm text-text-secondary hover:bg-surface-1" to="/observatory">Observatory</Link>
             <Link className="h-control-md rounded-sm border border-border-subtle px-3 py-1 text-sm text-text-secondary hover:bg-surface-1" to="/runs">Run history</Link>
             <Link className="h-control-md rounded-sm border border-border-subtle px-3 py-1 text-sm text-text-secondary hover:bg-surface-1" to="/chat">Chat</Link>
             <button className={preset === "24h" ? "h-control-md rounded-sm bg-accent-bg px-3 text-sm text-accent-primary" : "h-control-md rounded-sm border border-border-subtle px-3 text-sm text-text-secondary"} type="button" onClick={() => applyPreset("24h")}>24h</button>

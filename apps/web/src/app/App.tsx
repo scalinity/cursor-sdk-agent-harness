@@ -20,11 +20,6 @@ const Usage = lazy(async () => {
   return { default: module.Usage };
 });
 
-const Observatory = lazy(async () => {
-  const module = await import("../pages/Observatory.js");
-  return { default: module.Observatory };
-});
-
 const StreamingQA = lazy(async () => {
   const module = await import("../pages/StreamingQA.js");
   return { default: module.StreamingQA };
@@ -80,14 +75,6 @@ export function App() {
         element={
           <Suspense fallback={null}>
             <Usage />
-          </Suspense>
-        }
-      />
-      <Route
-        path="/observatory"
-        element={
-          <Suspense fallback={null}>
-            <Observatory />
           </Suspense>
         }
       />

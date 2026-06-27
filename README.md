@@ -2,7 +2,7 @@
 
 **A local observatory for AI coding agents — built on the [Cursor SDK](https://cursor.com/docs/sdk/typescript) (`@cursor/sdk`).**
 
-Orrery is not an IDE clone. Chat is one client; the product is the forensic SQLite event log, run replay through the same ingest path as live, honest micro-USD cost attribution, and live pipeline telemetry. The UI follows Cursor's clean design language; observatory features (replay, inspectors, usage analytics) are Orrery-specific.
+Orrery is not an IDE clone. Chat is one client; the product is the forensic SQLite event log, run replay through the same ingest path as live, and honest micro-USD cost attribution. The UI follows Cursor's clean design language; replay, inspectors, and usage accounting are Orrery-specific. As a personal, single-user, local tool it carries no telemetry, analytics, or external reporting.
 
 Every event flows through normalize → persist → broadcast → render so live and replay share one code path. The frontend never touches the SDK directly.
 
@@ -10,7 +10,6 @@ Every event flows through normalize → persist → broadcast → render so live
 
 ## Features
 
-- **Observatory** — consolidated telemetry at `/observatory`: event-log stats, pipeline perf counters, 7-day usage summary, sub-agent monitor.
 - **Token-by-token streaming markdown** with hybrid block-boundary re-render (see Phase 09 perf benches in `apps/web/tests/perf/`).
 - **Lezer-backed incremental syntax highlighting** for TypeScript, JavaScript, Python, JSON, Markdown, and shell.
 - **Live code-edit preview** with caret animation at 120 char/sec default (configurable via replay speed).
@@ -37,7 +36,7 @@ pnpm migrate          # apply Drizzle migrations to local SQLite
 pnpm dev              # server on 127.0.0.1:4783 + web on 127.0.0.1:5173
 ```
 
-Open `http://127.0.0.1:5173` and pick a workspace. Visit `/observatory` for the consolidated telemetry surface.
+Open `http://127.0.0.1:5173` and pick a workspace.
 
 ### Desktop
 
@@ -75,7 +74,7 @@ Token rates are unset by default. The Usage page shows a freshness banner until 
 | Workspace | Owns |
 |---|---|
 | `apps/server` | Fastify + better-sqlite3 + `@cursor/sdk`. SDK runtime, persistence, WS protocol, security perimeter, usage extraction. |
-| `apps/web` | Vite + React 19 + Tailwind v4 + Zustand. AppShell, streaming surfaces, Observatory, replay, history, usage. |
+| `apps/web` | Vite + React 19 + Tailwind v4 + Zustand. AppShell, streaming surfaces, replay, history, usage. |
 | `packages/shared` | Zod schemas + inferred TS types. WS frame protocol, REST contracts, brand constants. |
 
 Full spec: [`docs/spec-v1.1.md`](docs/spec-v1.1.md). Progress: [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md).
@@ -91,11 +90,17 @@ pnpm build:desktop
 pnpm format
 ```
 
-## Observability
+## Logging & diagnostics
 
-- Server perf counters exposed via `GET /api/observability/perf` and event-log stats via `GET /api/observability/stats`.
-- Observatory page at `/observatory` is the consolidated UI.
-- All canonical events persisted to SQLite for forensic replay.
+- **No telemetry, analytics, or observability instrumentation.** The former
+  perf-counter subsystem (`/api/observability/*`, `window.__harnessPerf`) and
+  the Observatory page were intentionally removed — this is a personal, local
+  tool and nothing phones home.
+- Server logging is a minimal console logger (`apps/server/src/logger.ts`);
+  per-request access logging is disabled, so request URLs/headers are never
+  written to logs.
+- All canonical events are persisted to SQLite for forensic replay — the
+  durable event log never leaves the device.
 
 ## License
 

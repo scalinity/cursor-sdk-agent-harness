@@ -22,7 +22,6 @@ import type { SubagentDefinitionsRepo } from "../db/repositories/subagents.repo.
 import type { CursorApiKeyStore } from "../keychain/cursor-api-key.js";
 import { MissingMcpSecretError, type McpSecretStore } from "../keychain/mcp-secret-store.js";
 import type { WorkspaceAllowlistRepo } from "../db/repositories/workspace-allowlist.repo.js";
-import type { PerfCounters } from "../observability/perf-counters.js";
 import type { WorkspacePolicy } from "../security/workspace-policy.js";
 import { getSettingsSnapshot } from "../services/settings.service.js";
 import type { SettingsRepo } from "../db/repositories/settings.repo.js";
@@ -108,7 +107,6 @@ export interface AgentRuntimeDeps {
   modelRouter?: ModelRouter | undefined;
   /** Max ms to wait for active runs to settle during `shutdown()`. */
   shutdownGraceMs?: number | undefined;
-  perfCounters?: PerfCounters | undefined;
 }
 
 export interface AgentRuntime {
@@ -662,7 +660,6 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
           }),
           pipeline: deps.pipeline,
           logger: deps.logger,
-          perfCounters: deps.perfCounters,
         },
         (c) => {
           activeRuns.unregister(c.runId);

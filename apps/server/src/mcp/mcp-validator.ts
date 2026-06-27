@@ -318,10 +318,9 @@ async function probeHttp(
 }
 
 /**
- * Token-like top-level keys we mask in API responses. The list mirrors the
- * pino redaction floor in observability/logger.ts. Anything not on this list
- * but matching `*.token`/`*.secret`/`*.password`/`*.key` is also masked by
- * the recursive walker.
+ * Token-like top-level keys we mask in API responses. Anything not on this
+ * list but matching `*.token`/`*.secret`/`*.password`/`*.key` is also masked
+ * by the recursive walker.
  */
 const TOKEN_FIELDS_BY_VARIANT = {
   stdio: ["env"] as const,

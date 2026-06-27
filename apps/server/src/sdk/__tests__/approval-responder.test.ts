@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pino } from "pino";
+import { createLogger } from "../../logger.js";
 import { ActiveRuns } from "../active-runs.js";
 import {
   buildApprovalResponder,
@@ -8,7 +8,7 @@ import {
 import type { RunController } from "../run-controller.js";
 import type { Run } from "../sdk-adapter.js";
 
-const silentLogger = pino({ level: "silent" });
+const silentLogger = createLogger("silent");
 
 /**
  * Build a minimal stub controller. The responder reaches in via

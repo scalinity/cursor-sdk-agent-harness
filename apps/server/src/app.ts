@@ -3,8 +3,7 @@ import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { registerRoutes } from "./routes/index.js";
 import type { Env } from "./config/env.js";
-import { REDACT_CONFIG, safeReqSerializer } from "./observability/logger.js";
-import { createPerfCounters, type PerfCounters } from "./observability/perf-counters.js";
+import { createLogger } from "./logger.js";
 import {
   CursorApiKeyStore,
   CsrfSecretStore,
@@ -77,13 +76,6 @@ export interface AppDeps {
    */
   skipStartupRecovery?: boolean;
   /**
-   * Phase 14 — injected perf counters. Production builds a real
-   * recorder via `createPerfCounters()` so the
-   * `/api/observability/perf` route can surface live histograms.
-   * Tests may pass a shared instance to assert observation behavior.
-   */
-  perfCounters?: PerfCounters;
-  /**
    * Embedded terminal session. Production builds one backed by node-pty.
    * Integration tests inject a `TerminalSession` with a stub `spawnPty` so
    * they exercise the `/ws/terminal` wiring without a real shell.
@@ -113,11 +105,6 @@ export interface BuiltApp {
    * cancellation through a single source of truth.
    */
   activeRuns: ActiveRuns;
-  /**
-   * Phase 14 — exposed so tests can assert observation behaviour and the
-   * `/api/observability/perf` route can read live snapshots.
-   */
-  perfCounters: PerfCounters;
   /**
    * Embedded terminal session, exposed so tests can drive/inspect it and so
    * the desktop entrypoint could surface session state if needed.
@@ -168,17 +155,12 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     // Sized for up to 16 images at MAX_IMAGE_DATA_BYTES each + ~4 MiB headroom
     // for the prompt/JSON envelope.
     bodyLimit: MAX_IMAGE_DATA_BYTES * MAX_IMAGE_ATTACHMENTS + 4 * 1024 * 1024,
-    logger: {
-      level: env.LOG_LEVEL,
-      redact: REDACT_CONFIG,
-      base: { service: "cursor-sdk-agent-harness" },
-      // The default `req` serializer captures `req.url` verbatim,
-      // which leaks `?csrf=<token>` on WS upgrades (browsers can't add
-      // custom headers to a WS upgrade so the token rides in the
-      // query). Replace with one that scrubs the param.
-      serializers: { req: safeReqSerializer },
-    },
-    disableRequestLogging: false,
+    // Minimal console logger (no Pino, no structured access logs). Per-request
+    // access logging stays OFF so request URLs/headers — which can carry the
+    // `?csrf=<token>` on WS upgrades — are never written anywhere. The only
+    // log output is explicit `logger.*` calls in our own code.
+    loggerInstance: createLogger(env.LOG_LEVEL),
+    disableRequestLogging: true,
     trustProxy: false,
   });
 
@@ -209,10 +191,6 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   });
   await app.register(websocket);
 
-  // Phase 14 — perf counters live above the pipeline so both the
-  // persist-and-broadcast pipeline and the WS plugin share one
-  // observation surface.
-  const perfCounters = deps.perfCounters ?? createPerfCounters();
   const searchService =
     deps.searchService ??
     new SearchService({
@@ -237,7 +215,6 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     runs: repos.runs,
     bus: runBus,
     logger: app.log,
-    perfCounters,
   });
 
   const sdk = deps.sdk ?? createCursorSdkAdapter();
@@ -258,7 +235,6 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     searchService,
     modelRouter,
     shutdownGraceMs: env.HARNESS_SHUTDOWN_GRACE_MS,
-    perfCounters,
   });
 
   const approvalResponder =
@@ -273,7 +249,6 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     activeRuns,
     approvalResponder,
     pipeline,
-    perfCounters,
     ...(deps.wsHeartbeatIntervalMs !== undefined
       ? { heartbeatIntervalMs: deps.wsHeartbeatIntervalMs }
       : {}),
@@ -337,15 +312,6 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     usage: { runsRepo: repos.runs, settingsRepo: repos.settings },
     mcpServers: { mcpServers: repos.mcpServers, mcpSecretStore },
     subagents: { subagents: repos.subagents, mcpServers: repos.mcpServers },
-    observability: {
-      perfCounters,
-      stats: {
-        dbPath: env.DB_PATH,
-        runs: repos.runs,
-        events: repos.events,
-        settings: repos.settings,
-      },
-    },
     git: {
       settingsRepo: repos.settings,
       workspaceAllowlist: repos.workspaceAllowlist,
@@ -392,7 +358,6 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     agentRuntime,
     runBus,
     activeRuns,
-    perfCounters,
     terminalSession,
   };
 }

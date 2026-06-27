@@ -26,7 +26,6 @@ import type {
 import { create } from "zustand";
 import { deleteRunBuffers } from "../lib/streaming-text-channel.js";
 import { parseCodeEditPayload } from "../lib/code-edit-events.js";
-import { clientPerf } from "../lib/perf-counters.js";
 import {
   groupToolCallLanes,
   upsertToolCallProjection,
@@ -347,15 +346,6 @@ export const useRunStore = create<RunState>((set) => ({
   activeRunId: null,
 
   ingestServerFrame: (frame, options) => {
-    const ingestStart = performance.now();
-    // P14-W3: only observe client_event_ingest_ms when the call did
-    // real work. Acks/heartbeats/errors and duplicate-seq drops return
-    // state unchanged; observing them pollutes the histogram with
-    // sub-microsecond no-ops and makes a heartbeat-only run look like
-    // "instant ingest" while a duplicate-replay storm reports inflated
-    // counts. The flag is set by the set() callback on the real-ingest
-    // path only.
-    let didIngest = false;
     set((state) => {
       // Acks and heartbeats don't carry events.
       if (frame.type === "ack" || frame.type === "heartbeat" || frame.type === "error") {
@@ -569,19 +559,12 @@ export const useRunStore = create<RunState>((set) => ({
         nextById[runId] = run;
       }
 
-      didIngest = true;
       return {
         ...state,
         byId: nextById,
         eventsByRunId: { ...state.eventsByRunId, [runId]: nextEvents },
       };
     });
-    if (didIngest) {
-      clientPerf.observe(
-        "client_event_ingest_ms",
-        performance.now() - ingestStart,
-      );
-    }
   },
 
   upsertRunSummary: (summary) => {

@@ -205,11 +205,9 @@ cursor-sdk-agent-harness/
 │   │   │   │   │   # Local CSRF cookie/header validation.
 │   │   │   │   └── workspace-policy.ts
 │   │   │   │       # realpath-based allowlist enforcement.
-│   │   │   ├── observability/
-│   │   │   │   ├── logger.ts
-│   │   │   │   │   # Structured pino logger with secret redaction.
-│   │   │   │   └── metrics.ts
-│   │   │   │       # Local in-memory counters and timing histograms.
+│   │   │   ├── logger.ts
+│   │   │   │   # Minimal console logger (replaced the removed observability/
+│   │   │   │   # pino logger + perf-counter metrics; see §13 amendment).
 │   │   │   └── tests/
 │   │   │       ├── fixtures/
 │   │   │       │   # Mock SDK streams, usage payload variants, code-edit payload variants.
@@ -684,7 +682,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
 | `databasePlugin` | Opens SQLite, enables `PRAGMA foreign_keys = ON`, enables WAL, applies busy timeout, exposes repositories. |
 | `settingsPlugin` | Loads persisted settings, validates defaults, imports one-shot `CURSOR_API_KEY` into Keychain when configured, ensures pricing keys exist. |
 | `websocketPlugin` | Registers `@fastify/websocket`, validates every frame with shared Zod schemas, manages heartbeat/reconnect. |
-| `observabilityPlugin` | Adds request IDs, structured logs, timing hooks, and redaction for API keys, secret-like MCP fields, and oversized payloads. |
+| ~~`observabilityPlugin`~~ | **Removed.** Originally added request IDs, structured logs, timing hooks, and Pino redaction. Orrery now uses a minimal console logger with per-request access logging disabled; perf timing hooks and the `/api/observability/*` endpoints were removed. API responses still mask secret-like MCP fields at the route layer. |
 
 #### Route Groups
 
@@ -2863,6 +2861,18 @@ Transcript export includes usage metadata because it is run-level metadata, not 
 ---
 
 ## 13. Performance Budget
+
+> **Post-rebrand amendment (observability removed).** The in-process
+> perf-counter subsystem that measured/enforced the latency rows below — the
+> shared ring-buffer recorder, the server `observability/` counters, the
+> `/api/observability/*` endpoints, the client-side `clientPerf` counters, the
+> 10k-event stress gate — **and the entire "Observatory" surface** (the
+> `/observatory` page, `useObservatory`, `observability/stats.ts`) were
+> intentionally removed. Orrery is a personal, single-user, local tool and the
+> always-on metrics, the consolidated telemetry page, and Pino structured
+> logging (replaced by a minimal console logger; per-request access logging
+> off) were more machinery than it warrants. The targets below are retained as
+> aspirational design guidance only — no longer auto-measured or enforced.
 
 | Metric | Target | Enforcement |
 |---|---:|---|

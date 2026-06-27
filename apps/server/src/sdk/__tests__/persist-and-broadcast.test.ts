@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { pino } from "pino";
+import { createLogger } from "../../logger.js";
 import type { Database as BetterSqlite3Database } from "better-sqlite3";
 import type { EventRow, SDKMessage } from "@harness/shared";
 import { openTestDb } from "../../db/__tests__/helpers.js";
@@ -10,7 +10,7 @@ import { createRunBus, type RunBus } from "../../ws/run-bus.js";
 import { buildServerFrame } from "../../ws/frame-builder.js";
 import { createPersistAndBroadcast } from "../persist-and-broadcast.js";
 
-const silentLogger = pino({ level: "silent" });
+const silentLogger = createLogger("silent");
 
 describe("persist-and-broadcast pipeline", () => {
   let dbClient: ReturnType<typeof openTestDb>;

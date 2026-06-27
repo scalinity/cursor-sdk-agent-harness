@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { pino } from "pino";
+import { createLogger } from "../../logger.js";
 import type { FastifyBaseLogger } from "fastify";
 import type { AgentMode, SettingsSnapshot } from "@harness/shared";
 import { openTestDb } from "../../db/__tests__/helpers.js";
@@ -42,7 +42,7 @@ function setupFixture(): Fixture {
   const db = openTestDb();
   const agents = new AgentsRepo(db.raw);
   const runs = new RunsRepo(db.raw);
-  const logger = pino({ level: "silent" }) as unknown as FastifyBaseLogger;
+  const logger = createLogger("silent");
   const terminalEvents: RecordedTerminalEvent[] = [];
   const agent = agents.create({
     id: "agent-rc-test",

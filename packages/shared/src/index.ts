@@ -315,17 +315,6 @@ export type {
   SubagentListResponse,
 } from "./rest-contracts.js";
 
-export {
-  createNoopPerfCounters,
-  createPerfCountersBase,
-  DEFAULT_RING_SIZE,
-  EMPTY_SNAPSHOT,
-} from "./perf-counters.js";
-export type {
-  CounterSnapshot,
-  CreatePerfCountersOptions,
-  PerfCountersAPI,
-} from "./perf-counters.js";
 
 // Browser pane protocol (Phase 18): IPC, state/console/network, MCP tools
 export {
@@ -537,11 +526,3 @@ export {
   PRODUCT_NAME,
   PRODUCT_TAGLINE,
 } from "./brand.js";
-export {
-  observabilityPerfResponseSchema,
-  observabilityStatsResponseSchema,
-} from "./rest-contracts.js";
-export type {
-  ObservabilityPerfResponse,
-  ObservabilityStatsResponse,
-} from "./rest-contracts.js";

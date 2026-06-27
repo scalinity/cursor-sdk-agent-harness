@@ -176,18 +176,9 @@ export function Settings() {
             </div>
             <div className="settings-mode-descriptions__item">
               <dt>Design</dt>
-              <dd>UI follows Cursor&apos;s clean design language; observatory features (replay, forensic log, usage analytics) are Orrery-specific.</dd>
+              <dd>UI follows Cursor&apos;s clean design language; replay, forensic event log, and usage accounting are Orrery-specific.</dd>
             </div>
           </dl>
-          <div className="settings-section__links">
-            <button
-              type="button"
-              onClick={() => navigate("/observatory")}
-              className="settings-link"
-            >
-              Observatory →
-            </button>
-          </div>
         </section>
       </div>
     </div>

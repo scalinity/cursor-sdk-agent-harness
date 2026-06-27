@@ -16,7 +16,6 @@ import {
   type ParsedTurnEndedUsage,
 } from "./usage-extractor.js";
 import type { StreamSink } from "./stream-stub.js";
-import type { PerfCounters } from "../observability/perf-counters.js";
 import type { PersistAndBroadcastPipeline } from "./persist-and-broadcast.js";
 
 /**
@@ -55,7 +54,6 @@ export interface RunControllerInit {
   sink: StreamSink;
   pipeline: Pick<PersistAndBroadcastPipeline, "appendCanonicalEvent">;
   logger: FastifyBaseLogger;
-  perfCounters?: PerfCounters | undefined;
 }
 
 /**
@@ -215,7 +213,6 @@ export class RunController {
           ...(unsupportedReason !== undefined ? { unsupported_reason: unsupportedReason } : {}),
         },
       });
-      this.init.perfCounters?.observe("cancel_unavailable_count", 1);
       const result: CancelResult = { outcome: "unsupported", unsupportedReason };
       return result;
     }
