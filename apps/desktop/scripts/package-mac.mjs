@@ -22,12 +22,18 @@
  */
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, readFileSync, readdirSync, renameSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const desktopDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = path.resolve(desktopDir, "../..");
-const venvDir = path.join(desktopDir, ".gyp-venv");
+// Keep the gyp venv OUTSIDE the repo tree. The checkout can live under a path
+// containing a space (e.g. ".../Doc Migration/..."), and electron-builder's
+// app-builder-lib mangles such paths when it stat-walks the python reference
+// node-gyp leaves inside the rebuilt native modules — failing the copy phase
+// with a spurious ENOENT. The OS temp dir has no space; reused across runs.
+const venvDir = path.join(os.tmpdir(), "orrery-gyp-venv");
 const venvPython = path.join(venvDir, "bin", "python");
 
 const ELECTRON_VERSION = JSON.parse(
