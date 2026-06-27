@@ -13,9 +13,11 @@ import {
   grepSearchResultSchema,
   runSummarySchema,
   listAgentsResponseSchema,
+  listModelsResponseSchema,
   listRunsResponseSchema,
   updateAgentRequestSchema,
   type AgentDetailResponse,
+  type ListModelsResponse,
   type AgentSummary,
   type ContextSearchResult,
   type CreateAgentRequest,
@@ -77,6 +79,10 @@ export class HarnessHttpClient implements CliHttpPort {
 
   async listAgents(input: { limit?: number; offset?: number } = {}): Promise<{ items: AgentSummary[] }> {
     return this.request("/api/agents", { query: input, schema: listAgentsResponseSchema });
+  }
+
+  async listModels(): Promise<ListModelsResponse> {
+    return this.request("/api/models", { schema: listModelsResponseSchema });
   }
 
   async getAgent(agentId: string): Promise<AgentDetailResponse> {

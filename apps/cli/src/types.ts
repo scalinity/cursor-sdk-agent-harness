@@ -9,6 +9,7 @@ import type {
   FileSearchResult,
   GetRunEventsResponse,
   GrepSearchResult,
+  ListModelsResponse,
   RunSummary,
   ServerFrame,
   UpdateAgentRequest,
@@ -37,6 +38,7 @@ export interface CliHttpPort {
   getRun(runId: string): Promise<RunSummary>;
   getRunEvents(runId: string, input?: { afterSeq?: number; limit?: number; direction?: "asc" | "desc" }): Promise<GetRunEventsResponse>;
   listAgents(input?: { limit?: number; offset?: number }): Promise<{ items: AgentSummary[] }>;
+  listModels(): Promise<ListModelsResponse>;
   createAgent(input: CreateAgentRequest): Promise<AgentSummary>;
   updateAgent(agentId: string, input: UpdateAgentRequest): Promise<AgentDetailResponse>;
   listRuns(input: Record<string, string | number | boolean | undefined>): Promise<{ items: RunSummary[]; total: number }>;

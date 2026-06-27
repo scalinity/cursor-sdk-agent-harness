@@ -28,7 +28,7 @@ describe("HarnessHttpClient contracts", () => {
         return json({ items: [{ ...agentBase, id: "agent-old", name: "Wrong workspace" }] });
       }
       if (url.pathname === "/api/agents/agent-old") {
-        return json({ ...agentBase, id: "agent-old", name: "Wrong workspace", cwd: ["/tmp/other"], settingSources: null, sandboxEnabled: null, cloudOptions: null, mcpServerIds: [], subagentDefinitionIds: [], latestRunId: null, latestRunStatus: null });
+        return json({ ...agentBase, id: "agent-old", name: "Wrong workspace", modelParams: null, cwd: ["/tmp/other"], settingSources: null, sandboxEnabled: null, cloudOptions: null, mcpServerIds: [], subagentDefinitionIds: [], latestRunId: null, latestRunStatus: null });
       }
       if (url.pathname === "/api/security/csrf-token") {
         return json({ token: "csrf-token" });

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import type { ContextChip, ContextSearchResult, ServerFrame, TokenUsage } from "@harness/shared";
+import type { ContextChip, ContextSearchResult, ModelParameterDefinition, ServerFrame, TokenUsage, UnifiedModel } from "@harness/shared";
 import { CLI_DISPLAY_NAME } from "@harness/shared";
 import { isRunStatusTerminalFrame, isTerminalFrame } from "../client/ws.js";
 import { appendPromptHistory, writePreferences } from "../config.js";
@@ -617,6 +617,9 @@ async function handleSlashCommand(ctx: SlashCommandContext): Promise<void> {
     case "model":
       await switchModel(slash.args[0], ctx, appendMessage, appendError);
       return;
+    case "effort":
+      await setEffort(slash.args[0], ctx, appendMessage, appendError);
+      return;
     case "skill":
       await handleSkillSlash(slash.args, ctx, appendMessage, appendError);
       return;
@@ -708,6 +711,71 @@ async function switchModel(
   ctx.setModelId(next.modelId);
   await writePreferences({ preferredMode: ctx.mode, preferredModel: next.modelId });
   appendMessage(`Model switched to ${next.modelId}.`);
+}
+
+const EFFORT_PARAM_RE = /thinking|reasoning|effort/i;
+
+/**
+ * The current model's thinking/effort parameter, discovered from the catalog.
+ * Matches by id/displayName (e.g. "thinking", "reasoning effort"); if a model
+ * exposes exactly one parameter, that one is used. Returns null when the model
+ * has no effort-like parameter.
+ */
+function findEffortParameter(model: UnifiedModel): ModelParameterDefinition | null {
+  const params = model.parameters ?? [];
+  const match = params.find(
+    (p) => EFFORT_PARAM_RE.test(p.id) || (p.displayName ? EFFORT_PARAM_RE.test(p.displayName) : false),
+  );
+  if (match) return match;
+  return params.length === 1 ? (params[0] ?? null) : null;
+}
+
+/**
+ * `/effort` — set the active model's thinking/effort level. The allowed values
+ * come straight from the discovered model catalog (never hardcoded). With no
+ * argument, lists the allowed values and the current selection.
+ */
+async function setEffort(
+  value: string | undefined,
+  ctx: SlashCommandContext,
+  appendMessage: (message: string) => void,
+  appendError: (message: string) => void,
+): Promise<void> {
+  let catalog: Awaited<ReturnType<CliHttpPort["listModels"]>>;
+  try {
+    catalog = await ctx.http.listModels();
+  } catch {
+    appendError("Could not load the model catalog.");
+    return;
+  }
+  const model = catalog.items.find((m) => m.id === ctx.activeAgent.modelId);
+  if (!model) {
+    appendError(
+      `Model "${ctx.activeAgent.modelId}" isn't in the catalog — switch to a listed model with /model first.`,
+    );
+    return;
+  }
+  const param = findEffortParameter(model);
+  if (!param) {
+    appendError(`${model.name} has no thinking/effort level to set.`);
+    return;
+  }
+  const label = param.displayName ?? param.id;
+  const allowed = param.values.map((v) => v.value);
+  if (!value) {
+    const detail = await ctx.http.getAgent(ctx.activeAgent.id);
+    const current = detail.modelParams?.find((p) => p.id === param.id)?.value;
+    appendMessage(
+      `${label}: ${allowed.join(" | ")}${current ? `  (current: ${current})` : ""}\nSet with /effort <level>.`,
+    );
+    return;
+  }
+  if (!allowed.includes(value)) {
+    appendError(`Invalid ${label} "${value}". Allowed: ${allowed.join(" | ")}.`);
+    return;
+  }
+  await ctx.http.updateAgent(ctx.activeAgent.id, { modelParams: [{ id: param.id, value }] });
+  appendMessage(`${label} set to ${value}.`);
 }
 
 async function handleSkillSlash(
