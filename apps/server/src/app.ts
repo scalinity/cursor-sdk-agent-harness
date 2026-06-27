@@ -35,6 +35,7 @@ import {
 import { MAX_IMAGE_ATTACHMENTS, MAX_IMAGE_DATA_BYTES } from "@harness/shared";
 import { SearchService } from "./search/search-service.js";
 import { ModelRouter } from "./providers/model-router.js";
+import { CursorModelCatalog } from "./providers/cursor-model-catalog.js";
 
 export interface AppDeps {
   env: Env;
@@ -198,11 +199,18 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       indexStatusRepo: repos.indexStatus,
       logger: app.log,
     });
+  const sdk = deps.sdk ?? createCursorSdkAdapter();
+  const cursorModelCatalog = new CursorModelCatalog({
+    sdk,
+    apiKeyStore,
+    logger: app.log,
+  });
   const modelRouter =
     deps.modelRouter ??
     new ModelRouter({
       modelProvidersRepo: repos.modelProviders,
       providerKeyStore,
+      cursorCatalog: cursorModelCatalog,
     });
 
   // Phase 07 pipeline. Build the run bus + persist-and-broadcast first so
@@ -216,8 +224,6 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
     bus: runBus,
     logger: app.log,
   });
-
-  const sdk = deps.sdk ?? createCursorSdkAdapter();
   const agentRuntime = createAgentRuntime({
     agentsRepo: repos.agents,
     runsRepo: repos.runs,

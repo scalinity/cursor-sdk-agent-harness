@@ -126,11 +126,12 @@ export async function registerAgentsRoutes(
       if (!parsed.success) return send422(reply, parsed.error);
       if (
         parsed.data.executionMode === undefined &&
-        parsed.data.modelId === undefined
+        parsed.data.modelId === undefined &&
+        parsed.data.modelParams === undefined
       ) {
         return reply.code(422).send({
           code: "VALIDATION_ERROR",
-          message: "executionMode or modelId is required",
+          message: "executionMode, modelId, or modelParams is required",
         });
       }
       const existing = deps.agentsRepo.getById(req.params.agentId);
@@ -141,8 +142,13 @@ export async function registerAgentsRoutes(
         });
       }
       try {
+        // Model switch first — it resets params to the new model's defaults —
+        // then apply any explicit params (so `/effort` after a switch sticks).
         if (parsed.data.modelId !== undefined) {
           deps.runtime.updateModel(req.params.agentId, parsed.data.modelId);
+        }
+        if (parsed.data.modelParams !== undefined) {
+          deps.runtime.setModelParams(req.params.agentId, parsed.data.modelParams);
         }
         if (parsed.data.executionMode !== undefined) {
           deps.agentsRepo.updateExecutionMode(req.params.agentId, parsed.data.executionMode);

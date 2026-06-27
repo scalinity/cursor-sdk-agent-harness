@@ -19,6 +19,7 @@ function agentRow(over: Partial<AgentRow> = {}): AgentRow {
     mode: "local",
     executionMode: "agent",
     modelId: "composer-2-5-fast",
+    modelParams: null,
     cwd: null,
     settingSources: null,
     sandboxEnabled: null,

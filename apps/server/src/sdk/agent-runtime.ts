@@ -8,6 +8,7 @@ import type {
   CreateRunResponse,
   CreateRunRequest,
   ExecutionMode,
+  ModelParameterValue,
 } from "@harness/shared";
 import { resolveMention, type SemanticSearchProvider } from "../services/context.service.js";
 import {
@@ -116,6 +117,7 @@ export interface AgentRuntime {
   list(): AgentSummary[];
   getById(agentId: string): AgentDetailResponse;
   updateModel(agentId: string, modelId: string): AgentSummary;
+  setModelParams(agentId: string, modelParams: ModelParameterValue[]): AgentSummary;
   startRun(input: CreateRunRequest): Promise<CreateRunResponse>;
   /**
    * Test/teardown hook: synchronously close all open SDK handles and clear
@@ -260,6 +262,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
           status: "active",
           mode: input.mode,
           modelId: input.modelId,
+          modelParams: input.modelParams ?? null,
           cwd: input.cwd ?? null,
           settingSources: input.settingSources ?? null,
           sandboxEnabled: input.sandboxEnabled ?? null,
@@ -282,6 +285,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
         status: overrides.status,
         mode: input.mode,
         modelId: input.modelId,
+        modelParams: input.modelParams ?? null,
         cwd: input.cwd ?? null,
         settingSources: input.settingSources ?? null,
         sandboxEnabled: input.sandboxEnabled ?? null,
@@ -414,6 +418,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
       const summary = buildSummary(row, aggregates);
       return {
         ...summary,
+        modelParams: row.modelParams,
         cwd: row.cwd,
         settingSources: row.settingSources,
         sandboxEnabled: row.sandboxEnabled,
@@ -444,6 +449,9 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
           );
         }
         deps.agentsRepo.updateModel(agentId, modelId);
+        // Switching models invalidates the old model's params (the new model
+        // exposes its own parameter set); reset to defaults.
+        deps.agentsRepo.setModelParams(agentId, null);
         const handle = liveAgents.get(agentId);
         if (handle) {
           try {
@@ -454,6 +462,25 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
           liveAgents.delete(agentId);
         }
       }
+      const updated = deps.agentsRepo.getById(agentId);
+      if (!updated) {
+        throw new AgentRuntimeError("AGENT_NOT_FOUND", `Agent ${agentId} vanished`);
+      }
+      return buildSummary(updated, deps.runsRepo.aggregatesByAgent().get(agentId));
+    },
+
+    setModelParams(agentId: string, modelParams: ModelParameterValue[]): AgentSummary {
+      const row = deps.agentsRepo.getById(agentId);
+      if (!row) {
+        throw new AgentRuntimeError("AGENT_NOT_FOUND", `Agent ${agentId} not found`);
+      }
+      if (row.status === "terminated") {
+        throw new AgentRuntimeError(
+          "AGENT_TERMINATED",
+          `Agent ${agentId} is terminated. Resume it first.`,
+        );
+      }
+      deps.agentsRepo.setModelParams(agentId, modelParams.length > 0 ? modelParams : null);
       const updated = deps.agentsRepo.getById(agentId);
       if (!updated) {
         throw new AgentRuntimeError("AGENT_NOT_FOUND", `Agent ${agentId} vanished`);

@@ -7,6 +7,7 @@ import {
   type AgentStatus,
   type CloudAgentOptions,
   type ExecutionMode,
+  type ModelParameterValue,
   type SettingSource,
 } from "@harness/shared";
 import {
@@ -25,6 +26,7 @@ export interface CreateAgentInput {
   mode: AgentMode;
   executionMode?: ExecutionMode;
   modelId: string;
+  modelParams?: ReadonlyArray<ModelParameterValue> | null;
   cwd?: ReadonlyArray<string> | null;
   settingSources?: ReadonlyArray<SettingSource> | null;
   sandboxEnabled?: boolean | null;
@@ -40,6 +42,7 @@ interface AgentDbRow {
   mode: string;
   execution_mode: string;
   model_id: string;
+  model_params_json: string | null;
   cwd_json: string | null;
   setting_sources_json: string | null;
   sandbox_enabled: number | null;
@@ -62,6 +65,7 @@ function rowToDomain(row: AgentDbRow): AgentRow {
     mode: row.mode as AgentMode,
     executionMode: executionModeSchema.parse(row.execution_mode),
     modelId: row.model_id,
+    modelParams: parseJsonOrNull<ModelParameterValue[]>(row.model_params_json),
     cwd: parseJsonOrNull<string[]>(row.cwd_json),
     settingSources: parseJsonOrNull<SettingSource[]>(row.setting_sources_json),
     sandboxEnabled:
@@ -87,12 +91,12 @@ export class AgentsRepo {
     this.raw
       .prepare(
         `INSERT INTO agents (
-            id, name, status, mode, execution_mode, model_id,
+            id, name, status, mode, execution_mode, model_id, model_params_json,
             cwd_json, setting_sources_json, sandbox_enabled,
             cloud_options_json, mcp_server_ids_json, subagent_definition_ids_json,
             created_at, updated_at
           ) VALUES (
-            @id, @name, @status, @mode, @execution_mode, @model_id,
+            @id, @name, @status, @mode, @execution_mode, @model_id, @model_params_json,
             @cwd_json, @setting_sources_json, @sandbox_enabled,
             @cloud_options_json, @mcp_server_ids_json, @subagent_definition_ids_json,
             @created_at, @updated_at
@@ -105,6 +109,7 @@ export class AgentsRepo {
         mode: input.mode,
         execution_mode: input.executionMode ?? "agent",
         model_id: input.modelId,
+        model_params_json: stringifyOrNull(input.modelParams ?? null),
         cwd_json: stringifyOrNull(input.cwd ?? null),
         setting_sources_json: stringifyOrNull(input.settingSources ?? null),
         sandbox_enabled:
@@ -184,6 +189,18 @@ export class AgentsRepo {
           WHERE id = ?`,
       )
       .run(modelId, isoNow(), id);
+  }
+
+  /** Set (or clear with `null`) the per-model parameters (thinking/effort). */
+  setModelParams(id: string, modelParams: ReadonlyArray<ModelParameterValue> | null): void {
+    this.raw
+      .prepare(
+        `UPDATE agents
+            SET model_params_json = ?,
+                updated_at = ?
+          WHERE id = ?`,
+      )
+      .run(stringifyOrNull(modelParams ?? null), isoNow(), id);
   }
 
   terminate(id: string): void {

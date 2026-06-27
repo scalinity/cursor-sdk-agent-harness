@@ -164,7 +164,7 @@ export async function registerProvidersRoutes(
   });
 
   app.get("/api/models", async (_request, reply) => {
-    const items: UnifiedModel[] = deps.modelRouter.listUnifiedModels();
+    const items: UnifiedModel[] = await deps.modelRouter.listAllModels();
     return reply.send({ items, autoAvailable: true });
   });
 }

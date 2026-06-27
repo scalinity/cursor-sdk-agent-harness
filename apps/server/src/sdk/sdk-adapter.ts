@@ -1,11 +1,13 @@
 import {
   Agent as CursorAgent,
+  Cursor,
   CursorSdkError,
   wrapSdkError,
   type SDKAgent,
   type Run,
   type AgentOptions,
   type SendOptions,
+  type SDKModel,
   type SDKUserMessage,
 } from "@cursor/sdk";
 import type { SdkImage } from "@harness/shared";
@@ -57,6 +59,13 @@ export interface SdkAdapter {
    * F-2 in the ledger so retries are de-duped server-side.
    */
   send(agent: SDKAgent, message: string | SdkUserMessageInput, sendOptions: SendOptions): Promise<Run>;
+  /**
+   * List the models available to the authenticated user, with each model's
+   * discovered parameters (thinking/reasoning effort, max mode) and preset
+   * variants. Wraps `Cursor.models.list()`. The catalog is account-specific;
+   * the key is passed explicitly rather than relying on the env fallback.
+   */
+  listModels(apiKey: string): Promise<SDKModel[]>;
 }
 
 async function invokeSdk<T>(operation: string, fn: () => Promise<T>): Promise<T> {
@@ -82,7 +91,9 @@ export function createCursorSdkAdapter(): SdkAdapter {
           sendOptions,
         ),
       ),
+    listModels: (apiKey) =>
+      invokeSdk("listModels", () => Cursor.models.list({ apiKey })),
   };
 }
 
-export type { SDKAgent, Run, AgentOptions, SendOptions, SDKUserMessage };
+export type { SDKAgent, Run, AgentOptions, SendOptions, SDKModel, SDKUserMessage };

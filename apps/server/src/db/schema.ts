@@ -25,6 +25,7 @@ export const agents = sqliteTable(
     status: text("status").notNull(),
     mode: text("mode").notNull(),
     modelId: text("model_id").notNull(),
+    modelParamsJson: text("model_params_json"),
     cwdJson: text("cwd_json"),
     settingSourcesJson: text("setting_sources_json"),
     sandboxEnabled: integer("sandbox_enabled"),
@@ -49,6 +50,10 @@ export const agents = sqliteTable(
       sql`${table.status} IN ('creating', 'active', 'terminated', 'error')`,
     ),
     check("agents_mode_check", sql`${table.mode} IN ('local', 'cloud')`),
+    check(
+      "agents_model_params_json_valid",
+      sql`${table.modelParamsJson} IS NULL OR json_valid(${table.modelParamsJson})`,
+    ),
   ],
 );
 

@@ -52,6 +52,13 @@ export interface ResolvedRunModel {
 export interface ModelRouterDeps {
   modelProvidersRepo: ModelProvidersRepo;
   providerKeyStore: ProviderKeyStore;
+  /**
+   * Optional live Cursor model discovery. When present, `listAllModels()`
+   * prefers the discovered catalog (with per-model parameters/variants) over
+   * the static `CURSOR_MODELS` registry; falls back to static when discovery
+   * yields nothing.
+   */
+  cursorCatalog?: { list(): Promise<UnifiedModel[]> };
 }
 
 export class ModelRouter {
@@ -89,15 +96,41 @@ export class ModelRouter {
     return this.instantiate(row, apiKey);
   }
 
-  /** All selectable models: Cursor built-ins + each enabled provider's models. */
+  /**
+   * All selectable models from the STATIC registry: Cursor built-ins + each
+   * enabled provider's models. Synchronous — used by `resolve()`'s Auto
+   * heuristic. For the user-facing catalog (with discovered Cursor params),
+   * use `listAllModels()`.
+   */
   listUnifiedModels(): UnifiedModel[] {
-    const out: UnifiedModel[] = CURSOR_MODELS.map((m) => ({
+    return [...this.staticCursorModels(), ...this.listProviderModels()];
+  }
+
+  /**
+   * The user-facing catalog: live-discovered Cursor models (with per-model
+   * parameters/variants) when available, else the static registry, plus each
+   * enabled provider's models.
+   */
+  async listAllModels(): Promise<UnifiedModel[]> {
+    const discovered = this.deps.cursorCatalog
+      ? await this.deps.cursorCatalog.list()
+      : [];
+    const cursor = discovered.length > 0 ? discovered : this.staticCursorModels();
+    return [...cursor, ...this.listProviderModels()];
+  }
+
+  private staticCursorModels(): UnifiedModel[] {
+    return CURSOR_MODELS.map((m) => ({
       id: m.id,
       name: m.name,
       provider: "cursor" as ProviderKind,
       providerId: "cursor",
       capabilities: inferCapabilities("cursor", m.id),
     }));
+  }
+
+  private listProviderModels(): UnifiedModel[] {
+    const out: UnifiedModel[] = [];
     for (const row of this.deps.modelProvidersRepo.list()) {
       if (!row.enabled) continue;
       const kind = row.provider as ProviderKind;

@@ -186,7 +186,14 @@ export async function buildAgentOptions(
     apiKey,
     agentId: agent.id,
     name: agent.name,
-    model: { id: toSdkModelId(agent.modelId) },
+    model: {
+      id: toSdkModelId(agent.modelId),
+      // Per-model params (thinking/effort) chosen via the catalog; the SDK's
+      // ModelSelection.params shape matches our stored {id,value} pairs.
+      ...(agent.modelParams && agent.modelParams.length > 0
+        ? { params: agent.modelParams }
+        : {}),
+    },
     ...(Object.keys(mcp).length > 0 ? { mcpServers: mcp } : {}),
     ...(Object.keys(agentsDefinitions).length > 0
       ? { agents: agentsDefinitions }

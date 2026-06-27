@@ -128,6 +128,9 @@ describe("RunController", () => {
       async resumeAgent() {
         return new StubSDKAgent(agentId);
       },
+      async listModels() {
+        return [];
+      },
       async send(_agent, _message, sendOptions) {
         sends.push(sendOptions);
         if (sends.length === 1) {
@@ -352,6 +355,9 @@ describe("RunController", () => {
       async resumeAgent() {
         return new StubSDKAgent(f.agentId);
       },
+      async listModels() {
+        return [];
+      },
       async send(_agent, _message, sendOptions) {
         sends.push(sendOptions);
         throw new Error("boom: unrelated network failure");
@@ -374,6 +380,9 @@ describe("RunController", () => {
       },
       async resumeAgent() {
         return new StubSDKAgent(f.agentId);
+      },
+      async listModels() {
+        return [];
       },
       async send(_agent, _message, sendOptions) {
         return new StubRun(

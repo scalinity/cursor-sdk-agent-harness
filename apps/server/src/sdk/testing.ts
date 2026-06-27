@@ -4,6 +4,7 @@ import type {
   AgentOptions,
   Run,
   SDKAgent,
+  SDKModel,
   SdkUserMessageInput,
   SdkAdapter,
 } from "./sdk-adapter.js";
@@ -196,6 +197,8 @@ export interface StubSdkAdapterOptions {
     onDelta?: (args: { update: unknown }) => void | Promise<void>;
     idempotencyKey?: string;
   }) => StubRunInit | Promise<StubRunInit>;
+  /** Models returned by `listModels()`. Default `[]` (discovery yields nothing). */
+  models?: SDKModel[];
 }
 
 export function createStubSdkAdapter(opts: StubSdkAdapterOptions = {}): SdkAdapter {
@@ -207,6 +210,9 @@ export function createStubSdkAdapter(opts: StubSdkAdapterOptions = {}): SdkAdapt
     async resumeAgent(agentId, options) {
       if (opts.onResume) await opts.onResume(agentId, options);
       return new StubSDKAgent(agentId);
+    },
+    async listModels() {
+      return opts.models ?? [];
     },
     async send(agent, message: string | SdkUserMessageInput, sendOptions) {
       const prompt = typeof message === "string" ? message : message.text;
