@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import { useCodebaseSearch, type SearchType } from "../hooks/useCodebaseSearch.js";
 import { cn } from "../lib/cn.js";
+import { formatBytes } from "../lib/format.js";
 import { FileIcon, SearchIcon, SparkIcon, type IconProps } from "./shell/ToolbarIcons.js";
 
 const PLACEHOLDERS: Record<string, string> = {
@@ -124,7 +125,7 @@ export function SearchPanel() {
                 <div className="search-result__path">{f.path}</div>
                 <div className="search-result__line">
                   {f.name}
-                  {f.size > 0 ? ` (${formatSize(f.size)})` : ""}
+                  {f.size > 0 ? ` (${formatBytes(f.size)})` : ""}
                 </div>
               </div>
             ))
@@ -166,10 +167,4 @@ export function SearchPanel() {
       ) : null}
     </div>
   );
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }

@@ -6,8 +6,7 @@ import {
   readWorkspaceFileQuerySchema,
   readWorkspaceFileResponseSchema,
 } from "@harness/shared";
-import type { FastifyInstance, FastifyReply } from "fastify";
-import type { z } from "zod";
+import type { FastifyInstance } from "fastify";
 import { constants as fsConstants } from "node:fs";
 import { mkdir, open as fsOpen, unlink, realpath as fsRealpath } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
@@ -22,15 +21,9 @@ import {
   readWorkspaceFile,
   type WorkspaceFilesErrorCode,
 } from "../services/workspace-files.service.js";
+import { send422 } from "./route-errors.js";
 
 export type FilesRoutesDeps = WorkspaceResolverDeps;
-
-function send422(reply: FastifyReply, error: z.ZodError) {
-  return reply.code(422).send({
-    code: "VALIDATION_ERROR",
-    details: error.issues,
-  });
-}
 
 // Maps a workspace-files service error to the HTTP status the client expects.
 const FILE_ERROR_STATUS: Record<WorkspaceFilesErrorCode, number> = {

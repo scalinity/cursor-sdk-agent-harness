@@ -9,7 +9,6 @@ import {
   type McpServerSummary,
 } from "@harness/shared";
 import type { FastifyInstance, FastifyReply } from "fastify";
-import type { z } from "zod";
 import type { McpServersRepo } from "../db/repositories/mcp-servers.repo.js";
 import {
   DEFAULT_PROBE_TIMEOUT_MS,
@@ -26,6 +25,7 @@ import {
 } from "../mcp/mcp-secret-config.js";
 import { ForeignMcpSecretRefError } from "../mcp/mcp-secret-errors.js";
 import { MissingMcpSecretError, type McpSecretStore } from "../keychain/mcp-secret-store.js";
+import { send422 } from "./route-errors.js";
 
 export interface McpServersRoutesDeps {
   mcpServers: McpServersRepo;
@@ -44,13 +44,6 @@ export interface McpServersRoutesDeps {
     config: unknown,
     options: McpValidatorOptions,
   ) => Promise<McpValidationResult>;
-}
-
-function send422(reply: FastifyReply, error: z.ZodError) {
-  return reply.code(422).send({
-    code: "VALIDATION_ERROR",
-    details: error.issues,
-  });
 }
 
 function sendMcpSecretRouteError(reply: FastifyReply, err: unknown): FastifyReply | null {

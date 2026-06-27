@@ -54,7 +54,7 @@ function hostOf(url: string): string {
   }
 }
 
-/** Map Chromium's numeric console level to our enum (verbose|info|warning|error). */
+/** Map Chromium's numeric console level to our ConsoleLevel enum. */
 function consoleLevelFromChromium(level: number): ConsoleLevel {
   switch (level) {
     case 0:

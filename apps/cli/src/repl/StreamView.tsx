@@ -201,11 +201,8 @@ function shouldInsertBlockGap(current: StreamBlock, next: StreamBlock): boolean 
 }
 
 export function renderViewportLines(text: string, width: number, height: number, scrollOffset: number): string[] {
-  const wrapped = hardWrapText(text, Math.max(10, width));
-  const viewportHeight = Math.max(1, height);
-  const maxOffset = Math.max(0, wrapped.length - viewportHeight);
-  const offset = Math.min(Math.max(0, scrollOffset), maxOffset);
-  return viewportLinesFromWrapped(wrapped, viewportHeight, offset);
+  // viewportLinesFromWrapped clamps the offset itself, so no pre-clamping here.
+  return viewportLinesFromWrapped(hardWrapText(text, Math.max(10, width)), height, scrollOffset);
 }
 
 export interface StreamViewportState {

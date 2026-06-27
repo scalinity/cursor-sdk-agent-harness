@@ -1,11 +1,11 @@
-export const usdCompact = new Intl.NumberFormat("en-US", {
+const usdCompact = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
   minimumFractionDigits: 2,
   maximumFractionDigits: 6,
 });
 
-export const integer = new Intl.NumberFormat("en-US");
+const integer = new Intl.NumberFormat("en-US");
 
 export function formatMicros(micros: number | null | undefined): string {
   if (micros === null || micros === undefined) return "--";
@@ -15,6 +15,12 @@ export function formatMicros(micros: number | null | undefined): string {
 export function formatTokens(tokens: number | null | undefined): string {
   if (tokens === null || tokens === undefined) return "--";
   return integer.format(tokens);
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
 export function tokenTotal(input: number | null, output: number | null): number | null {

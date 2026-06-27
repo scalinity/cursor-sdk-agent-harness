@@ -29,10 +29,9 @@ function parseFrontmatter(raw: string): { frontmatter: RuleFrontmatter; body: st
     if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
       value = value.slice(1, -1);
     }
-    if (key === "name") frontmatter.name = value;
-    else if (key === "scope") frontmatter.scope = value;
-    else if (key === "glob") frontmatter.glob = value;
-    else if (key === "description") frontmatter.description = value;
+    if (key === "name" || key === "scope" || key === "glob" || key === "description") {
+      frontmatter[key] = value;
+    }
   }
 
   return { frontmatter, body };

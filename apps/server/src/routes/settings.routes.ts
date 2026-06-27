@@ -5,8 +5,7 @@ import {
   updatePricingRequestSchema,
   updateSettingsRequestSchema,
 } from "@harness/shared";
-import type { FastifyInstance, FastifyReply } from "fastify";
-import type { z } from "zod";
+import type { FastifyInstance } from "fastify";
 import type { CursorApiKeyStore } from "../keychain/cursor-api-key.js";
 import type { SettingsRepo } from "../db/repositories/settings.repo.js";
 import {
@@ -14,17 +13,11 @@ import {
   applySettingsUpdate,
   getSettingsSnapshot,
 } from "../services/settings.service.js";
+import { send422 } from "./route-errors.js";
 
 export interface SettingsRoutesDeps {
   settings: SettingsRepo;
   apiKeyStore: CursorApiKeyStore;
-}
-
-function send422(reply: FastifyReply, error: z.ZodError) {
-  return reply.code(422).send({
-    code: "VALIDATION_ERROR",
-    details: error.issues,
-  });
 }
 
 export async function registerSettingsRoutes(

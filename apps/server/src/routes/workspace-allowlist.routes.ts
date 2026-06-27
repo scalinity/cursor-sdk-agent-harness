@@ -5,12 +5,13 @@ import {
   validateWorkspacePathRequestSchema,
   workspaceAllowlistRowSchema,
 } from "@harness/shared";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { SettingsRepo } from "../db/repositories/settings.repo.js";
 import type { WorkspaceAllowlistRepo } from "../db/repositories/workspace-allowlist.repo.js";
 import type { WorkspacePolicy } from "../security/workspace-policy.js";
 import { ensureDefaultWorkspace } from "../security/default-workspace.js";
+import { send422 } from "./route-errors.js";
 import { ACTIVE_WORKSPACE_SETTING_KEY } from "../config/settings-keys.js";
 export { ACTIVE_WORKSPACE_SETTING_KEY };
 
@@ -31,13 +32,6 @@ const deleteQuerySchema = z.object({
 const validateBatchSchema = z.object({
   paths: z.array(z.string().min(1)).min(1).max(64),
 });
-
-function send422(reply: FastifyReply, error: z.ZodError) {
-  return reply.code(422).send({
-    code: "VALIDATION_ERROR",
-    details: error.issues,
-  });
-}
 
 function readActiveWorkspaceId(settings: SettingsRepo): string | null {
   const raw = settings.get<string | null>(ACTIVE_WORKSPACE_SETTING_KEY);

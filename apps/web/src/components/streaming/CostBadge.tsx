@@ -1,4 +1,4 @@
-import type { TokenUsage } from "@harness/shared";
+import { SDK_RUN_TERMINAL_STATUSES, type SdkRunStatus, type TokenUsage } from "@harness/shared";
 import { useRunStore } from "../../state/run-store.js";
 import { useSettingsStore } from "../../state/settings-store.js";
 import { cn } from "../../lib/cn.js";
@@ -15,8 +15,8 @@ const currency = new Intl.NumberFormat("en-US", {
 
 const integer = new Intl.NumberFormat("en-US");
 
-function isTerminal(status: string | null | undefined): boolean {
-  return status === "FINISHED" || status === "ERROR" || status === "CANCELLED" || status === "EXPIRED";
+function isTerminal(status: SdkRunStatus | null): boolean {
+  return status !== null && SDK_RUN_TERMINAL_STATUSES.has(status);
 }
 
 function tokenSummary(usage: TokenUsage): { total: number; partial: boolean } | null {

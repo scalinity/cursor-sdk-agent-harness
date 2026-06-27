@@ -14,8 +14,7 @@ import {
   type ExecutionMode,
   type TokenUsage,
 } from "@harness/shared";
-import type { FastifyInstance, FastifyReply } from "fastify";
-import type { z } from "zod";
+import type { FastifyInstance } from "fastify";
 import type { RunsRepo, RunHistoryListOptions } from "../db/repositories/runs.repo.js";
 import type { EventsRepo } from "../db/repositories/events.repo.js";
 import type { AgentsRepo } from "../db/repositories/agents.repo.js";
@@ -25,44 +24,13 @@ import {
   WorkspaceRejectedError,
   type AgentRuntime,
 } from "../sdk/index.js";
+import { send422, sendRuntimeError } from "./route-errors.js";
 
 export interface RunsRoutesDeps {
   runtime: AgentRuntime;
   runsRepo: RunsRepo;
   eventsRepo: EventsRepo;
   agentsRepo: AgentsRepo;
-}
-
-function send422(reply: FastifyReply, error: z.ZodError) {
-  return reply.code(422).send({
-    code: "VALIDATION_ERROR",
-    details: error.issues,
-  });
-}
-
-function sendRuntimeError(reply: FastifyReply, err: AgentRuntimeError) {
-  switch (err.code) {
-    case "MISSING_API_KEY":
-      return reply.code(412).send({ code: err.code, message: err.message });
-    case "AGENT_NOT_FOUND":
-    case "RUN_NOT_FOUND":
-      return reply.code(404).send({ code: err.code, message: err.message });
-    case "AGENT_TERMINATED":
-      return reply.code(409).send({ code: err.code, message: err.message });
-    case "AGENT_BUSY":
-      return reply.code(409).send({ code: err.code, message: err.message });
-    case "SDK_CREATE_FAILED":
-    case "SDK_RESUME_FAILED":
-    case "SDK_SEND_FAILED":
-      return reply.code(502).send({ code: err.code, message: err.message });
-    case "MCP_SECRET_MISSING":
-      return reply.code(503).send({ code: err.code, message: err.message, details: err.details });
-    default: {
-      const _exhaustive: never = err.code;
-      void _exhaustive;
-      return reply.code(500).send({ code: "INTERNAL", message: err.message });
-    }
-  }
 }
 
 function splitCsv(value: string | undefined): string[] | undefined {

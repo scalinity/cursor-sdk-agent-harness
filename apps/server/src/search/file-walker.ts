@@ -94,16 +94,10 @@ function matchesIgnore(relPath: string, patterns: readonly string[]): boolean {
     if (p.endsWith("/")) p = p.slice(0, -1);
     if (p.length === 0) continue;
     const opts = { dot: true, nocomment: true };
-    if (anchored) {
-      if (minimatch(relPath, p, opts) || minimatch(relPath, `${p}/**`, opts)) return true;
-    } else if (
-      minimatch(relPath, p, opts) ||
-      minimatch(relPath, `**/${p}`, opts) ||
-      minimatch(relPath, `**/${p}/**`, opts) ||
-      minimatch(relPath, `${p}/**`, opts)
-    ) {
-      return true;
-    }
+    const candidates = anchored
+      ? [p, `${p}/**`]
+      : [p, `**/${p}`, `**/${p}/**`, `${p}/**`];
+    if (candidates.some((pattern) => minimatch(relPath, pattern, opts))) return true;
   }
   return false;
 }

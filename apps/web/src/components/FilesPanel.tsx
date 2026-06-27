@@ -1,6 +1,7 @@
 import { useRef, type KeyboardEvent, type UIEvent } from "react";
 import type { KnownLanguage } from "@harness/shared";
 import { detectLanguageFromPath } from "../lib/code-edit-events.js";
+import { formatBytes } from "../lib/format.js";
 import { useWorkspaceFiles, type FilePreview } from "../hooks/useWorkspaceFiles.js";
 import {
   ArrowLeftIcon,
@@ -10,12 +11,6 @@ import {
   XIcon,
 } from "./shell/ToolbarIcons.js";
 import { SyntaxHighlighter } from "./streaming/SyntaxHighlighter.js";
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
 
 export function FilesPanel() {
   const {
@@ -130,7 +125,7 @@ export function FilesPanel() {
                 )}
                 <span className="files-panel__name">{entry.name}</span>
                 {isFile && entry.size > 0 ? (
-                  <span className="files-panel__size mono">{formatSize(entry.size)}</span>
+                  <span className="files-panel__size mono">{formatBytes(entry.size)}</span>
                 ) : null}
               </button>
             );

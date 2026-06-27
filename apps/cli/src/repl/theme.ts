@@ -65,10 +65,6 @@ export function border(color: string | undefined): { borderColor?: string } {
   return color ? { borderColor: color } : {};
 }
 
-export function inkColor(color: string | undefined): { color?: string } {
-  return color === undefined ? {} : { color };
-}
-
 export function truncateMiddle(input: string, maxWidth: number): string {
   if (maxWidth <= 0) return "";
   if (visibleLength(input) <= maxWidth) return input;

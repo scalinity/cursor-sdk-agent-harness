@@ -1,3 +1,4 @@
+import { SDK_RUN_TERMINAL_STATUSES, type SdkRunStatus } from "@harness/shared";
 import { useMemo, useState } from "react";
 import {
   deriveTextForSeqRangeFromRunState,
@@ -13,8 +14,8 @@ export interface ThinkingTraceProps {
   endSeq?: number | undefined;
 }
 
-function isTerminal(status: string | null | undefined): boolean {
-  return status === "FINISHED" || status === "ERROR" || status === "CANCELLED" || status === "EXPIRED";
+function isTerminal(status: SdkRunStatus | null): boolean {
+  return status !== null && SDK_RUN_TERMINAL_STATUSES.has(status);
 }
 
 function hasMarkdownLikeStructure(text: string): boolean {

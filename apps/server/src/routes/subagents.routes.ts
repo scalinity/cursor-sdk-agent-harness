@@ -7,21 +7,14 @@ import {
   type SubagentSummary,
   type UpdateSubagentRequest,
 } from "@harness/shared";
-import type { FastifyInstance, FastifyReply } from "fastify";
-import type { z } from "zod";
+import type { FastifyInstance } from "fastify";
 import type { McpServersRepo } from "../db/repositories/mcp-servers.repo.js";
 import type { SubagentDefinitionsRepo } from "../db/repositories/subagents.repo.js";
+import { send422 } from "./route-errors.js";
 
 export interface SubagentsRoutesDeps {
   subagents: SubagentDefinitionsRepo;
   mcpServers: McpServersRepo;
-}
-
-function send422(reply: FastifyReply, error: z.ZodError) {
-  return reply.code(422).send({
-    code: "VALIDATION_ERROR",
-    details: error.issues,
-  });
 }
 
 function toSummary(row: SubagentDefinitionRow): SubagentSummary {
