@@ -90,16 +90,21 @@ async function externalizeValue(
 interface SecretField {
   path: string[];
   value: string;
-  /** Write a new value back to the same config object this field came from. */
-  set: (next: string) => void;
+  /**
+   * Write a new value to this field on the GIVEN config. The closure captures
+   * only the field's location (its key), never a config object — so it can't
+   * silently alias and mutate a caller's input. Callers that mutate pass a
+   * clone explicitly (see externalize/hydrate); `collect` never calls `set`,
+   * so the read path structurally cannot mutate.
+   */
+  set: (target: McpServerConfig, next: string) => void;
 }
 
 /**
  * The single traversal over a config's secret-BEARING string fields: `env`
  * entries with a secret-like key, `headers` with a secret-like key, and
- * `auth.CLIENT_SECRET`. Each field carries a `set` that writes back to the
- * config object passed in, so externalize/hydrate map in place and `collect`
- * reads — one definition of "where the secrets live" instead of three.
+ * `auth.CLIENT_SECRET`. One definition of "where the secrets live" shared by
+ * externalize (map), hydrate (map), and collect (read).
  *
  * Distinct from `visitConfigStringFields` (every string field) which the
  * foreign-ref assert uses: that one must inspect non-secret fields too.
@@ -107,31 +112,42 @@ interface SecretField {
 function secretFields(config: McpServerConfig): SecretField[] {
   const fields: SecretField[] = [];
   if ("command" in config) {
-    const env = config.env;
-    if (env) {
-      for (const [key, value] of Object.entries(env)) {
+    if (config.env) {
+      for (const [key, value] of Object.entries(config.env)) {
         if (isSecretEnvKey(key)) {
-          fields.push({ path: ["env", key], value, set: (next) => { env[key] = next; } });
+          fields.push({
+            path: ["env", key],
+            value,
+            set: (target, next) => {
+              if ("command" in target && target.env) target.env[key] = next;
+            },
+          });
         }
       }
     }
     return fields;
   }
 
-  const headers = config.headers;
-  if (headers) {
-    for (const [key, value] of Object.entries(headers)) {
+  if (config.headers) {
+    for (const [key, value] of Object.entries(config.headers)) {
       if (isSecretHeaderKey(key)) {
-        fields.push({ path: ["headers", key], value, set: (next) => { headers[key] = next; } });
+        fields.push({
+          path: ["headers", key],
+          value,
+          set: (target, next) => {
+            if (!("command" in target) && target.headers) target.headers[key] = next;
+          },
+        });
       }
     }
   }
-  const auth = config.auth;
-  if (auth && auth.CLIENT_SECRET) {
+  if (config.auth?.CLIENT_SECRET) {
     fields.push({
       path: ["auth", "CLIENT_SECRET"],
-      value: auth.CLIENT_SECRET,
-      set: (next) => { auth.CLIENT_SECRET = next; },
+      value: config.auth.CLIENT_SECRET,
+      set: (target, next) => {
+        if (!("command" in target) && target.auth) target.auth.CLIENT_SECRET = next;
+      },
     });
   }
   return fields;
@@ -147,7 +163,7 @@ export async function externalizeMcpSecrets(
   let wroteSecrets = false;
   for (const field of secretFields(next)) {
     const result = await externalizeValue(store, serverId, field.path, field.value);
-    field.set(result.value);
+    field.set(next, result.value);
     wroteSecrets ||= result.wrote;
   }
   return { config: next, wroteSecrets };
@@ -174,7 +190,7 @@ export async function hydrateMcpSecrets(
   const next = cloneConfig(config);
   for (const field of secretFields(next)) {
     if (refMatchesPath(parseMcpSecretRef(field.value), serverId, field.path)) {
-      field.set(await store.get(field.value));
+      field.set(next, await store.get(field.value));
     }
   }
   return next;
