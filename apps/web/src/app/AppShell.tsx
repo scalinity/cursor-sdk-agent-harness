@@ -29,7 +29,7 @@ import { Toaster } from "../components/shell/Toaster.js";
 import { NewAgentDialog } from "../components/agents/NewAgentDialog.js";
 import { WorkspaceRequiredModal } from "../components/workspace/WorkspaceRequiredModal.js";
 import { cn } from "../lib/cn.js";
-import { formatModelLabel, type ContextMention, type SdkImage } from "@harness/shared";
+import { formatModelLabel, type ContextMention, type ModelParameterValue, type SdkImage } from "@harness/shared";
 import { describeModel } from "../lib/model-label.js";
 
 export function AppShell() {
@@ -42,6 +42,7 @@ export function AppShell() {
     selectAgent,
     createAgent,
     updateAgentModel,
+    updateAgentModelParams,
   } = useAgents();
   const { runs, deleteRun, reload: reloadRuns } = useRunHistory();
   const [newAgentOpen, setNewAgentOpen] = useState(false);
@@ -150,6 +151,14 @@ export function AppShell() {
     [activeAgent, updateAgentModel],
   );
 
+  const onEffortChange = useCallback(
+    async (params: ModelParameterValue[]) => {
+      if (!activeAgent) return;
+      await updateAgentModelParams(activeAgent.id, params);
+    },
+    [activeAgent, updateAgentModelParams],
+  );
+
   const activeRun = useMemo(
     () => runs.find((r) => r.id === activeRunId) ?? null,
     [runs, activeRunId],
@@ -250,6 +259,7 @@ export function AppShell() {
           connectionState={connectionState}
           onSubmit={onSubmit}
           onModelChange={onModelChange}
+          onEffortChange={onEffortChange}
           onApprovalResolve={onApprovalResolve}
           cancelUnavailable={cancelUnavailable}
         />

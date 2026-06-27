@@ -1,4 +1,4 @@
-import type { AgentSummary, ContextMention, RunSummary, SdkImage } from "@harness/shared";
+import type { AgentSummary, ContextMention, ModelParameterValue, RunSummary, SdkImage } from "@harness/shared";
 import { useRunStore } from "../../state/run-store.js";
 import { useUiStore } from "../../state/ui-store.js";
 import { EventTimeline } from "./EventTimeline.js";
@@ -21,6 +21,7 @@ export interface CenterPaneProps {
     mentions?: ContextMention[];
   }) => Promise<string>;
   onModelChange?: ((modelId: string) => Promise<void>) | undefined;
+  onEffortChange?: ((params: ModelParameterValue[]) => Promise<void>) | undefined;
   /**
    * Phase 13 — resolve an approval prompt by sending the
    * `approval_response` WS frame. Wired down to ApprovalPrompt via
@@ -43,6 +44,7 @@ export function CenterPane({
   connectionState,
   onSubmit,
   onModelChange,
+  onEffortChange,
   onApprovalResolve,
   cancelUnavailable,
 }: CenterPaneProps) {
@@ -66,6 +68,7 @@ export function CenterPane({
             activeAgent={activeAgent}
             onSubmit={onSubmit}
             onModelChange={onModelChange}
+            onEffortChange={onEffortChange}
             heroMode
           />
         </div>
@@ -113,6 +116,7 @@ export function CenterPane({
         activeAgent={activeAgent}
         onSubmit={onSubmit}
         onModelChange={onModelChange}
+        onEffortChange={onEffortChange}
       />
     </main>
   );

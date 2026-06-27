@@ -8,7 +8,7 @@
  *   - A simple toast queue (used by `useErrorReporter`) with per-toast TTL
  */
 import { create } from "zustand";
-import { DEFAULT_MODEL_ID, unifiedModelIdSchema, type ReplaySpeed, type UnifiedModelId, type WorkspaceAllowlistRow } from "@harness/shared";
+import { DEFAULT_MODEL_ID, unifiedModelIdSchema, type ModelParameterValue, type ReplaySpeed, type UnifiedModelId, type WorkspaceAllowlistRow } from "@harness/shared";
 
 export type ConnectionState =
   | "idle"
@@ -57,6 +57,12 @@ export interface UiState {
    * a default agent configured for that model. Persisted across reloads.
    */
   selectedModelId: UnifiedModelId;
+  /**
+   * Per-model parameters (thinking/effort) the composer will run. Reset when
+   * `selectedModelId` changes (a new model exposes its own parameter set).
+   * In-memory only — re-derived from the agent on demand, not persisted.
+   */
+  selectedModelParams: ModelParameterValue[];
   replaySpeedByRunId: Record<string, ReplaySpeed>;
   replayPausedByRunId: Record<string, boolean>;
   selectedCodeEditEventByRunId: Record<string, string>;
@@ -100,6 +106,7 @@ export interface UiState {
   setConnectionState: (state: ConnectionState) => void;
   setComposerDraft: (draft: string) => void;
   setSelectedModelId: (modelId: UnifiedModelId) => void;
+  setSelectedModelParams: (params: ModelParameterValue[]) => void;
   setReplaySpeed: (runId: string, speed: ReplaySpeed) => void;
   setReplayPaused: (runId: string, paused: boolean) => void;
   selectCodeEditEvent: (runId: string, eventId: string | null) => void;
@@ -188,6 +195,7 @@ export const useUiStore = create<UiState>((set) => ({
   connectionState: "idle",
   composerDraft: "",
   selectedModelId: readInitialSelectedModel(),
+  selectedModelParams: [],
   replaySpeedByRunId: {},
   replayPausedByRunId: {},
   selectedCodeEditEventByRunId: {},
@@ -235,8 +243,10 @@ export const useUiStore = create<UiState>((set) => ({
   setComposerDraft: (draft) => set({ composerDraft: draft }),
   setSelectedModelId: (modelId) => {
     persistSelectedModel(modelId);
-    set({ selectedModelId: modelId });
+    // A new model exposes its own parameter set; drop the prior effort choice.
+    set({ selectedModelId: modelId, selectedModelParams: [] });
   },
+  setSelectedModelParams: (params) => set({ selectedModelParams: params }),
   setReplaySpeed: (runId, speed) =>
     set((s) => ({ replaySpeedByRunId: { ...s.replaySpeedByRunId, [runId]: speed } })),
   setReplayPaused: (runId, paused) =>

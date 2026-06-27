@@ -6,7 +6,10 @@ import {
   type AgentSummary,
   type ContextMention,
   type ModelId,
+  type ModelParameterDefinition,
+  type ModelParameterValue,
   type SdkImage,
+  type UnifiedModel,
 } from "@harness/shared";
 import { useUiStore } from "../../state/ui-store.js";
 import { useModels } from "../../hooks/useModels.js";
@@ -36,8 +39,32 @@ export interface ComposerProps {
     mentions?: ContextMention[];
   }) => Promise<string>;
   onModelChange?: ((modelId: string) => Promise<void>) | undefined;
+  onEffortChange?: ((params: ModelParameterValue[]) => Promise<void>) | undefined;
   /** Centered "new session" presentation when the chat is empty and the right pane is collapsed. */
   heroMode?: boolean;
+}
+
+const EFFORT_PARAM_RE = /thinking|reasoning|effort/i;
+
+/**
+ * The model's thinking/effort parameter, discovered from the catalog — matched
+ * by id/displayName, or the sole parameter when there's exactly one. Returns
+ * null when the model exposes no effort-like parameter.
+ */
+function findEffortParameter(model: UnifiedModel): ModelParameterDefinition | null {
+  const params = model.parameters ?? [];
+  const match = params.find(
+    (p) => EFFORT_PARAM_RE.test(p.id) || (p.displayName ? EFFORT_PARAM_RE.test(p.displayName) : false),
+  );
+  if (match) return match;
+  return params.length === 1 ? (params[0] ?? null) : null;
+}
+
+/** A model's default value for a parameter: its default variant, else the first value. */
+function defaultParamValue(model: UnifiedModel, param: ModelParameterDefinition): string {
+  const def = (model.variants ?? []).find((v) => v.isDefault);
+  const fromVariant = def?.params.find((p) => p.id === param.id)?.value;
+  return fromVariant ?? param.values[0]?.value ?? "";
 }
 
 /**
@@ -49,12 +76,15 @@ export function Composer({
   activeAgent,
   onSubmit,
   onModelChange,
+  onEffortChange,
   heroMode = false,
 }: ComposerProps) {
   const draft = useUiStore((s) => s.composerDraft);
   const setDraft = useUiStore((s) => s.setComposerDraft);
   const selectedModelId = useUiStore((s) => s.selectedModelId);
   const setSelectedModelId = useUiStore((s) => s.setSelectedModelId);
+  const selectedModelParams = useUiStore((s) => s.selectedModelParams);
+  const setSelectedModelParams = useUiStore((s) => s.setSelectedModelParams);
   const { models } = useModels();
   const [busy, setBusy] = useState(false);
   const [modelBusy, setModelBusy] = useState(false);
@@ -178,6 +208,40 @@ export function Composer({
     [activeAgent, onModelChange, report, setSelectedModelId],
   );
 
+  // The selected model's thinking/effort control, derived from the discovered
+  // catalog. Null when the model exposes no effort-like parameter — we render
+  // no control rather than a fake/disabled one.
+  const effortControl = useMemo(() => {
+    const model = models.find((m) => m.id === selectedModelId);
+    const param = model ? findEffortParameter(model) : null;
+    if (!model || !param || param.values.length === 0) return null;
+    const options: SelectOption<string>[] = param.values.map((v) => ({
+      value: v.value,
+      label: v.displayName ?? v.value,
+    }));
+    const current =
+      selectedModelParams.find((p) => p.id === param.id)?.value ??
+      defaultParamValue(model, param);
+    return { param, options, current };
+  }, [models, selectedModelId, selectedModelParams]);
+
+  const handleEffortChange = useCallback(
+    async (paramId: string, value: string) => {
+      const params: ModelParameterValue[] = [{ id: paramId, value }];
+      setSelectedModelParams(params);
+      if (!onEffortChange || !activeAgent) return;
+      setModelBusy(true);
+      try {
+        await onEffortChange(params);
+      } catch (e) {
+        report(e);
+      } finally {
+        setModelBusy(false);
+      }
+    },
+    [activeAgent, onEffortChange, report, setSelectedModelParams],
+  );
+
   const submit = useCallback(async () => {
     // Read the latest draft from the store at submit time rather than the
     // captured closure value — protects against programmatic updates racing
@@ -251,11 +315,9 @@ export function Composer({
 
   const canSend = ready && !busy && (draft.trim().length > 0 || attachments.length > 0);
 
-  // Reasoning effort knob intentionally absent. The Cursor SDK exposes
-  // per-model parameters via `Cursor.models.list()[…].parameters` and the
-  // run-time `model.params` field, but the harness has not yet wired model
-  // discovery, so we render no control rather than a fake / always-disabled
-  // one (spec's "honest about the SDK" rule).
+  // The reasoning/thinking effort control (next to the model picker) is driven
+  // by each model's discovered `parameters` from Cursor.models.list() — see
+  // `effortControl`. Models without an effort parameter render no control.
 
   return (
     <div className={cn("composer", heroMode && "composer--hero")}>
@@ -341,6 +403,20 @@ export function Composer({
             title="Model used for new runs. Switching it re-targets the coding agent."
             className="h-control-md gap-1 rounded-md px-1 text-md font-medium text-text-tertiary hover:text-text-primary"
           />
+          {effortControl ? (
+            <Select<string>
+              value={effortControl.current}
+              options={effortControl.options}
+              onChange={(value) => {
+                void handleEffortChange(effortControl.param.id, value);
+              }}
+              disabled={busy || modelBusy}
+              placement="top"
+              ariaLabel={effortControl.param.displayName ?? "Thinking"}
+              title={`${effortControl.param.displayName ?? "Thinking"} — reasoning effort for the selected model`}
+              className="h-control-md gap-1 rounded-md px-1 text-md font-medium text-text-tertiary hover:text-text-primary"
+            />
+          ) : null}
           <div className="ml-auto flex items-center gap-2">
             {speech.modelProgress !== null ? (
               <span className="composer-stt-status" aria-live="polite">

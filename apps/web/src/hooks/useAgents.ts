@@ -22,6 +22,7 @@ import {
   listAgentsResponseSchema,
   type AgentSummary,
   type CreateAgentRequest,
+  type ModelParameterValue,
 } from "@harness/shared";
 import { httpRequest, mutatingRequest } from "../lib/http-client.js";
 import { useAgentStore } from "../state/agent-store.js";
@@ -40,6 +41,7 @@ export interface UseAgentsResult {
   selectAgent: (agentId: string | null) => void;
   createAgent: (request: CreateAgentRequest) => Promise<AgentSummary>;
   updateAgentModel: (agentId: string, modelId: string) => Promise<AgentSummary>;
+  updateAgentModelParams: (agentId: string, modelParams: ModelParameterValue[]) => Promise<AgentSummary>;
   terminateAgent: (agentId: string) => Promise<void>;
 }
 
@@ -149,6 +151,24 @@ export function useAgents(): UseAgentsResult {
     [refreshCsrfToken, upsertAgent],
   );
 
+  const updateAgentModelParams = useCallback(
+    async (agentId: string, modelParams: ModelParameterValue[]): Promise<AgentSummary> => {
+      const updated = await mutatingRequest(
+        `/api/agents/${encodeURIComponent(agentId)}`,
+        {
+          method: "PATCH",
+          body: { modelParams },
+          getCsrfToken: () => useUiStore.getState().csrfToken,
+          refreshCsrfToken,
+          responseSchema: agentSummarySchema,
+        },
+      );
+      upsertAgent(updated);
+      return updated;
+    },
+    [refreshCsrfToken, upsertAgent],
+  );
+
   const terminateAgent = useCallback(
     async (agentId: string) => {
       await mutatingRequest(`/api/agents/${encodeURIComponent(agentId)}/terminate`, {
@@ -187,6 +207,7 @@ export function useAgents(): UseAgentsResult {
     selectAgent: setActiveAgentId,
     createAgent,
     updateAgentModel,
+    updateAgentModelParams,
     terminateAgent,
   };
 }
