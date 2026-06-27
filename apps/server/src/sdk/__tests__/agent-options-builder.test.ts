@@ -254,7 +254,8 @@ describe("buildAgentOptions", () => {
       subagents: subs,
       workspacePolicy: policy,
     });
-    expect(opts.agents?.explicit?.model).toEqual({ id: "composer-2" });
+    // composer-2-5 (legacy "Composer 2.5") maps to the real SDK id composer-2.5.
+    expect(opts.agents?.explicit?.model).toEqual({ id: "composer-2.5" });
   });
 
   it("builds cloud options when mode=cloud and skips workspace validation", async () => {

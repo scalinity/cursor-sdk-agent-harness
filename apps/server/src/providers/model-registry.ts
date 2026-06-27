@@ -39,10 +39,17 @@ export const FALLBACK_MODELS: Record<Exclude<ProviderKind, "cursor" | "ollama">,
     ],
   };
 
-/** Built-in Cursor models (the only tool-capable models in v1.2). */
+/**
+ * Static fallback catalog, used only when live discovery (`Cursor.models.list`)
+ * is unavailable. A single composer entry under the default id: when a key is
+ * present, discovery overlays it (composer-2.5 → composer-2-5-fast) and surfaces
+ * the full frontier catalog alongside. The legacy `composer-2-5` id is
+ * intentionally absent — it maps to the same SDK model (composer-2.5), so a
+ * separate row would only duplicate this one; agents stored on that id still
+ * resolve via HARNESS_TO_SDK_MODEL_ID.
+ */
 export const CURSOR_MODELS: ReadonlyArray<{ id: string; name: string; tier: ModelTier }> = [
-  { id: "composer-2-5-fast", name: "Composer 2.5 Fast", tier: "fast" },
-  { id: "composer-2-5", name: "Composer 2.5", tier: "capable" },
+  { id: "composer-2-5-fast", name: "Composer 2.5", tier: "fast" },
 ];
 
 const FAST_HINTS = /(haiku|mini|flash|fast|nano|lite)/i;

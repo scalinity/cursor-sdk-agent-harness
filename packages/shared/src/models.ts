@@ -74,23 +74,30 @@ export const modelVariantSchema = z.object({
 export type ModelVariant = z.infer<typeof modelVariantSchema>;
 
 /**
- * Harness model id ↔ Cursor SDK model id. The harness keeps its own ids
- * (`composer-2-5-fast` / `composer-2-5`) for pricing keys + UI labels, while
- * `@cursor/sdk` and `Cursor.models.list()` use dotted ids (`composer-2.5` /
- * `composer-2`). Both directions live here so the SDK boundary, the discovery
- * catalog, and both clients reconcile against ONE source of truth (F-004).
+ * Harness model id ↔ Cursor SDK model id. The harness keeps two legacy composer
+ * ids (`composer-2-5-fast` / `composer-2-5`) for pricing keys + UI labels and as
+ * the default-agent id, while `Cursor.models.list()` exposes ONE real model,
+ * dotted `composer-2.5`, with a `fast` parameter (verified against a live key:
+ * the "fast" split is a parameter, not a separate model). Both legacy ids
+ * therefore map to `composer-2.5` — NOT to the distinct older `composer-2`
+ * model, which keeps its own real id and is surfaced separately by discovery.
+ *
+ * The inverse is hand-written (not derived) because the forward map is
+ * many-to-one: `composer-2.5` must reconcile to the DEFAULT id
+ * `composer-2-5-fast` so the default agent matches its discovered catalog entry
+ * (and thus gets the effort control — F-004).
  *
  * Upgrade triggers: a new SDK model literal the harness wants to alias, or a
- * renamed literal — update this map (and re-derive the inverse below).
+ * renamed literal — update both maps.
  */
 export const HARNESS_TO_SDK_MODEL_ID: Readonly<Record<string, string>> = {
   "composer-2-5-fast": "composer-2.5",
-  "composer-2-5": "composer-2",
+  "composer-2-5": "composer-2.5",
 };
 
-const SDK_TO_HARNESS_MODEL_ID: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.entries(HARNESS_TO_SDK_MODEL_ID).map(([harness, sdk]) => [sdk, harness]),
-);
+const SDK_TO_HARNESS_MODEL_ID: Readonly<Record<string, string>> = {
+  "composer-2.5": "composer-2-5-fast",
+};
 
 /** Map a harness/unified model id to the id `@cursor/sdk` expects. Unknown ids pass through. */
 export function toSdkModelId(modelId: string): string {

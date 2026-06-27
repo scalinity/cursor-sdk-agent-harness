@@ -84,7 +84,9 @@ describe("ModelRouter.listUnifiedModels", () => {
     const models = router.listUnifiedModels();
     const cursor = models.filter((m) => m.provider === "cursor");
     const openai = models.filter((m) => m.provider === "openai");
-    expect(cursor.length).toBe(2);
+    // Static fallback now carries a single composer entry (legacy composer-2-5
+    // maps to the same SDK model and is dropped from the static list).
+    expect(cursor.length).toBe(1);
     expect(cursor.every((m) => m.capabilities.toolUse)).toBe(true);
     expect(openai.length).toBe(2);
     expect(openai.every((m) => m.capabilities.toolUse === false)).toBe(true);

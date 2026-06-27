@@ -48,6 +48,14 @@ describe("model id reconciliation", () => {
     expect(toHarnessModelId("composer-2.5")).toBe("composer-2-5-fast");
   });
 
+  it("maps both legacy composer ids to the single real SDK model (composer-2.5, not composer-2)", () => {
+    expect(toSdkModelId("composer-2-5")).toBe("composer-2.5");
+    expect(toSdkModelId("composer-2-5-fast")).toBe("composer-2.5");
+    // The distinct older model keeps its own id.
+    expect(toSdkModelId("composer-2")).toBe("composer-2");
+    expect(toHarnessModelId("composer-2")).toBe("composer-2");
+  });
+
   it("passes through ids with no alias (e.g. proxied frontier models)", () => {
     expect(toSdkModelId("claude-opus-4-8")).toBe("claude-opus-4-8");
     expect(toHarnessModelId("claude-opus-4-8")).toBe("claude-opus-4-8");

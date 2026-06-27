@@ -143,7 +143,8 @@ describe("/api/providers", () => {
     expect(body.autoAvailable).toBe(true);
     const cursor = body.items.filter((m: { provider: string }) => m.provider === "cursor");
     const anthropic = body.items.filter((m: { provider: string }) => m.provider === "anthropic");
-    expect(cursor.length).toBe(2);
+    // No live discovery wired here → static fallback (single composer entry).
+    expect(cursor.length).toBe(1);
     expect(cursor.every((m: { capabilities: { toolUse: boolean } }) => m.capabilities.toolUse)).toBe(true);
     expect(anthropic.length).toBe(1);
     expect(anthropic[0].capabilities.toolUse).toBe(false);
