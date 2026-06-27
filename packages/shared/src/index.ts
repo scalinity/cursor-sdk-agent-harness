@@ -87,8 +87,10 @@ export type {
 
 // Pricing helpers
 export {
+  CURSOR_MODEL_RATE_RULES,
   DEFAULT_PRICING_MICROS,
   PRICING_SETTING_KEYS,
+  cursorModelRateMicros,
   dollarsPerMillionToMicros,
   microsToDollars,
   modelPricingSchema,
@@ -98,7 +100,7 @@ export {
   pricingSettingsSchema,
   pricingValueSchemaByKey,
 } from "./pricing.js";
-export type { ModelPricing, PricingSettingKey, PricingSettings } from "./pricing.js";
+export type { ModelPricing, ModelRateMicros, PricingSettingKey, PricingSettings } from "./pricing.js";
 
 export {
   CONTEXT_DANGER_FRACTION,

@@ -153,6 +153,39 @@ describe("extractUsage", () => {
     expect(out.cost_usd_micros).toBeNull();
   });
 
+  it("prices a frontier catalog model (Claude Opus) from the published rate table", () => {
+    const out = extractUsage({
+      rawUsage: {
+        inputTokens: 1_000_000,
+        outputTokens: 200_000,
+        cacheReadTokens: 100_000,
+      },
+      modelId: "claude-opus-4-8",
+      pricing,
+    });
+    // Opus rates: $5/M in, $25/M out, $0.5/M cached.
+    // fresh 900_000 * 5_000_000 / 1e6   = 4_500_000
+    // cached 100_000 * 500_000 / 1e6    =    50_000
+    // output 200_000 * 25_000_000 / 1e6 = 5_000_000
+    //                                     = 9_550_000
+    expect(out.usage_source).toBe("sdk_final_result");
+    expect(out.cost_usd_micros).toBe(9_550_000);
+  });
+
+  it("prices a BYOK provider-qualified model id by stripping the provider prefix", () => {
+    const out = extractUsage({
+      rawUsage: { inputTokens: 1_000_000, outputTokens: 200_000, cacheReadTokens: 100_000 },
+      modelId: "openrouter:gpt-5",
+      pricing,
+    });
+    // GPT-5 rates: $1.25/M in, $10/M out, $0.125/M cached.
+    // fresh 900_000 * 1_250_000 / 1e6  = 1_125_000
+    // cached 100_000 * 125_000 / 1e6   =    12_500
+    // output 200_000 * 10_000_000 / 1e6 = 2_000_000
+    //                                     = 3_137_500
+    expect(out.cost_usd_micros).toBe(3_137_500);
+  });
+
   it("applies promoMultiplier", () => {
     const promo: SettingsSnapshot["pricing"] = {
       ...pricing,

@@ -1,4 +1,5 @@
 import {
+  cursorModelRateMicros,
   type PricingSettings,
   type SettingsSnapshot,
   type TokenUsage,
@@ -269,9 +270,13 @@ function pricingForModel(
   outputPerMillionUsdMicros: number;
   cachedInputPerMillionUsdMicros: number;
 } | null {
+  // The two composer ids stay user-configurable via pricing settings.
   if (modelId === "composer-2-5-fast") return pricing.composer25Fast;
   if (modelId === "composer-2-5") return pricing.composer25;
-  return null;
+  // Every other Cursor catalog model (Claude / GPT-5.x / Gemini / Grok / Kimi /
+  // GLM / older Composer) is priced from the published rate table so cost shows
+  // instead of "unavailable". Unknown ids still return null (we never estimate).
+  return cursorModelRateMicros(modelId);
 }
 
 /**
