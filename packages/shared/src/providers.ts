@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isoDateTimeSchema } from "./constants.js";
+import { modelParameterDefinitionSchema, modelVariantSchema } from "./models.js";
 
 /**
  * Phase 23 — Multi-model provider contracts.
@@ -113,6 +114,13 @@ export const unifiedModelSchema = z.object({
   providerId: z.string(),
   capabilities: modelCapabilitiesSchema,
   pricing: modelPricingHintSchema.optional(),
+  /**
+   * Discovered per-model parameters (thinking/reasoning effort, max mode) and
+   * preset variants, from `Cursor.models.list()`. Cursor models only today;
+   * absent for BYOK provider models.
+   */
+  parameters: z.array(modelParameterDefinitionSchema).optional(),
+  variants: z.array(modelVariantSchema).optional(),
 });
 export type UnifiedModel = z.infer<typeof unifiedModelSchema>;
 

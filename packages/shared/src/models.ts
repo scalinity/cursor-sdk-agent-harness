@@ -39,6 +39,40 @@ export function formatModelLabel(modelId: string): string {
   return colon > 0 ? modelId.slice(colon + 1) : modelId;
 }
 
+/**
+ * Per-model parameters — e.g. "thinking"/reasoning effort, max mode. Mirrors
+ * the Cursor SDK's `ModelSelection` / `ModelListItem` shapes verbatim. The
+ * allowed values are DISCOVERED at runtime via `Cursor.models.list()` and are
+ * model-specific; never hardcode the set here.
+ *
+ * - `ModelParameterValue` (`{ id, value }`) is a chosen setting, e.g.
+ *   `{ id: "thinking", value: "high" }`, sent with a model selection.
+ * - `ModelParameterDefinition` describes one parameter and its allowed values.
+ * - `ModelVariant` is a named preset bundle of params.
+ */
+export const modelParameterValueSchema = z.object({
+  id: z.string().min(1),
+  value: z.string(),
+});
+export type ModelParameterValue = z.infer<typeof modelParameterValueSchema>;
+
+export const modelParameterDefinitionSchema = z.object({
+  id: z.string().min(1),
+  displayName: z.string().optional(),
+  values: z.array(
+    z.object({ value: z.string(), displayName: z.string().optional() }),
+  ),
+});
+export type ModelParameterDefinition = z.infer<typeof modelParameterDefinitionSchema>;
+
+export const modelVariantSchema = z.object({
+  params: z.array(modelParameterValueSchema),
+  displayName: z.string(),
+  description: z.string().optional(),
+  isDefault: z.boolean().optional(),
+});
+export type ModelVariant = z.infer<typeof modelVariantSchema>;
+
 export const settingSourceSchema = z.enum([
   "project",
   "user",

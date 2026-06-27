@@ -7,6 +7,7 @@ import {
   executionModeSchema,
   mcpValidationStatusSchema,
   modelIdSchema,
+  modelParameterValueSchema,
   unifiedModelIdSchema,
   replaySpeedSchema,
   sdkRunStatusSchema,
@@ -65,6 +66,9 @@ export const createAgentRequestSchema = z
     mode: agentModeSchema,
     // Phase 23 — accepts Cursor enum ids, `auto`, or `{providerId}:{model}`.
     modelId: unifiedModelIdSchema,
+    // Per-model parameters (e.g. thinking/effort), discovered via the model
+    // catalog. Empty/omitted = the model's defaults.
+    modelParams: z.array(modelParameterValueSchema).optional(),
     cwd: z.array(z.string().min(1)).optional(),
     settingSources: z.array(settingSourceSchema).optional(),
     sandboxEnabled: z.boolean().optional(),
@@ -104,6 +108,7 @@ export const updateAgentRequestSchema = z.object({
   name: z.string().min(1).max(256).optional(),
   executionMode: executionModeSchema.optional(),
   modelId: unifiedModelIdSchema.optional(),
+  modelParams: z.array(modelParameterValueSchema).optional(),
 });
 export type UpdateAgentRequest = z.infer<typeof updateAgentRequestSchema>;
 
@@ -130,6 +135,7 @@ export const listAgentsResponseSchema = z.object({
 });
 
 export const agentDetailResponseSchema = agentSummarySchema.extend({
+  modelParams: z.array(modelParameterValueSchema).nullable(),
   cwd: z.array(z.string()).nullable(),
   settingSources: z.array(settingSourceSchema).nullable(),
   sandboxEnabled: z.boolean().nullable(),
