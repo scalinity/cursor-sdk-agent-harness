@@ -11,10 +11,9 @@ import {
   type UpdateSettingsRequest,
   type UpdatePricingRequest,
 } from "@harness/shared";
-import { httpRequest, mutatingRequest } from "../lib/http-client.js";
+import { httpRequest } from "../lib/http-client.js";
 import { useSettingsStore } from "../state/settings-store.js";
-import { useUiStore } from "../state/ui-store.js";
-import { useCsrfToken } from "./useCsrfToken.js";
+import { useMutatingRequest } from "./useMutatingRequest.js";
 
 export interface UseSettingsResult {
   snapshot: SettingsSnapshot | null;
@@ -45,7 +44,7 @@ export function useSettingsActions(): UseSettingsActions {
   const setApiKeyPresence = useSettingsStore((s) => s.setApiKeyPresence);
   const setLoading = useSettingsStore((s) => s.setLoading);
   const setLastError = useSettingsStore((s) => s.setLastError);
-  const { refresh: refreshCsrfToken } = useCsrfToken();
+  const mutate = useMutatingRequest();
 
   const reload = useCallback(async () => {
     if (reloadInFlight) return reloadInFlight;
@@ -85,11 +84,9 @@ export function useSettingsActions(): UseSettingsActions {
       const mutationId = ++settingsMutationSeq;
       setLastError(null);
       try {
-        const next = await mutatingRequest("/api/settings", {
+        const next = await mutate("/api/settings", {
           method: "PATCH",
           body: patch,
-          getCsrfToken: () => useUiStore.getState().csrfToken,
-          refreshCsrfToken,
           responseSchema: settingsSnapshotSchema,
         });
         if (mutationId === settingsMutationSeq) setSnapshot(next);
@@ -98,7 +95,7 @@ export function useSettingsActions(): UseSettingsActions {
         throw e;
       }
     },
-    [refreshCsrfToken, setSnapshot, setLastError],
+    [mutate, setSnapshot, setLastError],
   );
 
   const updatePricing = useCallback(
@@ -106,11 +103,9 @@ export function useSettingsActions(): UseSettingsActions {
       const mutationId = ++settingsMutationSeq;
       setLastError(null);
       try {
-        const next = await mutatingRequest("/api/settings/pricing", {
+        const next = await mutate("/api/settings/pricing", {
           method: "PATCH",
           body: patch,
-          getCsrfToken: () => useUiStore.getState().csrfToken,
-          refreshCsrfToken,
           responseSchema: settingsSnapshotSchema,
         });
         if (mutationId === settingsMutationSeq) setSnapshot(next);
@@ -119,32 +114,28 @@ export function useSettingsActions(): UseSettingsActions {
         throw e;
       }
     },
-    [refreshCsrfToken, setSnapshot, setLastError],
+    [mutate, setSnapshot, setLastError],
   );
 
   const setApiKey = useCallback(
     async (value: string) => {
-      const next = await mutatingRequest("/api/settings/api-key", {
+      const next = await mutate("/api/settings/api-key", {
         method: "PUT",
         body: { value },
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken,
         responseSchema: apiKeyPresenceResponseSchema,
       });
       setApiKeyPresence(next.present, next.lastValidatedAt ?? null);
     },
-    [refreshCsrfToken, setApiKeyPresence],
+    [mutate, setApiKeyPresence],
   );
 
   const deleteApiKey = useCallback(async () => {
-    const next = await mutatingRequest("/api/settings/api-key", {
+    const next = await mutate("/api/settings/api-key", {
       method: "DELETE",
-      getCsrfToken: () => useUiStore.getState().csrfToken,
-      refreshCsrfToken,
       responseSchema: apiKeyPresenceResponseSchema,
     });
     setApiKeyPresence(next.present, next.lastValidatedAt ?? null);
-  }, [refreshCsrfToken, setApiKeyPresence]);
+  }, [mutate, setApiKeyPresence]);
 
   return { reload, updateSettings, updatePricing, setApiKey, deleteApiKey };
 }

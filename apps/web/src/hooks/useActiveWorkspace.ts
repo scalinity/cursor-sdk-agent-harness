@@ -12,9 +12,9 @@
  */
 import { useCallback } from "react";
 import { activeWorkspaceResponseSchema, type WorkspaceAllowlistRow } from "@harness/shared";
-import { httpRequest, mutatingRequest } from "../lib/http-client.js";
+import { httpRequest } from "../lib/http-client.js";
 import { useUiStore } from "../state/ui-store.js";
-import { useCsrfToken } from "./useCsrfToken.js";
+import { useMutatingRequest } from "./useMutatingRequest.js";
 import { useMountEffect } from "./useMountEffect.js";
 
 export interface UseActiveWorkspaceResult {
@@ -44,7 +44,7 @@ export function useActiveWorkspace(): UseActiveWorkspaceResult {
   const activeWorkspaceId = useUiStore((s) => s.activeWorkspaceId);
   const loading = useUiStore((s) => s.activeWorkspaceLoading);
   const error = useUiStore((s) => s.activeWorkspaceError);
-  const { refresh: refreshCsrfToken } = useCsrfToken();
+  const mutate = useMutatingRequest();
 
   const reload = useCallback(async (): Promise<void> => {
     if (reloadInFlight) return reloadInFlight;
@@ -77,11 +77,9 @@ export function useActiveWorkspace(): UseActiveWorkspaceResult {
 
   const setActive = useCallback(
     async (id: string | null) => {
-      const res = await mutatingRequest("/api/workspace-allowlist/active", {
+      const res = await mutate("/api/workspace-allowlist/active", {
         method: "PUT",
         body: { id },
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken,
         responseSchema: activeWorkspaceResponseSchema,
       });
       useUiStore.getState().setActiveWorkspaceData({
@@ -89,7 +87,7 @@ export function useActiveWorkspace(): UseActiveWorkspaceResult {
         activeWorkspaceId: res.activeWorkspaceId,
       });
     },
-    [refreshCsrfToken],
+    [mutate],
   );
 
   useMountEffect(() => {

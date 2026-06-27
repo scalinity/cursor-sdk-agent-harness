@@ -3,9 +3,7 @@ import type { KnownLanguage } from "@harness/shared";
 import type { MarkdownBlock } from "../../lib/streaming-markdown-projector.js";
 import { detectLanguageFromPath } from "../../lib/code-edit-events.js";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard.js";
-import { httpRequest, mutatingRequest } from "../../lib/http-client.js";
-import { useUiStore } from "../../state/ui-store.js";
-import { csrfTokenResponseSchema } from "@harness/shared";
+import { useMutatingRequest } from "../../hooks/useMutatingRequest.js";
 import { StreamingText } from "./StreamingText.js";
 import { SyntaxHighlighter } from "./SyntaxHighlighter.js";
 
@@ -147,27 +145,16 @@ interface CodeBlockProps {
  */
 function CodeBlock({ text, language, languageRaw, closed, terminal }: CodeBlockProps) {
   const { copied, copy } = useCopyToClipboard();
+  const mutate = useMutatingRequest();
   const [applyState, setApplyState] = useState<ApplyState>("idle");
   const filename = parseFilenameFromFence(languageRaw);
 
   const handleApply = () => {
     if (!filename || applyState === "applying") return;
     setApplyState("applying");
-    void mutatingRequest("/api/files/write", {
+    void mutate("/api/files/write", {
       method: "POST",
       body: { path: filename, content: text },
-      getCsrfToken: () => useUiStore.getState().csrfToken,
-      refreshCsrfToken: async () => {
-        try {
-          const res = await httpRequest("/api/security/csrf-token", {
-            responseSchema: csrfTokenResponseSchema,
-          });
-          useUiStore.getState().setCsrfToken(res.token);
-          return res.token;
-        } catch {
-          return null;
-        }
-      },
     })
       .then(() => {
         setApplyState("applied");

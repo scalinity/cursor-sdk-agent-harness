@@ -9,9 +9,7 @@ import {
   PRODUCT_TAGLINE,
 } from "@harness/shared";
 import { useAgentStore } from "../state/agent-store.js";
-import { useUiStore } from "../state/ui-store.js";
-import { useCsrfToken } from "../hooks/useCsrfToken.js";
-import { mutatingRequest } from "../lib/http-client.js";
+import { useMutatingRequest } from "../hooks/useMutatingRequest.js";
 import { ModeToggle } from "../components/ModeToggle.js";
 import { DocsSettings } from "../components/settings/DocsSettings.js";
 import { CommandsSettings } from "../components/settings/CommandsSettings.js";
@@ -66,7 +64,7 @@ function ThemeSettingsSection() {
 
 export function Settings() {
   const navigate = useNavigate();
-  const csrf = useCsrfToken();
+  const mutate = useMutatingRequest();
   const activeAgentId = useAgentStore((s) => s.activeAgentId);
   const activeAgent = useAgentStore((s) => activeAgentId ? (s.byId[activeAgentId] ?? null) : null);
   const executionMode: ExecutionMode = activeAgent?.executionMode ?? "agent";
@@ -75,14 +73,12 @@ export function Settings() {
     (mode: ExecutionMode) => {
       if (!activeAgent) return;
       useAgentStore.getState().upsertAgent({ ...activeAgent, executionMode: mode });
-      void mutatingRequest(`/api/agents/${activeAgent.id}`, {
+      void mutate(`/api/agents/${activeAgent.id}`, {
         method: "PATCH",
         body: { executionMode: mode },
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken: () => csrf.refresh(),
       });
     },
-    [activeAgent, csrf],
+    [activeAgent, mutate],
   );
 
   return (

@@ -6,9 +6,7 @@ import { useWorkspaceAllowlist } from "../../hooks/useWorkspaceAllowlist.js";
 import { useActiveWorkspace } from "../../hooks/useActiveWorkspace.js";
 import { ChevronDownIcon, FolderIcon, PlusIcon, XIcon } from "./ToolbarIcons.js";
 import { workspaceLabel } from "../../lib/workspace-label.js";
-import { httpRequest, mutatingRequest } from "../../lib/http-client.js";
-import { useUiStore } from "../../state/ui-store.js";
-import { csrfTokenResponseSchema } from "@harness/shared";
+import { useMutatingRequest } from "../../hooks/useMutatingRequest.js";
 
 /**
  * SessionsRail — left rail. Top action starts a new chat (a fresh session);
@@ -363,6 +361,7 @@ function RailItem({ run, isActive, onSelectRun, onDeleteRun, onRenameRun }: Rail
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
+  const mutate = useMutatingRequest();
 
   const label = run.name ?? run.promptPreview ?? run.id;
 
@@ -375,21 +374,9 @@ function RailItem({ run, isActive, onSelectRun, onDeleteRun, onRenameRun }: Rail
     const trimmed = renameValue.trim();
     setRenaming(false);
     if (trimmed.length === 0 || trimmed === label) return;
-    void mutatingRequest(`/api/runs/${run.id}`, {
+    void mutate(`/api/runs/${run.id}`, {
       method: "PATCH",
       body: { name: trimmed },
-      getCsrfToken: () => useUiStore.getState().csrfToken,
-      refreshCsrfToken: async () => {
-        try {
-          const res = await httpRequest("/api/security/csrf-token", {
-            responseSchema: csrfTokenResponseSchema,
-          });
-          useUiStore.getState().setCsrfToken(res.token);
-          return res.token;
-        } catch {
-          return null;
-        }
-      },
     }).then(() => {
       onRenameRun?.(run.id, trimmed);
     });

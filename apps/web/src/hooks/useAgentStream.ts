@@ -24,11 +24,10 @@ import {
   type ClientFrame,
   type ServerFrame,
 } from "@harness/shared";
-import { mutatingRequest } from "../lib/http-client.js";
 import { useRunStore } from "../state/run-store.js";
 import { useUiStore, type ConnectionState } from "../state/ui-store.js";
 import { useWebSocket } from "./useWebSocket.js";
-import { useCsrfToken } from "./useCsrfToken.js";
+import { useMutatingRequest } from "./useMutatingRequest.js";
 import { wsUrl } from "../lib/api-base.js";
 import type { ContextMention, SdkImage } from "@harness/shared";
 
@@ -91,7 +90,7 @@ function buildSubscribeFrame(runId: string): ClientFrame {
 }
 
 export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult {
-  const { refresh: refreshCsrfToken } = useCsrfToken();
+  const mutate = useMutatingRequest();
   const csrfToken = useUiStore((s) => s.csrfToken);
   const setConnectionState = useUiStore((s) => s.setConnectionState);
   const ingestServerFrame = useRunStore((s) => s.ingestServerFrame);
@@ -241,7 +240,7 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
       images?: SdkImage[];
       mentions?: ContextMention[];
     }): Promise<string> => {
-      const res = await mutatingRequest("/api/runs", {
+      const res = await mutate("/api/runs", {
         method: "POST",
         body: {
           agentId,
@@ -249,14 +248,12 @@ export function useAgentStream(input: UseAgentStreamInput): UseAgentStreamResult
           ...(images && images.length > 0 ? { images } : {}),
           ...(mentions && mentions.length > 0 ? { mentions } : {}),
         },
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken,
         responseSchema: createRunResponseSchema,
       });
       setActiveRunId(res.runId);
       return res.runId;
     },
-    [refreshCsrfToken, setActiveRunId],
+    [mutate, setActiveRunId],
   );
 
   const cancelRun = useCallback(

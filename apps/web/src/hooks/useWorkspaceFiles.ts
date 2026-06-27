@@ -1,13 +1,13 @@
 import { useCallback, useState } from "react";
 import {
-  csrfTokenResponseSchema,
   fileWriteResponseSchema,
   listWorkspaceFilesResponseSchema,
   readWorkspaceFileResponseSchema,
   type ListWorkspaceFilesResponse,
 } from "@harness/shared";
-import { httpRequest, mutatingRequest, HttpError } from "../lib/http-client.js";
+import { httpRequest, HttpError } from "../lib/http-client.js";
 import { useUiStore } from "../state/ui-store.js";
+import { useMutatingRequest } from "./useMutatingRequest.js";
 import { useMountEffect } from "./useMountEffect.js";
 
 export interface FilePreview {
@@ -46,18 +46,6 @@ export interface UseWorkspaceFilesResult {
   save: () => void;
 }
 
-async function refreshCsrfToken(): Promise<string | null> {
-  try {
-    const res = await httpRequest("/api/security/csrf-token", {
-      responseSchema: csrfTokenResponseSchema,
-    });
-    useUiStore.getState().setCsrfToken(res.token);
-    return res.token;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Drives the workspace Files surface: directory listing, read-only preview,
  * and in-pane editing with save. The owning component is keyed by the active
@@ -72,6 +60,7 @@ async function refreshCsrfToken(): Promise<string | null> {
  */
 export function useWorkspaceFiles(): UseWorkspaceFilesResult {
   const workspaceId = useUiStore((s) => s.activeWorkspaceId);
+  const mutate = useMutatingRequest();
   const [relPath, setRelPath] = useState("");
   const [listing, setListing] = useState<ListWorkspaceFilesResponse | null>(null);
   const [listLoading, setListLoading] = useState(false);
@@ -173,12 +162,10 @@ export function useWorkspaceFiles(): UseWorkspaceFilesResult {
     const content = draft;
     setSaving(true);
     setSaveError(null);
-    void mutatingRequest("/api/files/write", {
+    void mutate("/api/files/write", {
       method: "POST",
       body: { path: target, content, workspaceId: workspaceId ?? undefined },
       responseSchema: fileWriteResponseSchema,
-      getCsrfToken: () => useUiStore.getState().csrfToken,
-      refreshCsrfToken,
     })
       .then(() => {
         setSavedContent(content);
@@ -189,7 +176,7 @@ export function useWorkspaceFiles(): UseWorkspaceFilesResult {
       .finally(() => {
         setSaving(false);
       });
-  }, [draft, preview, previewPath, savedContent, saving, workspaceId]);
+  }, [draft, preview, previewPath, savedContent, saving, workspaceId, mutate]);
 
   useMountEffect(() => {
     void load("");

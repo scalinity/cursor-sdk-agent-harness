@@ -24,10 +24,9 @@ import {
   type CreateAgentRequest,
   type ModelParameterValue,
 } from "@harness/shared";
-import { httpRequest, mutatingRequest } from "../lib/http-client.js";
+import { httpRequest } from "../lib/http-client.js";
 import { useAgentStore } from "../state/agent-store.js";
-import { useUiStore } from "../state/ui-store.js";
-import { useCsrfToken } from "./useCsrfToken.js";
+import { useMutatingRequest } from "./useMutatingRequest.js";
 
 const AGENT_STALE_MS = 60_000;
 
@@ -75,7 +74,7 @@ export function useAgents(): UseAgentsResult {
   const setLoading = useAgentStore((s) => s.setLoading);
   const setLastError = useAgentStore((s) => s.setLastError);
   const setLastFetchedAt = useAgentStore((s) => s.setLastFetchedAt);
-  const { refresh: refreshCsrfToken } = useCsrfToken();
+  const mutate = useMutatingRequest();
 
   // Track the in-flight fetch so a later reload (or unmount) can cancel
   // it; without this, a navigation-during-fetch races the response and
@@ -120,32 +119,28 @@ export function useAgents(): UseAgentsResult {
 
   const createAgent = useCallback(
     async (request: CreateAgentRequest): Promise<AgentSummary> => {
-      const created = await mutatingRequest("/api/agents", {
+      const created = await mutate("/api/agents", {
         method: "POST",
         body: request,
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken,
         responseSchema: agentSummarySchema,
       });
       upsertAgent(created);
       return created;
     },
-    [refreshCsrfToken, upsertAgent],
+    [mutate, upsertAgent],
   );
 
   const patchAgent = useCallback(
     async (agentId: string, body: Record<string, unknown>): Promise<AgentSummary> => {
-      const updated = await mutatingRequest(`/api/agents/${encodeURIComponent(agentId)}`, {
+      const updated = await mutate(`/api/agents/${encodeURIComponent(agentId)}`, {
         method: "PATCH",
         body,
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken,
         responseSchema: agentSummarySchema,
       });
       upsertAgent(updated);
       return updated;
     },
-    [refreshCsrfToken, upsertAgent],
+    [mutate, upsertAgent],
   );
 
   const updateAgentModel = useCallback(
@@ -161,15 +156,13 @@ export function useAgents(): UseAgentsResult {
 
   const terminateAgent = useCallback(
     async (agentId: string) => {
-      await mutatingRequest(`/api/agents/${encodeURIComponent(agentId)}/terminate`, {
+      await mutate(`/api/agents/${encodeURIComponent(agentId)}/terminate`, {
         method: "POST",
         body: {},
-        getCsrfToken: () => useUiStore.getState().csrfToken,
-        refreshCsrfToken,
       });
       removeAgent(agentId);
     },
-    [refreshCsrfToken, removeAgent],
+    [mutate, removeAgent],
   );
 
   // Mount hydration + stale-time refresh. Abort the active fetch on unmount.
