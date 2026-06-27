@@ -744,7 +744,6 @@ async function handleSkillSlash(
   appendError("Usage: /skill create <name> <description> | /skill list");
 }
 
-
 export interface ChromeStateInput {
   streamStatus: StreamConnectionStatus;
   turnActive: boolean;

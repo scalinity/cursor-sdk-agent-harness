@@ -1,3 +1,4 @@
+import type { AgentSummary } from "@harness/shared";
 import type { CliAgentSummary, CliMode } from "../types.js";
 
 /**
@@ -10,16 +11,15 @@ export function normalizeCliMode(value: string): CliMode {
 }
 
 /**
- * The single constructor for `CliAgentSummary`. Accepts any agent shape that
- * carries the four fields (an `AgentSummary` or `AgentDetailResponse`), so the
- * http client, the chat entry point, and the TUI all map through one place.
+ * The single constructor for `CliAgentSummary`. The `Pick<AgentSummary, …>`
+ * input accepts both `AgentSummary` and `AgentDetailResponse` (their fields are
+ * compatible) while keeping the compile-time check that callers pass a real
+ * agent shape — not an arbitrary object with a stray `executionMode` string.
+ * The http client, the chat entry point, and the TUI all map through here.
  */
-export function toCliAgentSummary(agent: {
-  id: string;
-  name: string;
-  modelId: string;
-  executionMode: string;
-}): CliAgentSummary {
+export function toCliAgentSummary(
+  agent: Pick<AgentSummary, "id" | "name" | "modelId" | "executionMode">,
+): CliAgentSummary {
   return {
     id: agent.id,
     name: agent.name,
