@@ -115,8 +115,10 @@ export class ModelRouter {
     const discovered = this.deps.cursorCatalog
       ? await this.deps.cursorCatalog.list()
       : [];
-    const cursor = discovered.length > 0 ? discovered : this.staticCursorModels();
-    return [...cursor, ...this.listProviderModels()];
+    return [
+      ...mergeCursorModels(this.staticCursorModels(), discovered),
+      ...this.listProviderModels(),
+    ];
   }
 
   private staticCursorModels(): UnifiedModel[] {
@@ -172,6 +174,24 @@ export class ModelRouter {
     }
     return cursorFallback();
   }
+}
+
+/**
+ * Overlay discovered Cursor models onto the static registry, keyed by id (both
+ * are in the harness id namespace after the catalog reconciles SDK ids). A
+ * discovered entry replaces its static counterpart in place (carrying the
+ * model's parameters/variants); discovered-only models append after the static
+ * set. Merging — rather than replacing — keeps a static fallback row visible
+ * when a transient/partial discovery omits it.
+ */
+function mergeCursorModels(
+  staticModels: UnifiedModel[],
+  discovered: UnifiedModel[],
+): UnifiedModel[] {
+  if (discovered.length === 0) return staticModels;
+  const byId = new Map<string, UnifiedModel>(staticModels.map((m) => [m.id, m]));
+  for (const model of discovered) byId.set(model.id, model);
+  return [...byId.values()];
 }
 
 function cursorFallback(): ResolvedRunModel {

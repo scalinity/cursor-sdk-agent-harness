@@ -1,15 +1,15 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   AUTO_MODEL_ID,
+  defaultModelParamValue,
+  findEffortParameter,
   MODEL_LABELS,
   PROVIDER_KIND_LABELS,
   type AgentSummary,
   type ContextMention,
   type ModelId,
-  type ModelParameterDefinition,
   type ModelParameterValue,
   type SdkImage,
-  type UnifiedModel,
 } from "@harness/shared";
 import { useUiStore } from "../../state/ui-store.js";
 import { useModels } from "../../hooks/useModels.js";
@@ -44,28 +44,6 @@ export interface ComposerProps {
   heroMode?: boolean;
 }
 
-const EFFORT_PARAM_RE = /thinking|reasoning|effort/i;
-
-/**
- * The model's thinking/effort parameter, discovered from the catalog — matched
- * by id/displayName, or the sole parameter when there's exactly one. Returns
- * null when the model exposes no effort-like parameter.
- */
-function findEffortParameter(model: UnifiedModel): ModelParameterDefinition | null {
-  const params = model.parameters ?? [];
-  const match = params.find(
-    (p) => EFFORT_PARAM_RE.test(p.id) || (p.displayName ? EFFORT_PARAM_RE.test(p.displayName) : false),
-  );
-  if (match) return match;
-  return params.length === 1 ? (params[0] ?? null) : null;
-}
-
-/** A model's default value for a parameter: its default variant, else the first value. */
-function defaultParamValue(model: UnifiedModel, param: ModelParameterDefinition): string {
-  const def = (model.variants ?? []).find((v) => v.isDefault);
-  const fromVariant = def?.params.find((p) => p.id === param.id)?.value;
-  return fromVariant ?? param.values[0]?.value ?? "";
-}
 
 /**
  * Composer — input textarea + attachments + model picker + Send button.
@@ -221,7 +199,7 @@ export function Composer({
     }));
     const current =
       selectedModelParams.find((p) => p.id === param.id)?.value ??
-      defaultParamValue(model, param);
+      defaultModelParamValue(model, param);
     return { param, options, current };
   }, [models, selectedModelId, selectedModelParams]);
 

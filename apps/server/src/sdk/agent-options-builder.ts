@@ -1,4 +1,5 @@
 import type { AgentOptions, McpServerConfig } from "@cursor/sdk";
+import { toSdkModelId } from "@harness/shared";
 import type {
   AgentRow,
   McpServerRow,
@@ -36,37 +37,10 @@ export class WorkspaceRejectedError extends Error {
   }
 }
 
-/**
- * F-004: harness-internal model IDs do not match `@cursor/sdk@1.0.13`'s
- * `Cursor.models.list()` enum. The SDK rejects `composer-2-5-fast` /
- * `composer-2-5` with `Cannot use this model` because the real IDs use
- * dots and have no "fast" tier. Translate here at the boundary so the
- * harness schema, pricing keys, and settings rows can keep their
- * existing shapes (which carry the fast-vs-standard pricing distinction
- * for cost accounting).
- *
- * Verified against: `@cursor/sdk@1.0.13` (May 2026).
- *
- * Upgrade triggers — revisit this map when ANY of the following change:
- *   - `@cursor/sdk` ships a new model literal that the harness wants to
- *     expose (add a new harness ID to `packages/shared/src/models.ts`
- *     AND a translation here).
- *   - `@cursor/sdk` renames an existing model literal (translation key
- *     stays in the harness ID, value flips to the new SDK literal).
- *   - The harness collapses its fast/standard pricing distinction —
- *     drop the corresponding harness IDs and this map can shrink.
- *
- * See `docs/POST_BUILD_REVIEW.md` F-004 and the "Out of scope" follow-up
- * about collapsing the harness schema.
- */
-const HARNESS_TO_SDK_MODEL_ID: Record<string, string> = {
-  "composer-2-5-fast": "composer-2.5",
-  "composer-2-5": "composer-2",
-};
-
-function toSdkModelId(harnessModelId: string): string {
-  return HARNESS_TO_SDK_MODEL_ID[harnessModelId] ?? harnessModelId;
-}
+// F-004: harness model ids (`composer-2-5-fast` / `composer-2-5`) don't match
+// the SDK's dotted ids; `toSdkModelId` (in `@harness/shared`) translates at the
+// boundary. The map + its inverse live in shared so the discovery catalog and
+// both clients reconcile against one source of truth.
 
 export interface BuildAgentOptionsInput {
   agent: AgentRow;

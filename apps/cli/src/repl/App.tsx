@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import type { ContextChip, ContextSearchResult, ModelParameterDefinition, ServerFrame, TokenUsage, UnifiedModel } from "@harness/shared";
-import { CLI_DISPLAY_NAME } from "@harness/shared";
+import type { ContextChip, ContextSearchResult, ServerFrame, TokenUsage } from "@harness/shared";
+import { CLI_DISPLAY_NAME, findEffortParameter } from "@harness/shared";
 import { isRunStatusTerminalFrame, isTerminalFrame } from "../client/ws.js";
 import { appendPromptHistory, writePreferences } from "../config.js";
 import {
@@ -711,23 +711,6 @@ async function switchModel(
   ctx.setModelId(next.modelId);
   await writePreferences({ preferredMode: ctx.mode, preferredModel: next.modelId });
   appendMessage(`Model switched to ${next.modelId}.`);
-}
-
-const EFFORT_PARAM_RE = /thinking|reasoning|effort/i;
-
-/**
- * The current model's thinking/effort parameter, discovered from the catalog.
- * Matches by id/displayName (e.g. "thinking", "reasoning effort"); if a model
- * exposes exactly one parameter, that one is used. Returns null when the model
- * has no effort-like parameter.
- */
-function findEffortParameter(model: UnifiedModel): ModelParameterDefinition | null {
-  const params = model.parameters ?? [];
-  const match = params.find(
-    (p) => EFFORT_PARAM_RE.test(p.id) || (p.displayName ? EFFORT_PARAM_RE.test(p.displayName) : false),
-  );
-  if (match) return match;
-  return params.length === 1 ? (params[0] ?? null) : null;
 }
 
 /**

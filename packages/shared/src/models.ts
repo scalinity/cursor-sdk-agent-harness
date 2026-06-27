@@ -73,6 +73,73 @@ export const modelVariantSchema = z.object({
 });
 export type ModelVariant = z.infer<typeof modelVariantSchema>;
 
+/**
+ * Harness model id ↔ Cursor SDK model id. The harness keeps its own ids
+ * (`composer-2-5-fast` / `composer-2-5`) for pricing keys + UI labels, while
+ * `@cursor/sdk` and `Cursor.models.list()` use dotted ids (`composer-2.5` /
+ * `composer-2`). Both directions live here so the SDK boundary, the discovery
+ * catalog, and both clients reconcile against ONE source of truth (F-004).
+ *
+ * Upgrade triggers: a new SDK model literal the harness wants to alias, or a
+ * renamed literal — update this map (and re-derive the inverse below).
+ */
+export const HARNESS_TO_SDK_MODEL_ID: Readonly<Record<string, string>> = {
+  "composer-2-5-fast": "composer-2.5",
+  "composer-2-5": "composer-2",
+};
+
+const SDK_TO_HARNESS_MODEL_ID: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(HARNESS_TO_SDK_MODEL_ID).map(([harness, sdk]) => [sdk, harness]),
+);
+
+/** Map a harness/unified model id to the id `@cursor/sdk` expects. Unknown ids pass through. */
+export function toSdkModelId(modelId: string): string {
+  return HARNESS_TO_SDK_MODEL_ID[modelId] ?? modelId;
+}
+
+/** Map a discovered SDK model id back to its harness id, when one exists. Else passthrough. */
+export function toHarnessModelId(sdkModelId: string): string {
+  return SDK_TO_HARNESS_MODEL_ID[sdkModelId] ?? sdkModelId;
+}
+
+/** Minimal shape for effort-parameter discovery — anything carrying `parameters`/`variants`. */
+interface ModelParamCarrier {
+  parameters?: ModelParameterDefinition[] | undefined;
+  variants?: ModelVariant[] | undefined;
+}
+
+/**
+ * Matches a parameter id/displayName that represents reasoning/thinking effort.
+ * Single source of truth shared by the web composer and the CLI `/effort`
+ * command so they never disagree about which discovered parameter is "effort".
+ */
+export const EFFORT_PARAM_RE = /thinking|reasoning|effort/i;
+
+/**
+ * The model's thinking/effort parameter, discovered from the catalog. Matched
+ * by id or displayName only — no "sole parameter" fallback, so an unrelated
+ * single parameter (e.g. `verbosity`) is never mislabelled as effort. Returns
+ * null when the model exposes no effort-like parameter.
+ */
+export function findEffortParameter(model: ModelParamCarrier): ModelParameterDefinition | null {
+  const params = model.parameters ?? [];
+  return (
+    params.find(
+      (p) => EFFORT_PARAM_RE.test(p.id) || (p.displayName ? EFFORT_PARAM_RE.test(p.displayName) : false),
+    ) ?? null
+  );
+}
+
+/** A model's default value for a parameter: its default variant, else the first allowed value. */
+export function defaultModelParamValue(
+  model: ModelParamCarrier,
+  param: ModelParameterDefinition,
+): string {
+  const def = (model.variants ?? []).find((v) => v.isDefault);
+  const fromVariant = def?.params.find((p) => p.id === param.id)?.value;
+  return fromVariant ?? param.values[0]?.value ?? "";
+}
+
 export const settingSourceSchema = z.enum([
   "project",
   "user",
