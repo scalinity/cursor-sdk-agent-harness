@@ -2,7 +2,7 @@
 
 ## Visual identity decisions
 
-- Brand accent is vermillion `#E04E1F`; use it only for identity surfaces: the CLI title, turn header separators, focused input frame, prompt indicator, and other explicitly branded labels.
+- Brand accent is Claude orange `#D97757`; use it only for identity surfaces: the CLI title, turn header separators, focused input frame, prompt indicator, and other explicitly branded labels.
 - State colors stay cool/semantic: ready/success is muted green, running/thinking is soft amber, and failures are red. Do not use state colors as decoration.
 - Neutral grays carry terminal structure: body text is off-white, secondary text is gray, and default frames/separators are muted gray.
 - Chrome backgrounds are transparent sentinels; the host terminal should remain the canvas instead of adding slab-like filled panels.
@@ -15,7 +15,7 @@
 - `border`: muted separator gray (`#66717f`).
 - `text`: foreground base (`#eef2f7`).
 - `muted`: muted text (`#9aa3ad`).
-- `brand`: warm accent / identity (`#E04E1F`, default vermillion).
+- `brand`: warm accent / identity (`#D97757`, Claude orange).
 - `code`: code text helper (`#7dd7ff`).
 - `state.ready`: success/idle signal color (`#95d475`).
 - `state.running`: running/working signal color (soft amber, `#f2c94c`).

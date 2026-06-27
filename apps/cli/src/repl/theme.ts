@@ -32,8 +32,9 @@ export function createTuiTheme(env: NodeJS.ProcessEnv = process.env): TuiTheme {
     border: "#66717f",
     text: "#eef2f7",
     muted: "#9aa3ad",
-    // ASSUMPTION: brand is intentionally warm vermillion and used only for brand identity surfaces.
-    brand: "#E04E1F",
+    // Brand accent — Claude orange. Used for brand-identity surfaces (app
+    // name, focused input border, turn headers, boot screen).
+    brand: "#D97757",
     code: "#7dd7ff",
     state: {
       ready: "#95d475",
