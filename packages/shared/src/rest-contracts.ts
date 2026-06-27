@@ -119,6 +119,10 @@ export const agentSummarySchema = z.object({
   mode: agentModeSchema,
   executionMode: executionModeSchema,
   modelId: z.string(),
+  // Persisted per-model params (thinking/effort). Lives on the summary so the
+  // web composer can re-hydrate the active agent's effort selection without a
+  // detail fetch. `null` = no per-model params (use the model default).
+  modelParams: z.array(modelParameterValueSchema).nullable(),
   runCount: z.number().int().nonnegative(),
   activeRunCount: z.number().int().nonnegative(),
   totalCostUsdMicros: z.number().int().nonnegative(),
@@ -135,7 +139,6 @@ export const listAgentsResponseSchema = z.object({
 });
 
 export const agentDetailResponseSchema = agentSummarySchema.extend({
-  modelParams: z.array(modelParameterValueSchema).nullable(),
   cwd: z.array(z.string()).nullable(),
   settingSources: z.array(settingSourceSchema).nullable(),
   sandboxEnabled: z.boolean().nullable(),

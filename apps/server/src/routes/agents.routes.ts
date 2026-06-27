@@ -70,6 +70,7 @@ export async function registerAgentsRoutes(
         mode: row.mode,
         executionMode: row.executionMode,
         modelId: row.modelId,
+        modelParams: row.modelParams,
         runCount: 0,
         activeRunCount: 0,
         totalCostUsdMicros: 0,

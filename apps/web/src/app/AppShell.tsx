@@ -14,6 +14,7 @@ import { useActiveWorkspace } from "../hooks/useActiveWorkspace.js";
 import { useWorkspacePicker } from "../hooks/useWorkspacePicker.js";
 import { useNativeMenuActions } from "../hooks/useNativeMenuActions.js";
 import { useEnsureDefaultAgent } from "../hooks/useEnsureDefaultAgent.js";
+import { useHydrateEffortSelection } from "../hooks/useHydrateEffortSelection.js";
 import { useErrorReporter } from "../hooks/useErrorReporter.js";
 import { useGitStatus } from "../hooks/useGitStatus.js";
 import { useRulesCount } from "../hooks/useRulesCount.js";
@@ -76,6 +77,10 @@ export function AppShell() {
     createAgent,
     selectAgent,
   });
+
+  // Re-hydrate the composer's effort selection from the active agent's
+  // persisted modelParams (in-memory store starts empty on reload).
+  useHydrateEffortSelection(activeAgent);
 
   const {
     connectionState,

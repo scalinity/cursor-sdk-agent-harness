@@ -418,7 +418,6 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
       const summary = buildSummary(row, aggregates);
       return {
         ...summary,
-        modelParams: row.modelParams,
         cwd: row.cwd,
         settingSources: row.settingSources,
         sandboxEnabled: row.sandboxEnabled,
@@ -808,6 +807,7 @@ function buildSummary(
     mode: row.mode,
     executionMode: row.executionMode,
     modelId: row.modelId,
+    modelParams: row.modelParams,
     runCount: aggregates?.runCount ?? 0,
     activeRunCount: aggregates?.activeRunCount ?? 0,
     totalCostUsdMicros: aggregates?.totalCostUsdMicros ?? 0,
