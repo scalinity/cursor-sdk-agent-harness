@@ -1,26 +1,12 @@
-import { randomBytes } from "node:crypto";
-import { getKeychainDriver } from "./keytar-driver.js";
-
-const ACCOUNT = "csrf-secret";
+import { GeneratedSecretStore } from "./generated-secret-store.js";
 
 export interface CsrfSecretStoreOptions {
   service: string;
 }
 
-export class CsrfSecretStore {
-  constructor(private readonly opts: CsrfSecretStoreOptions) {}
-
-  async getOrCreate(): Promise<string> {
-    const driver = getKeychainDriver();
-    const existing = await driver.getPassword(this.opts.service, ACCOUNT);
-    if (existing && existing.length > 0) return existing;
-    const fresh = randomBytes(32).toString("base64url");
-    await driver.setPassword(this.opts.service, ACCOUNT, fresh);
-    return fresh;
-  }
-
-  async reset(): Promise<void> {
-    const driver = getKeychainDriver();
-    await driver.deletePassword(this.opts.service, ACCOUNT);
+/** Keychain-backed CSRF HMAC seed, generated on first use. */
+export class CsrfSecretStore extends GeneratedSecretStore {
+  constructor(opts: CsrfSecretStoreOptions) {
+    super(opts.service, "csrf-secret");
   }
 }
