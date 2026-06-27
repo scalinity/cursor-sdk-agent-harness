@@ -946,6 +946,34 @@ Phase 01 output — resolves every Open Question from `spec-v1.1.md` Section 14 
   when confirmed.
 
 ---
+
+## OQ-31: What does `Cursor.models.list({ apiKey })` return, and how do the harness composer ids map to real SDK ids?
+
+- **Status**: `verified` (2026-06-27, against a live API key on macOS).
+- **Question**: Does live discovery surface the full frontier catalog (Claude,
+  GPT-5.x, Gemini, …) or only Composer? What are the canonical SDK model ids, and
+  is the "fast" composer split a separate model or a parameter?
+- **Verified answer**: `Cursor.models.list({ apiKey })` returns **30**
+  `ModelListItem`s with a valid key — `composer-2.5`, `composer-2`, `default`
+  ("Auto"), the Claude family (`claude-opus-4-8/4-7/4-6/4-5`, `claude-sonnet-4-6/
+  4-5/4`, `claude-haiku-4-5`), GPT-5.x + Codex (`gpt-5.5/5.4/5.3-codex/…`),
+  Gemini (`gemini-3.1-pro`, `gemini-3-flash`, `gemini-2.5-flash`, …), Grok
+  (`grok-4.3`, `grok-build-0.1`), `kimi-k2.5`, `glm-5.2`. Each item carries
+  `displayName`, `parameters` (effort-like params named `thinking` / `reasoning`
+  / `effort`, plus `context` and `fast`), and `variants` (preset param combos).
+  - **The "fast" split is a PARAMETER, not a separate model**: `composer-2.5`
+    exposes a `fast` parameter. There is no `composer-2.5-fast` SDK id. The
+    distinct `composer-2` is an older, separate model.
+- **Implication for the harness**: the two legacy harness ids
+  (`composer-2-5-fast`, `composer-2-5`) both alias the one real model
+  `composer-2.5` in `HARNESS_TO_SDK_MODEL_ID` (`packages/shared/src/models.ts`);
+  `composer-2` keeps its own id. Discovery requires a key in the SAME keychain
+  the server reads — the CLI's embedded server now prefers keytar (shares the
+  desktop key) and only falls back to the file store when keytar can't load
+  (`apps/server/src/keychain/configure-driver.ts`). With no key, `list()` returns
+  the static fallback (single composer entry) — not an error.
+
+---
 ---
 
 ## Verified runtime commands
